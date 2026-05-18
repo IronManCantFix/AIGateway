@@ -73,8 +73,23 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Debug linuxdeploy (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          echo "=== Testing linuxdeploy manually ==="
+          mkdir -p /tmp/linuxdeploy-test && cd /tmp/linuxdeploy-test
+          curl -fsSL -o linuxdeploy https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy
+          echo "=== linuxdeploy --version ==="
+          ./linuxdeploy --version 2>&1 || echo "EXIT CODE: $?"
+          echo "=== ldd linuxdeploy ==="
+          ldd linuxdeploy 2>&1 || true
+          echo "=== FUSE check ==="
+          fusermount --version 2>&1 || true
+          ls -la /dev/fuse 2>&1 || true
+
       - name: Build
-        run: npm run tauri build -- --target ${{ matrix.target }}
+        run: npm run tauri build -- --target ${{ matrix.target }} --verbose 2>&1 || { echo "=== Build failed, dumping linuxdeploy debug info ==="; ls -la ~/.cache/tauri/ 2>/dev/null || true; ls -la /tmp/linuxdeploy* 2>/dev/null || true; exit 1; }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
