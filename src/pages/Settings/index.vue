@@ -193,11 +193,14 @@ const filteredLogs = computed(() => {
   })
 })
 
-const logTotalPages = computed(() => Math.max(1, Math.ceil(filteredLogs.value.length / logPageSize.value)))
+const logTotalPages = computed(() => Math.max(1, Math.ceil(filteredLogs.value.length / Number(logPageSize.value) || 5)))
 
 const pagedLogs = computed(() => {
-  const start = (logPage.value - 1) * logPageSize.value
-  return filteredLogs.value.slice(start, start + logPageSize.value)
+  const size = Number(logPageSize.value) || 5
+  const totalPages = Math.max(1, Math.ceil(filteredLogs.value.length / size))
+  const page = Math.min(Math.max(Math.round(logPage.value), 1), totalPages)
+  const start = (page - 1) * size
+  return filteredLogs.value.slice(start, start + size)
 })
 
 const logProviderOptions = computed(() => [...new Set(logs.value.map(l => l.provider).filter(Boolean))])
@@ -223,14 +226,11 @@ function copyText(text, label) {
 }
 
 function resetLogPage() { logPage.value = 1 }
+function prevPage() { logPage.value = Math.max(1, logPage.value - 1) }
+function nextPage() { logPage.value = Math.min(logTotalPages.value, logPage.value + 1) }
 
-// Ensure logPageSize is always a number (v-model.number can misbehave in some WebViews)
-watch(logPageSize, (val) => {
-  if (typeof val !== 'number') logPageSize.value = Number(val) || 5
-}, { immediate: true })
-
-// Ensure logPage is always within valid range
-watch([logPage, logTotalPages], () => {
+// Keep logPage in valid range when data/pageSize changes
+watch([logTotalPages, logPageSize], () => {
   const max = logTotalPages.value
   if (logPage.value > max) logPage.value = max
   if (logPage.value < 1) logPage.value = 1
@@ -553,9 +553,9 @@ onMounted(async () => { await loadSettings(); await loadStats() })
               <span>条</span>
             </div>
             <template v-if="logTotalPages > 1">
-              <button :disabled="logPage <= 1" @click="logPage--">上一页</button>
+              <button :disabled="logPage <= 1" @click="prevPage">上一页</button>
               <span class="page-info">{{ logPage }} / {{ logTotalPages }}</span>
-              <button :disabled="logPage >= logTotalPages" @click="logPage++">下一页</button>
+              <button :disabled="logPage >= logTotalPages" @click="nextPage">下一页</button>
             </template>
           </div>
           <div class="card-empty" v-if="logs.length && !pagedLogs.length">无匹配结果</div>
