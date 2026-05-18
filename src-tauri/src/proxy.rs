@@ -105,17 +105,43 @@ impl ProxyManager {
             "proxy-server-x86_64-unknown-linux-gnu"
         };
 
-        let sidecar_in_resource = self.app_handle.path().resource_dir()
-            .ok()
-            .map(|d| d.join("binaries").join(sidecar_name));
-        let sidecar_in_source = Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("binaries").join(sidecar_name));
+        // Bundler strips target triple, so sidecar name becomes "proxy-server[.exe]"
+        let base_name = if cfg!(target_os = "windows") {
+            "proxy-server.exe"
+        } else {
+            "proxy-server"
+        };
 
-        let sidecar_path = [sidecar_in_resource, sidecar_in_source]
-            .into_iter()
-            .flatten()
+        let candidates: Vec<PathBuf> = [
+            // Packaged app: Tauri copies sidecar to <resource_dir>/binaries/
+            self.app_handle.path().resource_dir().ok()
+                .map(|d| d.join("binaries").join(sidecar_name)),
+            // Packaged app: resource_dir might be the exe directory itself
+            self.app_handle.path().resource_dir().ok()
+                .map(|d| d.join(sidecar_name)),
+            // macOS: bundler places sidecar next to the main exe (stripped name)
+            std::env::current_exe().ok()
+                .and_then(|e| e.parent().map(|d| d.join(base_name))),
+            // Fallback: check next to the exe with full triple name
+            std::env::current_exe().ok()
+                .and_then(|e| e.parent().map(|d| d.join("binaries").join(sidecar_name))),
+            std::env::current_exe().ok()
+                .and_then(|e| e.parent().map(|d| d.join(sidecar_name))),
+            // Dev build: sidecar in source tree
+            Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("binaries").join(sidecar_name)),
+        ].into_iter().flatten().collect();
+
+        let sidecar_path = candidates.iter()
             .find(|p| p.exists())
-            .ok_or_else(|| format!("Sidecar not found: {}", sidecar_name))?;
+            .cloned()
+            .ok_or_else(|| {
+                let tried = candidates.iter()
+                    .map(|p| format!("  - {}", p.display()))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("Sidecar not found: {}\nTried paths:\n{}", sidecar_name, tried)
+            })?;
 
         let mut child = Command::new(&sidecar_path)
             .stdin(Stdio::piped())

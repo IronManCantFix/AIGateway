@@ -38,6 +38,18 @@ Codex / Cursor / 脚本 / ...
 | Windows | `.msi` 或 `.exe` |
 | Linux | `.deb` 或 `.rpm` |
 
+#### macOS 安装说明
+
+本应用未签名，macOS 的 Gatekeeper 会阻止直接打开。安装后需要手动解除隔离属性：
+
+```bash
+# 挂载 dmg 后，将 AIGateway.app 拖入「应用程序」文件夹，然后执行：
+sudo xattr -r -d com.apple.quarantine /Applications/AIGateway.app
+```
+
+
+> 未执行上述步骤直接双击打开，会提示"Apple 无法验证此 App"而无法运行。
+
 ### 1️⃣ 配置并使用
 
 启动应用后，在主界面添加一条提供商配置：
