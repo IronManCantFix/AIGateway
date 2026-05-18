@@ -31,7 +31,7 @@ jobs:
             sidecar: proxy-server-x86_64-pc-windows-msvc.exe
             bundles: "--bundles msi nsis"
             artifacts: |
-              **/*.msi
+              **/AIGateway*.msi
               **/AIGateway*.exe
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
