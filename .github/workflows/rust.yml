@@ -30,13 +30,17 @@ jobs:
             bun_target: bun-windows-x64
             sidecar: proxy-server-x86_64-pc-windows-msvc.exe
             bundles: "--bundles msi nsis"
-            artifacts: "**/*.msi **/*.exe"
+            artifacts: |
+              **/*.msi
+              **/*.exe
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             bun_target: bun-linux-x64
             sidecar: proxy-server-x86_64-unknown-linux-gnu
             bundles: "--bundles deb rpm"
-            artifacts: "**/*.deb **/*.rpm"
+            artifacts: |
+              **/*.deb
+              **/*.rpm
 
     runs-on: ${{ matrix.platform }}
 
