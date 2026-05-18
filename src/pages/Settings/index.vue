@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, inject, computed } from 'vue'
+import { ref, onMounted, inject, computed, watch } from 'vue'
 import { api } from '../../api.js'
 
 const navigate = inject('navigate')
@@ -223,6 +223,18 @@ function copyText(text, label) {
 }
 
 function resetLogPage() { logPage.value = 1 }
+
+// Ensure logPageSize is always a number (v-model.number can misbehave in some WebViews)
+watch(logPageSize, (val) => {
+  if (typeof val !== 'number') logPageSize.value = Number(val) || 5
+}, { immediate: true })
+
+// Ensure logPage is always within valid range
+watch([logPage, logTotalPages], () => {
+  const max = logTotalPages.value
+  if (logPage.value > max) logPage.value = max
+  if (logPage.value < 1) logPage.value = 1
+})
 
 onMounted(async () => { await loadSettings(); await loadStats() })
 </script>
