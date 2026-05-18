@@ -1,0 +1,6 @@
+# Rust build artifacts
+target/
+Cargo.lock
+
+# Tauri generated files
+gen/

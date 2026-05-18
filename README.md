@@ -1,0 +1,221 @@
+# 🚀 AIGateway
+
+本地 AI API 统一代理网关 — 让所有 AI 工具共享一个入口，随意切换后端。
+
+## 🤔 它解决什么问题？
+
+你手上有好几个 AI 工具：Codex CLI、Cursor、CherryStudio、自己写的脚本……每个都直连不同的 API。当你想切换到另一个提供商时——比如从 OpenAI 换到 Anthropic，或者从官方 API 换到中转站——你得逐个修改每个工具的配置。更麻烦的是，有的工具只支持 OpenAI 格式，但你想用的提供商只提供 Anthropic 格式。
+
+**AIGateway 坐在所有工具和所有 API 之间：**
+
+```
+Codex / Cursor / 脚本 / ...
+        │
+        ▼
+  localhost:9999  ← 统一入口，固定不变
+        │
+        ▼
+   AIGateway 自动做协议转换
+        │
+        ▼
+  OpenAI / Anthropic / 中转站 / ...
+```
+
+- 📌 工具侧只认一个地址 `http://127.0.0.1:9999`，永远不用改
+- 🔄 后端随意切换：在 GUI 里勾选/取消配置即可，工具无感
+- 🔀 协议自动转换：用 OpenAI 格式的工具也能调 Anthropic，反过来也行
+- 🎯 支持同时启用多个提供商，按模型名自动路由 — 请求中的模型名会按配置的先后顺序匹配提供商，命中即停
+
+## ⚡ 快速开始
+
+### 1️⃣ 配置并使用
+
+启动应用后，在主界面添加一条提供商配置：
+
+| 字段 | 示例 | 说明 |
+|---|---|---|
+| 名称 | `My OpenAI` | 随意命名 |
+| 类型 | `openai-chat` | 提供商接口类型 |
+| Base URL | `https://api.openai.com` | 不含路径 |
+| API Key | `sk-...` | 你的密钥 |
+| 默认模型 | `gpt-4o` | 未指定模型时使用 |
+
+勾选启用，点击「启动」代理。然后把你的工具指向 `http://127.0.0.1:9999` 即可。
+
+![2.png](images/2.png)
+![1.png](images/1.png)
+### 2️⃣ 在 Codex CLI或桌面端 中使用
+
+[Codex CLI](https://github.com/openai/codex) 原生支持 OpenAI API，只需设置环境变量指向 AIGateway 代理地址
+
+config.toml文件
+```bash
+model_provider = "utools"
+model_reasoning_effort = "medium"
+model_override = true
+
+[model_providers.utools]
+provider_type = "openai"
+name = "utools"
+base_url = "http://127.0.0.1:9999/v1"
+env_key  = "MY_RELAY_API_KEY"
+wire_api = "responses"
+```
+
+模型映射，将GPT-5.4-mini、GPT-5.5、GPT-5.4、GPT-5.3映射成你指定的模型
+
+这样 Codex 的所有请求都经过 AIGateway 代理。当你切换后端提供商时，Codex 完全无感——它看到的始终是 OpenAI 格式的响应。
+
+### 3️⃣ 其他客户端
+
+任何支持自定义 API Base URL 的工具都能接入：
+
+| 工具 | 设置方式 |
+|---|---|
+| **Cursor** | Settings → OpenAI API Key & Base URL |
+| **CherryStudio** | 设置中填入代理地址 |
+| **任意 HTTP 客户端** | 请求 `http://127.0.0.1:9999/v1/chat/completions` |
+
+支持的代理接口（`/v1` 前缀可选，`/chat/completions` 和 `/v1/chat/completions` 均可）：
+
+| 接口 | 说明 |
+|---|---|
+| `POST /v1/chat/completions` | OpenAI Chat Completions 格式 |
+| `POST /v1/responses` | OpenAI Responses 格式 |
+| `POST /v1/messages` | Anthropic Messages 格式 |
+| `GET /v1/models` | 全局模型列表（OpenAI 兼容格式） |
+
+### 📎 系统托盘
+
+关闭窗口时应用最小化到系统托盘。右键托盘图标可以快速启动/停止代理或退出应用。
+
+## 📊 日志与统计
+
+设置页面提供多维度的请求统计和日志查看功能。
+
+### 总览
+
+顶部展示三个核心指标：**总请求数**、**Token 消耗**（Prompt / Completion 明细）、**日均请求**。
+
+![3.png](images/3.png)
+
+### 趋势分析
+
+- **全年热力图** — 按天聚合，GitHub 风格热力图，支持切换「请求数」和「Token」两种视图
+- **30 天趋势** — 双轴折线图，同时展示请求数和 Token 消耗走势，悬停查看每日明细
+
+### 分维度统计
+
+- **提供商统计** — 按提供商分组，展示各提供商的请求次数、Token 消耗量，展开查看各模型的调用明细
+- **模型统计** — 按模型分组，展示每个模型的调用次数和 Token 用量（Prompt / Completion / Total）
+
+### 请求日志
+
+日志页记录每一次代理请求，支持：
+
+- 按**提供商**、**模型**、**日期范围**筛选
+- 分页浏览（每页 5 / 10 / 20 / 50 条）
+- 每条日志显示：状态码、接口类型、提供商、模型、耗时、Token 用量（P / C / T）
+
+### 调试日志
+
+在设置中开启「记录请求参数与返回参数」后，每条日志会额外记录完整的请求体和响应体：
+
+1. 进入设置页面，勾选「记录请求参数与返回参数」— 立即生效，无需重启代理
+2. 在日志列表中展开「查看参数」，可查看完整的 JSON 请求/响应内容
+3. 点击「复制」按钮可快速复制参数用于排查
+
+> ⚠️ 开启调试日志会增加存储占用。可通过「清空参数」按钮清除已记录的请求/响应体（保留统计计数），或「清除日志」删除全部日志。
+
+## 🏷️ 提供商类型
+
+| providerType | 上游接口 | 典型用途 |
+|---|---|---|
+| `openai-chat` | `/v1/chat/completions` | OpenAI、中转站、大多数兼容 API |
+| `openai-response` | `/v1/responses` | OpenAI Responses API |
+| `anthropic-message` | `/v1/messages` | Anthropic Claude API |
+
+## 🔧 协议转换矩阵
+
+代理自动处理客户端请求格式与上游 API 格式之间的交叉转换：
+
+| 客户端请求 | → openai-chat | → openai-response | → anthropic-message |
+|---|---|---|---|
+| `/v1/chat/completions` | 直接转发 | → `/v1/responses` | → `/v1/messages` |
+| `/v1/responses` | → `/v1/chat/completions` | 直接转发 | → `/v1/messages` |
+| `/v1/messages` | → `/v1/chat/completions` | → `/v1/responses` | 直接转发 |
+
+SSE 流式响应也会实时转换。
+
+## 🛠️ 安装与开发
+
+### 安装依赖
+
+```bash
+npm install
+cd proxy && bun install && cd ..
+```
+
+### 开发模式
+
+```bash
+# 编译 Sidecar（首次）
+mkdir -p src-tauri/binaries
+cd proxy && bun build --compile proxy-server.js --outfile ../src-tauri/binaries/proxy-server && cd ..
+TARGET=$(rustc -vV | grep host | cut -d' ' -f2)
+ln -sf proxy-server "src-tauri/binaries/proxy-server-$TARGET"
+
+# 启动
+npm run tauri dev
+```
+
+### 生产构建
+
+```bash
+npm run proxy:build   # 编译 Sidecar（所有平台）
+npm run tauri build   # 构建应用
+```
+
+## 📦 技术栈
+
+- **前端**：Vue 3 + Vite
+- **桌面框架**：Tauri 2.x（Rust 后端）
+- **代理服务器**：Node.js 原生 `http` 模块（Sidecar 模式，bun compile 编译为独立二进制）
+- **数据存储**：JSON 文件（平台标准应用数据目录）
+
+## 📁 项目结构
+
+```
+aigateway/
+├── src/                          # Vue 3 前端
+│   ├── api.js                    # Tauri invoke 封装
+│   ├── App.vue                   # 路由入口
+│   └── pages/
+│       ├── Home/                 # 主页
+│       ├── ProfileEdit/          # 配置编辑
+│       └── Settings/             # 设置
+├── src-tauri/                    # Tauri Rust 后端
+│   ├── src/
+│   │   ├── main.rs               # 入口 + 命令注册 + 系统托盘
+│   │   ├── config.rs             # JSON 配置存储
+│   │   ├── proxy.rs              # Sidecar 进程管理
+│   │   └── commands.rs           # Tauri invoke 命令
+│   ├── tauri.conf.json           # Tauri 配置
+│   └── capabilities/             # 权限配置
+├── proxy/                        # Node.js 代理 Sidecar
+│   ├── proxy-server.js           # 代理服务器 + 协议转换
+│   └── package.json
+├── scripts/
+│   └── build-proxy.sh            # Sidecar 多平台编译脚本
+└── package.json
+```
+
+## 🙏 致谢
+
+- 感谢 **DeepSeek V4 Pro** 模型的超高性价比，第一版（[utools 插件版](https://github.com/a471640241/ai-gateway-utools)）完全使用 DeepSeek V4 Pro 开发
+- 感谢 **小米 Orbit 百万亿 Token 计划**，提供了免费的 Pro 月度套餐，本桌面版从 utools 版迁移而来，使用 MiMo-V2.5-Pro 开发
+- 感谢 **Claude Code** 这么好用的开发工具，让开发效率大幅提升
+
+## 📄 许可证
+
+MIT
