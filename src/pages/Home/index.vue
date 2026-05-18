@@ -11,6 +11,7 @@ const profiles = ref([])
 const activeProfileIds = ref([])
 const toast = ref('')
 const modelMappings = ref({ enabled: false, rules: [] })
+const confirmState = ref({ visible: false, message: '', resolve: null })
 
 const proxyUrl = computed(() => `http://127.0.0.1:${proxyPort.value}`)
 
@@ -106,11 +107,18 @@ async function copyProfile(p) {
   showToast(`已复制「${p.name}」`)
 }
 
+function showConfirm(message) {
+  return new Promise(resolve => {
+    confirmState.value = { visible: true, message, resolve }
+  })
+}
+function confirmOk() { confirmState.value.resolve(true); confirmState.value.visible = false }
+function confirmCancel() { confirmState.value.resolve(false); confirmState.value.visible = false }
+
 async function confirmDelete(id) {
-  if (window.confirm('确定要删除该提供商吗？')) {
-    await api.deleteProfile(id)
-    await loadData()
-  }
+  if (!await showConfirm('确定要删除该提供商吗？')) return
+  await api.deleteProfile(id)
+  await loadData()
 }
 
 function providerLabel(type) {
@@ -279,7 +287,12 @@ onMounted(async () => {
     <!-- 提供商 -->
     <div class="card">
       <div class="card-header">
-        <h3>提供商</h3>
+        <h3>提供商
+          <span class="tip-icon">
+            ?
+            <span class="tip-pop">支持同时启用多个提供商，请求时按照列表从上到下的顺序匹配模型 ID，匹配到的第一个提供商将处理该请求</span>
+          </span>
+        </h3>
         <button class="link-btn" @click="navigate('gw-add')">+ 添加</button>
       </div>
       <div class="card-body" v-if="profiles.length > 0">
@@ -397,6 +410,19 @@ onMounted(async () => {
       </div>
     </div>
   </div>
+
+  <!-- 确认弹窗 -->
+  <Teleport to="body">
+    <div class="confirm-overlay" v-if="confirmState.visible" @click.self="confirmCancel">
+      <div class="confirm-dialog">
+        <p class="confirm-msg">{{ confirmState.message }}</p>
+        <div class="confirm-actions">
+          <button class="confirm-cancel" @click="confirmCancel">取消</button>
+          <button class="confirm-ok" @click="confirmOk">确定</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -1010,4 +1036,14 @@ onMounted(async () => {
   border-color: #6366f1;
   background: #eef2ff;
 }
+
+/* Confirm dialog */
+.confirm-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; }
+.confirm-dialog { background: #fff; border-radius: 14px; padding: 28px 32px 20px; min-width: 320px; max-width: 420px; box-shadow: 0 20px 60px rgba(0,0,0,.2); }
+.confirm-msg { font-size: 15px; color: #1e293b; line-height: 1.6; margin: 0 0 24px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.confirm-cancel { padding: 8px 20px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; font-size: 14px; color: #64748b; cursor: pointer; transition: all .15s; }
+.confirm-cancel:hover { background: #f8fafc; border-color: #cbd5e1; }
+.confirm-ok { padding: 8px 20px; border: none; border-radius: 8px; background: #ef4444; font-size: 14px; color: #fff; font-weight: 500; cursor: pointer; transition: all .15s; }
+.confirm-ok:hover { background: #dc2626; }
 </style>

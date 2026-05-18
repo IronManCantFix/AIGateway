@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::config::{ConfigStore, ModelMappings, Profile, Settings};
 use crate::proxy::{ProxyManager, ProxyStatus};
@@ -34,7 +34,7 @@ pub fn get_profiles(state: State<'_, AppState>) -> Vec<Profile> {
 }
 
 #[tauri::command]
-pub fn add_profile(state: State<'_, AppState>, profile: serde_json::Value) -> Result<Profile, String> {
+pub fn add_profile(app_handle: tauri::AppHandle, state: State<'_, AppState>, profile: serde_json::Value) -> Result<Profile, String> {
     let p: Profile = serde_json::from_value(profile).map_err(|e| e.to_string())?;
     let saved = state.config.add_profile(p)?;
     let active = state.config.get_active_profiles();
@@ -44,26 +44,29 @@ pub fn add_profile(state: State<'_, AppState>, profile: serde_json::Value) -> Re
             state.proxy.reload()?;
         }
     }
+    app_handle.emit("tray-menu-update", ()).ok();
     Ok(saved)
 }
 
 #[tauri::command]
-pub fn update_profile(state: State<'_, AppState>, id: String, updates: serde_json::Value) -> Result<Profile, String> {
+pub fn update_profile(app_handle: tauri::AppHandle, state: State<'_, AppState>, id: String, updates: serde_json::Value) -> Result<Profile, String> {
     let saved = state.config.update_profile(&id, updates)?;
     let active = state.config.get_active_profiles();
     if active.contains(&id) && state.proxy.get_status().status == "running" {
         state.proxy.reload()?;
     }
+    app_handle.emit("tray-menu-update", ()).ok();
     Ok(saved)
 }
 
 #[tauri::command]
-pub fn delete_profile(state: State<'_, AppState>, id: String) -> Result<(), String> {
+pub fn delete_profile(app_handle: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
     let was_active = state.config.get_active_profiles().contains(&id);
     state.config.delete_profile(&id)?;
     if was_active && state.proxy.get_status().status == "running" {
         state.proxy.reload()?;
     }
+    app_handle.emit("tray-menu-update", ()).ok();
     Ok(())
 }
 
@@ -73,16 +76,17 @@ pub fn get_active_profiles(state: State<'_, AppState>) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn set_active_profiles(state: State<'_, AppState>, ids: Vec<String>) -> Result<(), String> {
+pub fn set_active_profiles(app_handle: tauri::AppHandle, state: State<'_, AppState>, ids: Vec<String>) -> Result<(), String> {
     state.config.set_active_profiles(&ids)?;
     if state.proxy.get_status().status == "running" {
         state.proxy.reload()?;
     }
+    app_handle.emit("tray-menu-update", ()).ok();
     Ok(())
 }
 
 #[tauri::command]
-pub fn toggle_profile(state: State<'_, AppState>, id: String, enabled: bool) -> Result<(), String> {
+pub fn toggle_profile(app_handle: tauri::AppHandle, state: State<'_, AppState>, id: String, enabled: bool) -> Result<(), String> {
     let mut ids = state.config.get_active_profiles();
     if enabled {
         if !ids.contains(&id) {
@@ -95,15 +99,17 @@ pub fn toggle_profile(state: State<'_, AppState>, id: String, enabled: bool) -> 
     if state.proxy.get_status().status == "running" {
         state.proxy.reload()?;
     }
+    app_handle.emit("tray-menu-update", ()).ok();
     Ok(())
 }
 
 #[tauri::command]
-pub fn reorder_profiles(state: State<'_, AppState>, ordered_ids: Vec<String>) -> Result<(), String> {
+pub fn reorder_profiles(app_handle: tauri::AppHandle, state: State<'_, AppState>, ordered_ids: Vec<String>) -> Result<(), String> {
     state.config.reorder_profiles(&ordered_ids)?;
     if state.proxy.get_status().status == "running" {
         state.proxy.reload()?;
     }
+    app_handle.emit("tray-menu-update", ()).ok();
     Ok(())
 }
 

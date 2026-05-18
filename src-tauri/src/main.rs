@@ -252,6 +252,13 @@ fn main() {
                 rebuild_tray_menu(&app_handle, &state);
             });
 
+            // Listen for tray menu update events (provider/profile changes)
+            let app_handle = app.handle().clone();
+            app.listen("tray-menu-update", move |_event| {
+                let state = app_handle.state::<AppState>();
+                rebuild_tray_menu(&app_handle, &state);
+            });
+
             // Auto-start proxy if configured
             let settings = config_store.get_settings();
             if settings.auto_start {
