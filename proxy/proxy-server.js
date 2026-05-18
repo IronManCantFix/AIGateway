@@ -230,11 +230,16 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
           if (sourceFormat === 'responses') {
             // Upstream returned non-streaming Chat/Messages JSON, client expects Responses SSE
-            const choice = data.choices?.[0]
-            const content = choice?.message?.content || (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('') || ''
+            let content
+            if (data.type === 'message' && Array.isArray(data.content)) {
+              content = data.content.filter(c => c.type === 'text').map(c => c.text).join('')
+            } else {
+              const choice = data.choices?.[0]
+              content = choice?.message?.content || ''
+            }
             const model = data.model || ''
-            const inputTokens = data.usage?.prompt_tokens || data.usage?.input_tokens || 0
-            const outputTokens = data.usage?.completion_tokens || data.usage?.output_tokens || 0
+            const inputTokens = data.usage?.input_tokens || data.usage?.prompt_tokens || 0
+            const outputTokens = data.usage?.output_tokens || data.usage?.completion_tokens || 0
             const responseId = 'resp_' + Date.now()
             const itemId = 'msg_' + Date.now()
 
@@ -255,35 +260,86 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
             )
           } else if (sourceFormat === 'chat_completions') {
             // Client expects Chat Completions SSE
-            const choice = data.choices?.[0]
-            const message = choice?.message || {}
-            const content = message.content || (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('') || ''
-            const model = data.model || ''
+            let content, model, finishReason
+            if (data.type === 'message' && Array.isArray(data.content)) {
+              content = data.content.filter(c => c.type === 'text').map(c => c.text).join('')
+              model = data.model || ''
+              const reverseStop = { end_turn: 'stop', max_tokens: 'length', tool_use: 'tool_calls' }
+              finishReason = reverseStop[data.stop_reason] || data.stop_reason || 'stop'
+            } else {
+              const choice = data.choices?.[0]
+              const message = choice?.message || {}
+              content = message.content || ''
+              model = data.model || ''
+              finishReason = choice?.finish_reason || 'stop'
+            }
             const chatId = 'chatcmpl-' + Date.now()
 
             clientRes.write(
               fmtOpenAISSE({ id: chatId, object: 'chat.completion.chunk', created: Math.floor(Date.now()), model, choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }] }) +
               (content ? fmtOpenAISSE({ id: chatId, object: 'chat.completion.chunk', created: Math.floor(Date.now()), model, choices: [{ index: 0, delta: { content: content }, finish_reason: null }] }) : '') +
-              fmtOpenAISSE({ id: chatId, object: 'chat.completion.chunk', created: Math.floor(Date.now()), model, choices: [{ index: 0, delta: {}, finish_reason: choice?.finish_reason || 'stop' }] }) +
+              fmtOpenAISSE({ id: chatId, object: 'chat.completion.chunk', created: Math.floor(Date.now()), model, choices: [{ index: 0, delta: {}, finish_reason: finishReason }] }) +
               'data: [DONE]\n\n'
             )
           } else {
             // Client expects Anthropic Messages SSE
-            const choice = data.choices?.[0]
-            const message = choice?.message || {}
-            const role = message.role || 'assistant'
-            const content = message.content || (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('') || ''
-            const model = data.model || ''
-            const msgId = 'msg_' + Date.now()
+            let role, model, content, reasoning, inputTokens, outputTokens, stopReason, contentBlocks
 
-            clientRes.write(
-              fmtAnthropicSSE('message_start', { type: 'message_start', message: { id: msgId, type: 'message', role, model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } }) +
-              fmtAnthropicSSE('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }) +
-              fmtAnthropicSSE('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: content } }) +
-              fmtAnthropicSSE('content_block_stop', { type: 'content_block_stop', index: 0 }) +
-              fmtAnthropicSSE('message_delta', { type: 'message_delta', delta: { stop_reason: mapFinishReason(choice?.finish_reason || 'stop') }, usage: { output_tokens: data.usage?.completion_tokens || 0 } }) +
-              fmtAnthropicSSE('message_stop', { type: 'message_stop' })
-            )
+            if (data.type === 'message' && Array.isArray(data.content)) {
+              // Upstream returned Anthropic Messages format — pass through
+              role = data.role || 'assistant'
+              model = data.model || ''
+              contentBlocks = data.content
+              reasoning = ''
+              inputTokens = data.usage?.input_tokens || 0
+              outputTokens = data.usage?.output_tokens || 0
+              stopReason = data.stop_reason || 'end_turn'
+            } else {
+              // Upstream returned OpenAI Chat Completions format — convert
+              const choice = data.choices?.[0]
+              const message = choice?.message || {}
+              role = message.role || 'assistant'
+              model = data.model || ''
+              const text = message.content || ''
+              reasoning = message.reasoning_content || ''
+              contentBlocks = []
+              if (reasoning) contentBlocks.push({ type: 'thinking', thinking: reasoning })
+              if (text) contentBlocks.push({ type: 'text', text })
+              inputTokens = data.usage?.prompt_tokens || 0
+              outputTokens = data.usage?.completion_tokens || 0
+              stopReason = mapFinishReason(choice?.finish_reason || 'stop')
+            }
+
+            const msgId = 'msg_' + Date.now()
+            let idx = 0
+
+            let out = fmtAnthropicSSE('message_start', { type: 'message_start', message: { id: msgId, type: 'message', role, model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: inputTokens, output_tokens: 0 } } })
+
+            for (const block of contentBlocks) {
+              if (block.type === 'thinking') {
+                out += fmtAnthropicSSE('content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'thinking', thinking: '' } }) +
+                       fmtAnthropicSSE('content_block_delta', { type: 'content_block_delta', index: idx, delta: { type: 'thinking_delta', thinking: block.thinking || '' } }) +
+                       fmtAnthropicSSE('content_block_stop', { type: 'content_block_stop', index: idx })
+                idx++
+              } else if (block.type === 'text') {
+                out += fmtAnthropicSSE('content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'text', text: '' } }) +
+                       fmtAnthropicSSE('content_block_delta', { type: 'content_block_delta', index: idx, delta: { type: 'text_delta', text: block.text || '' } }) +
+                       fmtAnthropicSSE('content_block_stop', { type: 'content_block_stop', index: idx })
+                idx++
+              }
+            }
+
+            // Ensure at least one text block exists
+            if (idx === 0) {
+              out += fmtAnthropicSSE('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }) +
+                     fmtAnthropicSSE('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '' } }) +
+                     fmtAnthropicSSE('content_block_stop', { type: 'content_block_stop', index: 0 })
+            }
+
+            out += fmtAnthropicSSE('message_delta', { type: 'message_delta', delta: { stop_reason: stopReason }, usage: { output_tokens: outputTokens } }) +
+                   fmtAnthropicSSE('message_stop', { type: 'message_stop' })
+
+            clientRes.write(out)
           }
           if (onResponseBody) onResponseBody(rawBody)
         } catch {
@@ -392,9 +448,52 @@ function convertChatToMessages(body) {
 function convertMessagesToChat(body) {
   const { messages, system, ...rest } = body
   const result = pickFields(rest, TARGET_FIELDS.chat_completions)
-  result.messages = [...messages]
+  // Convert message content: Anthropic content blocks → OpenAI string
+  // Anthropic: content: [{type: "text", text: "..."}] or content: "..."
+  // OpenAI:    content: "..." (string) or content: [{type: "text", text: "..."}] (for vision)
+  result.messages = messages.map(m => {
+    if (typeof m.content === 'string') return m
+    if (!Array.isArray(m.content)) return m
+    // Check if any non-text content blocks exist (images, etc.)
+    const hasNonText = m.content.some(c => c.type === 'image' || c.type === 'image_url' || c.type === 'source')
+    if (hasNonText) {
+      // Convert to OpenAI vision format: [{type: "text", text: "..."}, {type: "image_url", ...}]
+      const converted = m.content.map(c => {
+        if (c.type === 'text') return { type: 'text', text: c.text || '' }
+        if (c.type === 'image') {
+          // Anthropic image: {type: "image", source: {type: "base64"|"url", ...}}
+          if (c.source?.type === 'url') {
+            return { type: 'image_url', image_url: { url: c.source.url } }
+          }
+          if (c.source?.type === 'base64') {
+            return { type: 'image_url', image_url: { url: `data:${c.source.media_type};base64,${c.source.data}` } }
+          }
+        }
+        return c
+      })
+      return { ...m, content: converted }
+    }
+    // Text-only: flatten to string
+    const text = m.content.filter(c => c.type === 'text').map(c => c.text || '').join('')
+    return { ...m, content: text }
+  })
+  // Convert system field (can be string or content block array)
   if (system) {
-    result.messages.unshift({ role: 'system', content: system })
+    result.messages.unshift({ role: 'system', content: extractSystemContent({ content: system }) })
+  }
+  // Convert tools from Anthropic Messages format to Chat Completions format
+  // Anthropic: { name, description, input_schema }
+  // Chat:      { type: "function", function: { name, description, parameters } }
+  if (Array.isArray(result.tools)) {
+    result.tools = result.tools.map(t => {
+      if (t.name && !t.type) {
+        const func = { name: t.name }
+        if (t.description) func.description = t.description
+        if (t.input_schema) func.parameters = t.input_schema
+        return { type: 'function', function: func }
+      }
+      return t
+    })
   }
   return result
 }
@@ -471,12 +570,33 @@ function convertResponsesToChat(body) {
 
 function convertMessagesToResponses(body) {
   const { messages, system, ...rest } = body
-  const input = [...messages]
+  // Convert message content: Anthropic content blocks → Responses input format
+  const input = messages.map(m => {
+    if (typeof m.content === 'string') return m
+    if (!Array.isArray(m.content)) return m
+    // Flatten text content blocks to string
+    const text = m.content.filter(c => c.type === 'text').map(c => c.text || '').join('')
+    return { ...m, content: text }
+  })
   if (system) {
-    input.unshift({ role: 'system', content: system })
+    input.unshift({ role: 'system', content: extractSystemContent({ content: system }) })
   }
   const result = pickFields(rest, TARGET_FIELDS.responses)
   result.input = input
+  // Convert tools from Anthropic Messages format to Responses format
+  // Anthropic:  { name, description, input_schema }
+  // Responses:  { type: "function", name, parameters, description }
+  if (Array.isArray(result.tools)) {
+    result.tools = result.tools.map(t => {
+      if (t.name && !t.type) {
+        const res = { type: 'function', name: t.name }
+        if (t.description) res.description = t.description
+        if (t.input_schema) res.parameters = t.input_schema
+        return res
+      }
+      return t
+    })
+  }
   return result
 }
 
@@ -537,8 +657,38 @@ function mapFinishReason(reason) {
 
 function chatToMessagesSSEFactory() {
   let started = false
+  let thinkingStarted = false
+  let thinkingClosed = false
+  let textStarted = false
   let messageId = 'msg_' + Date.now()
   let model = ''
+  let outputTokens = 0
+  let lastReasoning = ''
+
+  function ensureStarted(choice) {
+    if (started) return ''
+    started = true
+    const role = choice?.delta?.role || choice?.message?.role || 'assistant'
+    return fmtAnthropicSSE('message_start', { type: 'message_start', message: { id: messageId, type: 'message', role, model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } })
+  }
+
+  function startThinking() {
+    if (thinkingStarted) return ''
+    thinkingStarted = true
+    return fmtAnthropicSSE('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } })
+  }
+
+  function closeThinking() {
+    if (!thinkingStarted || thinkingClosed) return ''
+    thinkingClosed = true
+    return fmtAnthropicSSE('content_block_stop', { type: 'content_block_stop', index: 0 })
+  }
+
+  function startText() {
+    if (textStarted) return ''
+    textStarted = true
+    return fmtAnthropicSSE('content_block_start', { type: 'content_block_start', index: thinkingStarted ? 1 : 0, content_block: { type: 'text', text: '' } })
+  }
 
   return (line) => {
     if (!line.startsWith('data: ')) return ''
@@ -549,29 +699,63 @@ function chatToMessagesSSEFactory() {
       const choice = data.choices?.[0]
       if (!choice) return ''
 
-      if (!started && data.model) model = data.model
+      if (data.model) model = data.model
 
-      if (!started) {
-        started = true
-        const role = choice.delta?.role || 'assistant'
-        let out = fmtAnthropicSSE('message_start', { type: 'message_start', message: { id: messageId, type: 'message', role, model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } }) +
-                  fmtAnthropicSSE('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }) +
-                  fmtAnthropicSSE('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: choice.delta?.content || '' } })
-        if (choice.finish_reason) {
-          out += fmtAnthropicSSE('content_block_stop', { type: 'content_block_stop', index: 0 }) +
-                 fmtAnthropicSSE('message_delta', { type: 'message_delta', delta: { stop_reason: mapFinishReason(choice.finish_reason) }, usage: { output_tokens: 0 } }) +
-                 fmtAnthropicSSE('message_stop', { type: 'message_stop' })
+      // Support both delta (streaming) and message (non-streaming final chunk) formats
+      const delta = choice.delta || choice.message || {}
+      const content = delta.content
+      const rawReasoning = delta.reasoning_content
+      const finishReason = choice.finish_reason
+
+      // reasoning_content: auto-detect cumulative (MiniMax) vs incremental (DeepSeek)
+      let reasoning = ''
+      if (rawReasoning != null) {
+        if (rawReasoning.length > lastReasoning.length && rawReasoning.startsWith(lastReasoning)) {
+          // Cumulative: extract delta from the longer string
+          reasoning = rawReasoning.substring(lastReasoning.length)
+          lastReasoning = rawReasoning
+        } else if (rawReasoning !== lastReasoning) {
+          // Incremental: use as-is (or cumulative reset)
+          reasoning = rawReasoning
+          lastReasoning = rawReasoning
         }
-        return out
       }
 
-      if (choice.finish_reason) {
-        return fmtAnthropicSSE('content_block_stop', { type: 'content_block_stop', index: 0 }) +
-               fmtAnthropicSSE('message_delta', { type: 'message_delta', delta: { stop_reason: mapFinishReason(choice.finish_reason) }, usage: { output_tokens: 0 } }) +
-               fmtAnthropicSSE('message_stop', { type: 'message_stop' })
+      // Update token counts if available
+      if (data.usage?.completion_tokens) outputTokens = data.usage.completion_tokens
+
+      let out = ''
+
+      // Emit message_start on first chunk
+      out += ensureStarted(choice)
+
+      // Handle reasoning content → thinking block
+      // Start thinking block on first encounter of reasoning_content field (even if empty)
+      if (rawReasoning != null) {
+        out += startThinking()
+      }
+      if (reasoning) {
+        out += fmtAnthropicSSE('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: reasoning } })
       }
 
-      return fmtAnthropicSSE('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: choice.delta?.content || '' } })
+      // Handle text content → text block
+      if (content != null && content !== '') {
+        out += closeThinking()
+        out += startText()
+        out += fmtAnthropicSSE('content_block_delta', { type: 'content_block_delta', index: thinkingStarted ? 1 : 0, delta: { type: 'text_delta', text: content } })
+      }
+
+      // Handle finish
+      if (finishReason) {
+        out += closeThinking()
+        if (!textStarted) out += startText()
+        const textIdx = thinkingStarted ? 1 : 0
+        out += fmtAnthropicSSE('content_block_stop', { type: 'content_block_stop', index: textIdx })
+        out += fmtAnthropicSSE('message_delta', { type: 'message_delta', delta: { stop_reason: mapFinishReason(finishReason) }, usage: { output_tokens: outputTokens } })
+        out += fmtAnthropicSSE('message_stop', { type: 'message_stop' })
+      }
+
+      return out
     } catch {
       return ''
     }
@@ -598,6 +782,10 @@ function messagesToChatSSEFactory() {
       }
 
       if (data.type === 'content_block_delta') {
+        // Map thinking_delta to reasoning_content for clients that support it
+        if (data.delta?.type === 'thinking_delta') {
+          return fmtOpenAISSE({ id: chatId, object: 'chat.completion.chunk', created: Math.floor(Date.now()), model, choices: [{ index: 0, delta: { reasoning_content: data.delta.thinking || '' }, finish_reason: null }] })
+        }
         const text = data.delta?.text || ''
         return fmtOpenAISSE({ id: chatId, object: 'chat.completion.chunk', created: Math.floor(Date.now()), model, choices: [{ index: 0, delta: { content: text }, finish_reason: null }] })
       }
@@ -815,6 +1003,8 @@ function messagesToResponsesSSEFactory() {
       }
 
       if (data.type === 'content_block_delta') {
+        // Skip thinking blocks (Responses API doesn't have native thinking support)
+        if (data.delta?.type === 'thinking_delta') return ''
         const text = data.delta?.text || ''
         if (text) fullText += text
         return fmtResponsesSSE('response.output_text.delta', { type: 'response.output_text.delta', item_id: itemId, output_index: 0, content_index: 0, delta: text })
@@ -978,15 +1168,25 @@ function reasoningSSEFactory() {
 // === Response Body Converters (non-streaming) ===
 
 function convertChatResponseToMessages(data) {
+  // If response is already in Anthropic Messages format, return as-is
+  if (data.type === 'message' && Array.isArray(data.content)) {
+    return data
+  }
+  // Otherwise convert from OpenAI Chat Completions format
   const choice = data.choices?.[0]
   const message = choice?.message || {}
   const reverseFinish = { stop: 'end_turn', length: 'max_tokens', tool_calls: 'tool_use' }
+  const content = []
+  if (message.reasoning_content) {
+    content.push({ type: 'thinking', thinking: message.reasoning_content })
+  }
+  content.push({ type: 'text', text: message.content || '' })
   return {
     id: 'msg_' + (data.id || Date.now()),
     type: 'message',
     role: message.role || 'assistant',
     model: data.model || '',
-    content: [{ type: 'text', text: message.content || '' }],
+    content,
     stop_reason: reverseFinish[choice?.finish_reason] || choice?.finish_reason || 'end_turn',
     stop_sequence: null,
     usage: {
@@ -1001,7 +1201,13 @@ function convertMessagesResponseToChat(data) {
     .filter(c => c.type === 'text')
     .map(c => c.text || '')
     .join('')
+  const thinkingContent = (data.content || [])
+    .filter(c => c.type === 'thinking')
+    .map(c => c.thinking || '')
+    .join('')
   const reverseFinish = { end_turn: 'stop', max_tokens: 'length', tool_use: 'tool_calls' }
+  const message = { role: data.role || 'assistant', content: textContent }
+  if (thinkingContent) message.reasoning_content = thinkingContent
   return {
     id: data.id || ('msg_' + Date.now()),
     object: 'chat.completion',
@@ -1009,7 +1215,7 @@ function convertMessagesResponseToChat(data) {
     model: data.model || '',
     choices: [{
       index: 0,
-      message: { role: data.role || 'assistant', content: textContent },
+      message,
       finish_reason: reverseFinish[data.stop_reason] || data.stop_reason || 'stop'
     }],
     usage: {
@@ -1280,10 +1486,12 @@ async function handleApiRequest(req, res) {
   const upstreamUrl = `${profile.baseUrl}${meta.path}`
   const needStream = req.headers.accept?.includes('text/event-stream') || body.stream
   let sseConverter = needStream ? createSSEConverter(source, meta.target) : null
-  // Same-format chat_completions: inject reasoning_split for MiniMax-style providers
-  // and convert reasoning output to reasoning_content for client compatibility
+  // Same-format chat_completions: convert reasoning_details / <think> tags
+  // to reasoning_content for client compatibility (e.g. CherryStudio).
+  // Do NOT inject reasoning_split automatically — it's provider-specific
+  // (MiniMax) and breaks other providers (Xiaomi, DeepSeek, etc.).
+  // Clients that need reasoning_split should add it themselves.
   if (!sseConverter && source === 'chat_completions' && meta.target === 'chat_completions') {
-    body.reasoning_split = true
     if (needStream) {
       sseConverter = reasoningSSEFactory()
     }
@@ -1350,6 +1558,16 @@ const server = http.createServer(async (req, res) => {
       res.on('finish', () => {
         logRequest(endpoint, '-', res.statusCode, Date.now() - startTime, null, null, null, '-')
       })
+    } else if (urlPath === '/v1/messages/count_tokens') {
+      // Anthropic token counting endpoint — return estimated count since upstream providers don't support it
+      rawBody = await readBody(req)
+      model = (rawBody && rawBody.model) || '-'
+      // Rough estimate: ~4 chars per token for English, ~2 chars per token for CJK
+      const bodyStr = JSON.stringify(rawBody.messages || [])
+      const inputTokens = Math.ceil(bodyStr.length / 3)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ input_tokens: inputTokens }))
+      logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-')
     } else if (PATH_TO_SOURCE[urlPath]) {
       rawBody = await readBody(req)
       model = (rawBody && rawBody.model) || '-'

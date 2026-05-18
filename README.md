@@ -63,15 +63,13 @@ Codex / Cursor / 脚本 / ...
 
 config.toml文件
 ```bash
-model_provider = "utools"
-model_reasoning_effort = "medium"
+model_provider = "aigateway"
 model_override = true
 
-[model_providers.utools]
+[model_providers.aigateway]
 provider_type = "openai"
-name = "utools"
+name = "aigateway"
 base_url = "http://127.0.0.1:9999/v1"
-env_key  = "MY_RELAY_API_KEY"
 wire_api = "responses"
 ```
 
@@ -160,6 +158,28 @@ wire_api = "responses"
 
 SSE 流式响应也会实时转换。
 
+## ✅ 测试说明
+
+目前使用 Codex App 、 Cherry Studio 、Claude App 进行了以下测试：
+
+| 客户端           | 提供商       | 协议                      | 结果 |
+|---------------|-----------|-------------------------|---|
+| Codex App     | MiMo      | `openai-responses`      | ✅ |
+| Codex App     | DeepSeek  | `openai-responses`      | ✅ |
+| Cherry Studio | MiniMax   | `openai-chat、Anthropic` | ✅ |
+| Cherry Studio | MiMo      | `openai-chat、Anthropic` | ✅ |
+| Cherry Studio | DeepSeek  | `openai-chat、Anthropic` | ✅ |
+| Cherry Studio | GLM       | `openai-chat、Anthropic` | ✅ |
+| Claude App    | GLM       | `Anthropic` | ✅ |
+| Claude App    | MiMo      | `Anthropic` | ✅ |
+| Claude App    | DeepSeek  | `Anthropic` | ✅ |
+| Claude App    | MiniMax   | `Anthropic` | ✅ |
+
+我个人没有把市面上常见的AI工具都下载下来一一测试，只测试了我常用的工具和模型，国外的模型我没有购买所以无法测试。 
+目前基本上都是使用流式请求，非流式请求没有进行测试，有bug可以反馈。
+
+> 欢迎提交 Issue 反馈其他模型或客户端的兼容性情况。
+
 ## 🛠️ 安装与开发
 
 ### 安装依赖
@@ -188,6 +208,39 @@ npm run tauri dev
 npm run proxy:build   # 编译 Sidecar（所有平台）
 npm run tauri build   # 构建应用
 ```
+
+### 何时需要重新编译代理服务器
+
+代理服务器（`proxy/proxy-server.js`）会被 `bun compile` 编译为独立的二进制文件（Sidecar），嵌入到应用中运行。因此，**修改 `proxy/proxy-server.js` 后必须重新编译才能生效**。
+
+需要重新编译的典型场景：
+
+- 修改了协议转换逻辑（请求体/响应体格式转换）
+- 修改了 SSE 流式转换器
+- 修改了路由处理（如添加新的 API 端点）
+- 修改了代理转发逻辑
+
+不需要重新编译的情况：
+
+- 只修改了前端代码（`src/` 目录下的 Vue 文件）— `npm run tauri dev` 会自动热更新
+- 只修改了 Rust 后端代码（`src-tauri/src/`）— `npm run tauri dev` 会自动重新编译
+- 只修改了配置文件或 README
+
+**开发模式下重新编译代理（当前平台）：**
+
+```bash
+cd proxy && bun build --compile proxy-server.js --outfile ../src-tauri/binaries/proxy-server && cd ..
+TARGET=$(rustc -vV | grep host | cut -d' ' -f2)
+ln -sf proxy-server "src-tauri/binaries/proxy-server-$TARGET"
+```
+
+**生产构建（所有平台）：**
+
+```bash
+npm run proxy:build
+```
+
+重新编译后需要重启应用才能生效。
 
 ## 📦 技术栈
 
