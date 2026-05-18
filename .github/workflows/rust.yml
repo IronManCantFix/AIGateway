@@ -72,7 +72,7 @@ jobs:
           workspaces: src-tauri
 
       - name: Build
-        run: cargo tauri build --target ${{ matrix.target }}
+        run: npm run tauri build -- --target ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
