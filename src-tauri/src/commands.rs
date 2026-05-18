@@ -215,6 +215,11 @@ pub fn clear_logs_bodies(state: State<'_, AppState>) -> Result<(), String> {
     state.config.clear_logs_bodies()
 }
 
+#[tauri::command]
+pub fn clear_aggregated_stats(state: State<'_, AppState>) -> Result<(), String> {
+    state.config.clear_aggregated_stats()
+}
+
 // Clipboard is handled directly by tauri-plugin-clipboard-manager on the frontend.
 
 // --- Fetch provider models ---

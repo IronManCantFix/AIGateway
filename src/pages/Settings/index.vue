@@ -19,6 +19,16 @@ const logPage = ref(1)
 const logPageSize = ref(5)
 const trendHover = ref(null) // { x, y, date, count, tokens }
 
+// Custom confirm dialog (window.confirm doesn't work reliably in Tauri WebView)
+const confirmState = ref({ visible: false, message: '', resolve: null })
+function showConfirm(message) {
+  return new Promise(resolve => {
+    confirmState.value = { visible: true, message, resolve }
+  })
+}
+function confirmOk() { confirmState.value.resolve(true); confirmState.value.visible = false }
+function confirmCancel() { confirmState.value.resolve(false); confirmState.value.visible = false }
+
 async function loadSettings() {
   const s = await api.getSettings()
   port.value = s.port || 9999
@@ -34,15 +44,15 @@ async function saveSettings() {
 async function toggleLogging() { await api.setLogEnabled(logEnabled.value) }
 async function loadStats() { stats.value = await api.getStats(); logs.value = await api.getLogs(1000) }
 async function clearLogs() {
-  if (!window.confirm('确定要清除所有请求日志吗？\n统计计数将保留。')) return
+  if (!await showConfirm('确定要清除所有请求日志吗？统计计数将保留。')) return
   await api.clearLogs(); await loadStats()
 }
 async function clearAllData() {
-  if (!window.confirm('确定要清除所有数据和统计吗？此操作不可恢复。')) return
-  await api.clearAllData(); await loadStats()
+  if (!await showConfirm('确定要清除所有统计数据吗？此操作不可恢复。')) return
+  await api.clearAggregatedStats(); await loadStats()
 }
 async function clearLogsBodyData() {
-  if (!window.confirm('确定要清空所有请求参数和返回参数吗？统计计数将保留。')) return
+  if (!await showConfirm('确定要清空所有请求参数和返回参数吗？统计计数将保留。')) return
   await api.clearLogsBodies(); await loadStats()
 }
 function statusLabel(c) {
@@ -269,7 +279,7 @@ onMounted(async () => { await loadSettings(); await loadStats() })
           <h3>请求统计</h3>
           <div class="header-actions">
             <button class="refresh-btn" @click="loadStats">刷新</button>
-            <button class="clear-btn danger" @click="clearAllData">清除全部</button>
+            <button class="clear-btn danger" @click="clearAllData">清除统计</button>
           </div>
         </div>
         <div class="card-body overview-body">
@@ -549,6 +559,19 @@ onMounted(async () => { await loadSettings(); await loadStats() })
       <p>作者 Claude Code &amp; DeepSeek v4 Pro &amp; mimo-v2.5-pro</p>
     </div>
   </div>
+
+  <!-- 确认弹窗 -->
+  <Teleport to="body">
+    <div class="confirm-overlay" v-if="confirmState.visible" @click.self="confirmCancel">
+      <div class="confirm-dialog">
+        <p class="confirm-msg">{{ confirmState.message }}</p>
+        <div class="confirm-actions">
+          <button class="confirm-cancel" @click="confirmCancel">取消</button>
+          <button class="confirm-ok" @click="confirmOk">确定</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -686,4 +709,14 @@ onMounted(async () => { await loadSettings(); await loadStats() })
 
 .about { text-align: center; padding: 32px 16px; color: #94a3b8; font-size: 13px; line-height: 1.8; }
 .about strong { color: #64748b; }
+
+/* Confirm dialog */
+.confirm-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; }
+.confirm-dialog { background: #fff; border-radius: 14px; padding: 28px 32px 20px; min-width: 320px; max-width: 420px; box-shadow: 0 20px 60px rgba(0,0,0,.2); }
+.confirm-msg { font-size: 15px; color: #1e293b; line-height: 1.6; margin: 0 0 24px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.confirm-cancel { padding: 8px 20px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; font-size: 14px; color: #64748b; cursor: pointer; transition: all .15s; }
+.confirm-cancel:hover { background: #f8fafc; border-color: #cbd5e1; }
+.confirm-ok { padding: 8px 20px; border: none; border-radius: 8px; background: #ef4444; font-size: 14px; color: #fff; font-weight: 500; cursor: pointer; transition: all .15s; }
+.confirm-ok:hover { background: #dc2626; }
 </style>

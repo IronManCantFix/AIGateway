@@ -293,6 +293,7 @@ fn main() {
             commands::clear_logs,
             commands::clear_all_data,
             commands::clear_logs_bodies,
+            commands::clear_aggregated_stats,
             commands::fetch_provider_models,
         ])
         .on_window_event(|window, event| {

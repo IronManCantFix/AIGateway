@@ -39,6 +39,7 @@ export const api = {
   clearLogs: () => invoke('clear_logs'),
   clearAllData: () => invoke('clear_all_data'),
   clearLogsBodies: () => invoke('clear_logs_bodies'),
+  clearAggregatedStats: () => invoke('clear_aggregated_stats'),
   getLogEnabled: () => invoke('get_log_enabled'),
   setLogEnabled: (enabled) => invoke('set_log_enabled', { enabled }),
 

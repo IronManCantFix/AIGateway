@@ -28,6 +28,16 @@ Codex / Cursor / 脚本 / ...
 
 ## ⚡ 快速开始
 
+### 0️⃣ 下载安装
+
+前往 [GitHub Releases](https://github.com/a471640241/AIGateway/releases) 页面下载对应平台的安装包：
+
+| 平台 | 安装包 |
+|---|---|
+| macOS | `.dmg`（aarch64 / x86_64） |
+| Windows | `.msi` 或 `.exe` |
+| Linux | `.deb` 或 `.rpm` |
+
 ### 1️⃣ 配置并使用
 
 启动应用后，在主界面添加一条提供商配置：
@@ -39,6 +49,9 @@ Codex / Cursor / 脚本 / ...
 | Base URL | `https://api.openai.com` | 不含路径 |
 | API Key | `sk-...` | 你的密钥 |
 | 默认模型 | `gpt-4o` | 未指定模型时使用 |
+| 可用模型 | `gpt-4o`, `gpt-4o-mini` | 该提供商支持的模型列表，用于模型路由匹配和对外暴露可用模型 |
+
+添加可用模型后，首页会展示当前所有可用模型，客户端也可通过 `GET /v1/models` 接口获取模型 ID 列表（OpenAI 兼容格式）。
 
 勾选启用，点击「启动」代理。然后把你的工具指向 `http://127.0.0.1:9999` 即可。
 

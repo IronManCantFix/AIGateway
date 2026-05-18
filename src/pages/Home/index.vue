@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, inject } from 'vue'
+import { ref, onMounted, computed, inject, nextTick } from 'vue'
 import { api } from '../../api.js'
 import { listen } from '@tauri-apps/api/event'
 
@@ -34,10 +34,11 @@ async function loadData() {
 }
 
 const aggregatedModels = computed(() => {
+  const activeSet = new Set(activeProfileIds.value)
+  const activeProfiles = profiles.value.filter(p => activeSet.has(p.id))
   const modelProviders = {}
-  for (const id of activeProfileIds.value) {
-    const p = profiles.value.find(pr => pr.id === id)
-    if (p && Array.isArray(p.models)) {
+  for (const p of activeProfiles) {
+    if (Array.isArray(p.models)) {
       for (const m of p.models) {
         if (!modelProviders[m]) modelProviders[m] = []
         modelProviders[m].push(p.name)
@@ -46,9 +47,8 @@ const aggregatedModels = computed(() => {
   }
   const result = []
   const seen = new Set()
-  for (const id of activeProfileIds.value) {
-    const p = profiles.value.find(pr => pr.id === id)
-    if (p && Array.isArray(p.models)) {
+  for (const p of activeProfiles) {
+    if (Array.isArray(p.models)) {
       for (const m of p.models) {
         if (!seen.has(m)) {
           seen.add(m)
@@ -129,47 +129,71 @@ function modelCountText(p) {
   return `${count} 个模型`
 }
 
-// --- Drag & drop reorder ---
+// --- Drag & drop reorder (mouse events) ---
 const dragIndex = ref(null)
-const dragOverIndex = ref(null)
+let dragStartY = 0
+let dragStarted = false
+let containerTop = 0
+let rowHeight = 0
+let ghostEl = null
+let ghostOffsetY = 0
+const DRAG_THRESHOLD = 5
 
-function onDragStart(e, index) {
-  dragIndex.value = index
-  e.dataTransfer.effectAllowed = 'move'
-  e.dataTransfer.setData('text/plain', String(index))
-}
-
-function onDragOver(e, index) {
+function onHandleMouseDown(e, index) {
   e.preventDefault()
-  e.dataTransfer.dropEffect = 'move'
-  dragOverIndex.value = index
-}
-
-function onDragLeave() {
-  dragOverIndex.value = null
-}
-
-async function onDrop(e, toIndex) {
-  e.preventDefault()
-  const fromIndex = dragIndex.value
-  if (fromIndex === null || fromIndex === toIndex) {
-    dragIndex.value = null
-    dragOverIndex.value = null
-    return
+  dragStartY = e.clientY
+  dragStarted = false
+  const rowEl = e.target.closest('.provider-row')
+  const onMouseMove = (ev) => {
+    if (!dragStarted && Math.abs(ev.clientY - dragStartY) < DRAG_THRESHOLD) return
+    if (!dragStarted) {
+      dragStarted = true
+      dragIndex.value = index
+      document.body.style.userSelect = 'none'
+      const rows = document.querySelectorAll('.provider-row')
+      if (rows.length > 0) {
+        const firstRect = rows[0].getBoundingClientRect()
+        containerTop = firstRect.top
+        rowHeight = firstRect.height + 4
+      }
+      const rect = rowEl.getBoundingClientRect()
+      ghostOffsetY = ev.clientY - rect.top
+      ghostEl = document.createElement('div')
+      ghostEl.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;z-index:9999;pointer-events:none;opacity:0.8;box-shadow:0 8px 24px rgba(0,0,0,.2);border-radius:10px;background:#fff;border:2px solid #c7d2fe;display:flex;align-items:center;padding:12px;font-size:14px;font-weight:600;color:#1e293b;`
+      ghostEl.textContent = rowEl.querySelector('.pr-name')?.textContent || ''
+      document.body.appendChild(ghostEl)
+    }
+    if (ghostEl) {
+      ghostEl.style.top = (ev.clientY - ghostOffsetY) + 'px'
+    }
+    const count = profiles.value.length
+    let targetIdx = Math.round((ev.clientY - containerTop) / rowHeight)
+    targetIdx = Math.max(0, Math.min(targetIdx, count - 1))
+    if (targetIdx !== dragIndex.value) {
+      const fromIdx = dragIndex.value
+      const arr = [...profiles.value]
+      const [moved] = arr.splice(fromIdx, 1)
+      arr.splice(targetIdx, 0, moved)
+      profiles.value = arr
+      dragIndex.value = targetIdx
+    }
   }
-  const newProfiles = [...profiles.value]
-  const [moved] = newProfiles.splice(fromIndex, 1)
-  newProfiles.splice(toIndex, 0, moved)
-  profiles.value = newProfiles
-  const orderedIds = newProfiles.map(p => p.id)
-  await api.reorderProfiles(orderedIds)
-  dragIndex.value = null
-  dragOverIndex.value = null
-}
-
-function onDragEnd() {
-  dragIndex.value = null
-  dragOverIndex.value = null
+  const onMouseUp = async () => {
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mouseup', onMouseUp)
+    document.body.style.userSelect = ''
+    if (ghostEl) { ghostEl.remove(); ghostEl = null }
+    dragIndex.value = null
+    if (!dragStarted) return
+    try {
+      await api.reorderProfiles(profiles.value.map(p => p.id))
+    } catch (err) {
+      showToast('排序保存失败: ' + (typeof err === 'string' ? err : err.message || ''))
+      await loadData()
+    }
+  }
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
 }
 
 let toastTimer = 0
@@ -263,15 +287,9 @@ onMounted(async () => {
           v-for="(p, index) in profiles"
           :key="p.id"
           class="provider-row"
-          :class="{ active: isActive(p.id), 'drag-over-top': dragOverIndex === index && dragIndex !== null && dragIndex < index, 'drag-over-bottom': dragOverIndex === index && dragIndex !== null && dragIndex > index }"
-          :draggable="true"
-          @dragstart="onDragStart($event, index)"
-          @dragover="onDragOver($event, index)"
-          @dragleave="onDragLeave"
-          @drop="onDrop($event, index)"
-          @dragend="onDragEnd"
+          :class="{ active: isActive(p.id), dragging: dragIndex === index }"
         >
-          <div class="pr-drag-handle" title="拖拽排序">
+          <div class="pr-drag-handle" title="拖拽排序" @mousedown="onHandleMouseDown($event, index)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
           </div>
           <div class="pr-left" @click="toggleProfile(p.id)">
@@ -612,6 +630,7 @@ onMounted(async () => {
   background: #eef2ff;
   border-color: #c7d2fe;
 }
+.provider-row.dragging { opacity: 0.4; }
 .provider-row.drag-over-top { border-top-color: #6366f1; }
 .provider-row.drag-over-bottom { border-bottom-color: #6366f1; }
 

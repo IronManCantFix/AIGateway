@@ -91,6 +91,32 @@ pub struct StatsSnapshot {
     pub logs: Vec<LogEntry>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AggregatedStats {
+    #[serde(default)]
+    pub total_requests: u64,
+    #[serde(default)]
+    pub total_tokens: u64,
+    #[serde(default)]
+    pub total_prompt_tokens: u64,
+    #[serde(default)]
+    pub total_completion_tokens: u64,
+    #[serde(default)]
+    pub provider_counts: std::collections::HashMap<String, u64>,
+    #[serde(default)]
+    pub provider_tokens: std::collections::HashMap<String, u64>,
+    #[serde(default)]
+    pub model_counts: std::collections::HashMap<String, u64>,
+    #[serde(default)]
+    pub model_tokens: std::collections::HashMap<String, (u64, u64, u64)>,
+    #[serde(default)]
+    pub provider_model_counts: std::collections::HashMap<String, std::collections::HashMap<String, u64>>,
+    #[serde(default)]
+    pub daily_counts: std::collections::HashMap<String, u64>,
+    #[serde(default)]
+    pub daily_tokens: std::collections::HashMap<String, u64>,
+}
+
 // --- Config Store ---
 
 pub struct ConfigStore {
@@ -274,13 +300,45 @@ impl ConfigStore {
     }
 
     pub fn add_log(&self, entry: &LogEntry) -> Result<(), String> {
+        // Save to logs
         let mut snapshot: StatsSnapshot = self.read_json("stats-snapshot.json");
         snapshot.logs.push(entry.clone());
         if snapshot.logs.len() > 5000 {
             let drain_count = snapshot.logs.len() - 5000;
             snapshot.logs.drain(0..drain_count);
         }
-        self.write_json("stats-snapshot.json", &snapshot)
+        self.write_json("stats-snapshot.json", &snapshot)?;
+
+        // Update aggregated stats
+        let mut stats: AggregatedStats = self.read_json("aggregated-stats.json");
+        stats.total_requests += 1;
+        stats.total_tokens += entry.total_tokens.unwrap_or(0);
+        stats.total_prompt_tokens += entry.prompt_tokens.unwrap_or(0);
+        stats.total_completion_tokens += entry.completion_tokens.unwrap_or(0);
+
+        let provider = if entry.provider.is_empty() { "-".to_string() } else { entry.provider.clone() };
+        let model = if entry.model.is_empty() { "-".to_string() } else { entry.model.clone() };
+
+        *stats.provider_counts.entry(provider.clone()).or_insert(0) += 1;
+        *stats.provider_model_counts.entry(provider).or_default().entry(model.clone()).or_insert(0) += 1;
+        *stats.model_counts.entry(model.clone()).or_insert(0) += 1;
+
+        if let Some(t) = entry.total_tokens {
+            let e = stats.model_tokens.entry(model.clone()).or_insert((0, 0, 0));
+            e.0 += t;
+            e.1 += entry.prompt_tokens.unwrap_or(0);
+            e.2 += entry.completion_tokens.unwrap_or(0);
+            // provider_tokens uses the provider key from above (already consumed by provider_counts entry)
+            // Re-derive provider string for tokens map
+            let prov = if entry.provider.is_empty() { "-" } else { &entry.provider };
+            *stats.provider_tokens.entry(prov.to_string()).or_insert(0) += t;
+        }
+
+        let date = chrono_date(entry.timestamp);
+        *stats.daily_counts.entry(date.clone()).or_insert(0) += 1;
+        *stats.daily_tokens.entry(date).or_insert(0) += entry.total_tokens.unwrap_or(0);
+
+        self.write_json("aggregated-stats.json", &stats)
     }
 
     pub fn clear_logs(&self) -> Result<(), String> {
@@ -298,43 +356,20 @@ impl ConfigStore {
     }
 
     pub fn clear_all_data(&self) -> Result<(), String> {
-        for name in &["profiles.json", "active-profiles.json", "models.json", "model-mappings.json", "stats-snapshot.json"] {
-            fs::remove_file(self.path(name)).ok();
-        }
+        fs::remove_file(self.path("stats-snapshot.json")).ok();
+        fs::remove_file(self.path("aggregated-stats.json")).ok();
+        Ok(())
+    }
+
+    pub fn clear_aggregated_stats(&self) -> Result<(), String> {
+        fs::remove_file(self.path("aggregated-stats.json")).ok();
         Ok(())
     }
 
     // --- Stats aggregation ---
 
     pub fn get_stats(&self) -> serde_json::Value {
-        let logs = self.get_logs(None);
-        let total_requests = logs.len();
-        let total_tokens: u64 = logs.iter().filter_map(|l| l.total_tokens).sum();
-        let total_prompt_tokens: u64 = logs.iter().filter_map(|l| l.prompt_tokens).sum();
-        let total_completion_tokens: u64 = logs.iter().filter_map(|l| l.completion_tokens).sum();
-
-        let mut provider_map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-        let mut provider_model_map: std::collections::HashMap<String, std::collections::HashMap<String, u64>> = std::collections::HashMap::new();
-        let mut model_map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-        let mut model_tokens_map: std::collections::HashMap<String, (u64, u64, u64)> = std::collections::HashMap::new();
-        let mut provider_tokens_map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-
-        for log in &logs {
-            let provider = if log.provider.is_empty() { "-".to_string() } else { log.provider.clone() };
-            let model = if log.model.is_empty() { "-".to_string() } else { log.model.clone() };
-
-            *provider_map.entry(provider.clone()).or_insert(0) += 1;
-            *provider_model_map.entry(provider.clone()).or_default().entry(model.clone()).or_insert(0) += 1;
-            *model_map.entry(model.clone()).or_insert(0) += 1;
-
-            if let Some(t) = log.total_tokens {
-                let e = model_tokens_map.entry(model.clone()).or_insert((0, 0, 0));
-                e.0 += t;
-                e.1 += log.prompt_tokens.unwrap_or(0);
-                e.2 += log.completion_tokens.unwrap_or(0);
-                *provider_tokens_map.entry(provider.clone()).or_insert(0) += t;
-            }
-        }
+        let stats: AggregatedStats = self.read_json("aggregated-stats.json");
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -343,40 +378,30 @@ impl ConfigStore {
         let day_ms: u64 = 86400000;
         let mut trend = Vec::new();
         for i in (0..30).rev() {
-            let day_start = now - (i + 1) * day_ms;
             let day_end = now - i * day_ms;
             let date = chrono_date(day_end);
-            let day_logs: Vec<&LogEntry> = logs.iter().filter(|l| l.timestamp >= day_start && l.timestamp < day_end).collect();
-            let count = day_logs.len();
-            let tokens: u64 = day_logs.iter().filter_map(|l| l.total_tokens).sum();
+            let count = stats.daily_counts.get(&date).copied().unwrap_or(0);
+            let tokens = stats.daily_tokens.get(&date).copied().unwrap_or(0);
             trend.push(serde_json::json!({ "date": date, "count": count, "tokens": tokens }));
         }
 
-        let mut year_map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-        let mut year_map_tokens: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-        for log in &logs {
-            let date = chrono_date(log.timestamp);
-            *year_map.entry(date.clone()).or_insert(0) += 1;
-            *year_map_tokens.entry(date).or_insert(0) += log.total_tokens.unwrap_or(0);
-        }
-
-        let by_provider_model: Vec<serde_json::Value> = provider_model_map.iter().map(|(provider, models)| {
+        let by_provider_model: Vec<serde_json::Value> = stats.provider_model_counts.iter().map(|(provider, models)| {
             let models_arr: Vec<serde_json::Value> = models.iter().map(|(model, count)| {
                 serde_json::json!({ "model": model, "count": count })
             }).collect();
             serde_json::json!({
                 "provider": provider,
-                "count": provider_map.get(provider).unwrap_or(&0),
+                "count": stats.provider_counts.get(provider).unwrap_or(&0),
                 "models": models_arr
             })
         }).collect();
 
-        let by_provider_tokens: Vec<serde_json::Value> = provider_tokens_map.iter().map(|(provider, total)| {
+        let by_provider_tokens: Vec<serde_json::Value> = stats.provider_tokens.iter().map(|(provider, total)| {
             serde_json::json!({ "provider": provider, "total": total })
         }).collect();
 
-        let by_model: Vec<serde_json::Value> = model_map.iter().map(|(model, count)| {
-            let tokens = model_tokens_map.get(model);
+        let by_model: Vec<serde_json::Value> = stats.model_counts.iter().map(|(model, count)| {
+            let tokens = stats.model_tokens.get(model);
             serde_json::json!({
                 "model": model,
                 "count": count,
@@ -385,13 +410,13 @@ impl ConfigStore {
         }).collect();
 
         serde_json::json!({
-            "totalRequests": total_requests,
-            "totalTokens": total_tokens,
-            "totalPromptTokens": total_prompt_tokens,
-            "totalCompletionTokens": total_completion_tokens,
+            "totalRequests": stats.total_requests,
+            "totalTokens": stats.total_tokens,
+            "totalPromptTokens": stats.total_prompt_tokens,
+            "totalCompletionTokens": stats.total_completion_tokens,
             "trend": trend,
-            "yearMap": year_map,
-            "yearMapTokens": year_map_tokens,
+            "yearMap": stats.daily_counts,
+            "yearMapTokens": stats.daily_tokens,
             "byProviderModel": by_provider_model,
             "byProviderTokens": by_provider_tokens,
             "byModel": by_model,
