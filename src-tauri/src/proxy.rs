@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 use tauri::{Emitter, Manager};
 use tauri::image::Image;
@@ -143,11 +145,13 @@ impl ProxyManager {
                 format!("Sidecar not found: {}\nTried paths:\n{}", sidecar_name, tried)
             })?;
 
-        let mut child = Command::new(&sidecar_path)
-            .stdin(Stdio::piped())
+        let mut cmd = Command::new(&sidecar_path);
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        let mut child = cmd.spawn()
             .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
 
         // Send init config via stdin
