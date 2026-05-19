@@ -82,6 +82,7 @@ jobs:
 
       - name: Inject version from tag
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json && rm -f src-tauri/tauri.conf.json.bak
