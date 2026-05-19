@@ -80,6 +80,13 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Inject version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json && rm -f src-tauri/tauri.conf.json.bak
+          echo "Injected version: $VERSION"
+
       - name: Build
         run: npm run tauri build -- --target ${{ matrix.target }} ${{ matrix.bundles }}
 
