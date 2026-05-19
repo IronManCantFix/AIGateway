@@ -5,6 +5,8 @@
 const http = require('http')
 const https = require('https')
 const { URL } = require('url')
+const { HttpProxyAgent } = require('http-proxy-agent')
+const { HttpsProxyAgent } = require('https-proxy-agent')
 
 // --- State ---
 
@@ -94,10 +96,42 @@ function flattenBodyMessages(body) {
 
 // --- Forward request to upstream ---
 
-function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat) {
+function createProxyAgent(proxyConfig, isHttps, profileId) {
+  if (!proxyConfig?.enabled || !proxyConfig?.url) {
+    return undefined
+  }
+
+  // 检查当前 profile 是否在排除列表中
+  if (proxyConfig.excludeProfiles?.includes(profileId)) {
+    return undefined
+  }
+
+  try {
+    const proxyUrl = new URL(proxyConfig.url)
+    if (proxyConfig.username) {
+      proxyUrl.username = proxyConfig.username
+    }
+    if (proxyConfig.password) {
+      proxyUrl.password = proxyConfig.password
+    }
+
+    return isHttps
+      ? new HttpsProxyAgent(proxyUrl.toString())
+      : new HttpProxyAgent(proxyUrl.toString())
+  } catch (e) {
+    console.error('Failed to create proxy agent:', e.message)
+    return undefined
+  }
+}
+
+function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId) {
   const parsed = new URL(upstreamUrl)
   const isHttps = parsed.protocol === 'https:'
   const transport = isHttps ? https : http
+
+  // 检查是否需要使用代理
+  const proxyConfig = currentConfig?.settings?.httpProxy
+  const agent = createProxyAgent(proxyConfig, isHttps, profileId)
 
   const bodyStr = JSON.stringify(body)
 
@@ -106,6 +140,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     port: parsed.port || (isHttps ? 443 : 80),
     path: parsed.pathname + parsed.search,
     method: clientReq.method,
+    agent,
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
@@ -1557,7 +1592,8 @@ async function handleApiRequest(req, res) {
   forwardRequest(req, res, upstreamUrl, profile.apiKey, body, sseConverter,
     req._onResponseBody || null,
     responseBodyConverter,
-    source
+    source,
+    profile.id
   )
 }
 
