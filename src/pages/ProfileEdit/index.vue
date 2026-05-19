@@ -56,7 +56,7 @@ async function save() {
   error.value = ''
   if (!form.value.name.trim()) { error.value = '请输入配置名称'; return }
   if (!form.value.baseUrl.trim()) { error.value = '请输入 Base URL'; return }
-  form.value.baseUrl = form.value.baseUrl.replace(/\/+$/, '')
+  form.value.baseUrl = form.value.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
   saving.value = true
   try {
     if (isEdit.value) {
@@ -94,7 +94,8 @@ async function fetchModels() {
   fetchedModels.value = []
   showModelDropdown.value = false
   try {
-    const models = await api.fetchProviderModels(form.value)
+    const cleanForm = { ...form.value, baseUrl: form.value.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '') }
+    const models = await api.fetchProviderModels(cleanForm)
     if (models.length === 0) {
       error.value = '该提供商返回了空的模型列表'
       return
@@ -123,7 +124,8 @@ async function fetchAvailModels() {
   availFetchingModels.value = true
   error.value = ''
   try {
-    const models = await api.fetchProviderModels(form.value)
+    const cleanForm = { ...form.value, baseUrl: form.value.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '') }
+    const models = await api.fetchProviderModels(cleanForm)
     if (models.length === 0) {
       error.value = '该提供商返回了空的模型列表'
       return
@@ -219,6 +221,7 @@ onMounted(() => {
           <div class="field">
             <label>Base URL <span class="req">*</span></label>
             <input v-model="form.baseUrl" type="text" placeholder="如：https://api.openai.com" />
+            <span class="hint">无需添加 /v1，代理会自动拼接</span>
           </div>
 
           <div class="field">
@@ -372,6 +375,7 @@ onMounted(() => {
 
 .req { color: #ef4444; font-weight: 700; }
 .opt { font-weight: 400; color: #94a3b8; font-size: 12px; }
+.hint { font-size: 12px; color: #94a3b8; margin-top: 2px; }
 
 .field input,
 .field select {

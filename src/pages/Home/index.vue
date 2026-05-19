@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, inject, nextTick } from 'vue'
 import { api } from '../../api.js'
 import { listen } from '@tauri-apps/api/event'
+import iconUrl from '../../assets/icon.png'
 
 const navigate = inject('navigate')
 
@@ -270,6 +271,7 @@ onMounted(async () => {
     <!-- Header Card -->
     <div class="header-card" :class="{ running: proxyStatus === 'running', starting: proxyStatus === 'starting' || proxyStatus === 'stopping' }">
       <div class="hc-left">
+        <img :src="iconUrl" class="hc-logo" alt="AIGateway" />
         <span class="status-dot"></span>
         <div class="hc-info">
           <span class="hc-label">{{ proxyStatus === 'running' ? '代理运行中' : proxyStatus === 'starting' ? '正在启动...' : proxyStatus === 'stopping' ? '正在停止...' : '代理已停止' }}</span>
@@ -492,6 +494,7 @@ onMounted(async () => {
   min-width: 0;
   flex: 1;
 }
+.hc-logo { width: 28px; height: 28px; flex-shrink: 0; }
 
 .status-dot {
   width: 9px;

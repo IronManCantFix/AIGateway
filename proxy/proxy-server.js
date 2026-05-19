@@ -1538,7 +1538,8 @@ async function handleApiRequest(req, res) {
     body = bodyConverter(body)
   }
 
-  const upstreamUrl = `${profile.baseUrl}${meta.path}`
+  const baseUrl = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
+  const upstreamUrl = `${baseUrl}${meta.path}`
   const needStream = req.headers.accept?.includes('text/event-stream') || body.stream
   let sseConverter = needStream ? createSSEConverter(source, meta.target) : null
   // Same-format chat_completions: convert reasoning_details / <think> tags

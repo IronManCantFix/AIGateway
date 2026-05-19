@@ -243,7 +243,8 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
     let base_url = profile.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
     let api_key = profile.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
 
-    let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
+    let base_url = base_url.trim_end_matches('/').trim_end_matches("/v1");
+    let url = format!("{}/v1/models", base_url);
 
     let client = reqwest::Client::new();
     let resp = client

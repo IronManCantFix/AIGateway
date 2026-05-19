@@ -2,6 +2,7 @@
 import { ref, onMounted, inject, computed, watch } from 'vue'
 import { api } from '../../api.js'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import iconUrl from '../../assets/icon.png'
 
 const navigate = inject('navigate')
 
@@ -250,14 +251,17 @@ watch([logTotalPages, logPageSize], () => {
 
 const updateInfo = ref(null)
 const checkingUpdate = ref(false)
-const isDev = ref(false)
+const isDev = import.meta.env.DEV
 
 async function checkForUpdates() {
   checkingUpdate.value = true
   try {
     const info = await api.checkForUpdates()
-    isDev.value = info.currentVersion === '1.0.0'
     updateInfo.value = info
+    if (!isDev && info.has_update) {
+      const ok = await showConfirm(`发现新版本 ${info.latest_version}，是否前往下载？`)
+      if (ok) openUrl(info.download_url).catch(e => console.error('openUrl failed:', e))
+    }
   } catch (e) {
     console.error('检查更新失败:', e)
   } finally {
@@ -266,9 +270,12 @@ async function checkForUpdates() {
 }
 
 function openDownloadPage() {
-  if (updateInfo.value?.downloadUrl) {
-    openUrl(updateInfo.value.downloadUrl)
+  if (updateInfo.value?.download_url) {
+    openUrl(updateInfo.value.download_url).catch(e => console.error('openUrl failed:', e))
   }
+}
+function openGithub() {
+  openUrl('https://github.com/IronManCantFix/AIGateway').catch(e => console.error('openUrl failed:', e))
 }
 
 onMounted(async () => { await loadSettings(); await loadStats() })
@@ -399,7 +406,7 @@ onMounted(async () => { await loadSettings(); await loadStats() })
                   <div v-if="heatHover" class="heat-tooltip"
                     :style="{ left: heatHover.left + 'px', top: heatHover.top + 'px' }">
                     <div class="heat-tip-date">{{ heatHover.date }}</div>
-                    <div class="heat-tip-val">{{ heatHover.mode === 'tokens' ? heatHover.count.toLocaleString() + ' tokens' : heatHover.count + ' 次请求' }}</div>
+                    <div class="heat-tip-val">{{ heatHover.mode === 'tokens' ? fmtTok(heatHover.count) + ' tokens' : heatHover.count + ' 次请求' }}</div>
                   </div>
                 </Transition>
               </Teleport>
@@ -610,35 +617,22 @@ onMounted(async () => { await loadSettings(); await loadStats() })
       </div>
     </template>
 
-    <!-- 检查更新 -->
-    <div class="card">
-      <div class="card-body">
-        <div class="update-section">
-          <div class="update-info">
-            <span class="current-version" v-if="updateInfo && !isDev">当前版本: {{ updateInfo.currentVersion }}</span>
-            <span class="current-version" v-else>当前版本: 开发版</span>
-            <template v-if="updateInfo">
-              <span class="latest-version" v-if="isDev">最新正式版: {{ updateInfo.latestVersion }}</span>
-              <span class="latest-version" v-else-if="updateInfo.hasUpdate">最新版本: {{ updateInfo.latestVersion }}</span>
-              <span class="up-to-date" v-else>已是最新版本</span>
-            </template>
-          </div>
-          <div class="update-actions">
-            <button class="check-update-btn" @click="checkForUpdates" :disabled="checkingUpdate">
-              {{ checkingUpdate ? '检查中...' : '检查更新' }}
-            </button>
-            <button class="download-btn" v-if="updateInfo?.hasUpdate && !isDev" @click="openDownloadPage">前往下载</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- 关于 -->
     <div class="about">
+      <img :src="iconUrl" class="about-logo" alt="AIGateway" />
       <p><strong>AIGateway</strong></p>
-      <p>版本 {{ isDev ? '开发版' : (updateInfo?.currentVersion || '...') }}</p>
+      <p class="about-version">
+        {{ isDev ? '开发版' : (updateInfo?.current_version || '...') }}
+        <button class="check-update-btn" @click="checkForUpdates" :disabled="checkingUpdate">
+          {{ checkingUpdate ? '检查中...' : '检查更新' }}
+        </button>
+        <button class="download-btn" v-if="updateInfo?.has_update && !isDev" @click="openDownloadPage">前往下载</button>
+      </p>
+      <p class="about-update-hint" v-if="isDev && updateInfo">最新正式版: {{ updateInfo.latest_version }}</p>
+      <p class="about-update-hint" v-else-if="updateInfo?.has_update">新版本 {{ updateInfo.latest_version }} 可用</p>
+      <p class="about-update-hint up-to-date" v-else-if="updateInfo">已是最新版本</p>
       <p>作者 Claude Code &amp; DeepSeek v4 Pro &amp; mimo-v2.5-pro</p>
-      <p><span class="github-link" @click="openUrl('https://github.com/IronManCantFix/AIGateway')"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg> GitHub</span></p>
+      <p><span class="github-link" @click="openGithub"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg> GitHub</span></p>
     </div>
   </div>
 
@@ -794,20 +788,18 @@ onMounted(async () => { await loadSettings(); await loadStats() })
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 .log-body pre { margin-top: 4px; padding: 8px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 11px; font-family: 'SF Mono',monospace; color: #475569; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
 
-.update-section { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-.update-info { display: flex; flex-direction: column; gap: 4px; }
-.current-version { font-size: 14px; color: #334155; font-weight: 500; }
-.latest-version { font-size: 13px; color: #6366f1; font-weight: 600; }
-.up-to-date { font-size: 13px; color: #22c55e; font-weight: 500; }
-.update-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.check-update-btn { padding: 6px 14px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; font-size: 13px; color: #64748b; cursor: pointer; transition: all .15s; }
+.about-version { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; color: #94a3b8; font-family: 'SF Mono',monospace; }
+.about-update-hint { font-size: 12px; color: #6366f1; margin: -4px 0 0; }
+.about-update-hint.up-to-date { color: #22c55e; }
+.check-update-btn { padding: 3px 10px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; font-size: 12px; color: #64748b; cursor: pointer; transition: all .15s; }
 .check-update-btn:hover:not(:disabled) { background: #f1f5f9; }
 .check-update-btn:disabled { opacity: .6; cursor: default; }
-.download-btn { padding: 6px 14px; border: none; border-radius: 8px; background: #6366f1; font-size: 13px; color: #fff; font-weight: 500; cursor: pointer; transition: all .15s; }
+.download-btn { padding: 3px 10px; border: none; border-radius: 6px; background: #6366f1; font-size: 12px; color: #fff; font-weight: 500; cursor: pointer; transition: all .15s; }
 .download-btn:hover { background: #4f46e5; }
 .about { text-align: center; padding: 32px 16px; color: #94a3b8; font-size: 13px; line-height: 1.8; }
+.about-logo { width: 64px; height: 64px; margin-bottom: 8px; }
 .about strong { color: #64748b; }
-.github-link { display: inline-flex; align-items: center; gap: 5px; color: #6366f1; text-decoration: none; vertical-align: middle; }
+.github-link { display: inline-flex; align-items: center; gap: 5px; color: #6366f1; text-decoration: none; vertical-align: middle; cursor: pointer; }
 .github-link:hover { text-decoration: underline; }
 
 /* Confirm dialog */
