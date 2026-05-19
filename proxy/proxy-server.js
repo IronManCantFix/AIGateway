@@ -13,6 +13,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 let currentConfig = null // { profile: {...}, models: [...] }
 let logEnabled = false
 let initialized = false
+let startupKeepAlive = null
 
 // --- Path → source format mapping ---
 
@@ -1713,10 +1714,14 @@ process.stdin.on('data', (chunk) => {
       initialized = true
       currentConfig = msg.config
       const port = msg.config.settings?.port || 9999
+      logEnabled = !!(msg.config.settings && msg.config.settings.logEnabled)
+      // keepalive timer 防止 stdin 关闭后事件循环退出
+      startupKeepAlive = setInterval(() => {}, 60000)
       server.listen(port, '127.0.0.1', () => {
+        clearInterval(startupKeepAlive)
+        startupKeepAlive = null
         process.stdout.write(JSON.stringify({ type: 'started', port }) + '\n')
       })
-      logEnabled = !!(msg.config.settings && msg.config.settings.logEnabled)
     } else if (msg.type === 'reload') {
       currentConfig = msg.config
       logEnabled = !!(msg.config.settings && msg.config.settings.logEnabled)
@@ -1725,6 +1730,13 @@ process.stdin.on('data', (chunk) => {
       server.close()
       process.exit(0)
     }
+  }
+})
+
+// stdin 关闭时：未初始化则退出，已初始化则继续运行
+process.stdin.on('end', () => {
+  if (!initialized) {
+    process.exit(1)
   }
 })
 
@@ -1738,11 +1750,5 @@ server.on('error', (err) => {
   }
 })
 
-// stdin 关闭后自动关闭 HTTP server 并退出
-process.stdin.on('end', () => {
-  if (!initialized) {
-    try { server.closeAllConnections() } catch {}
-    server.close()
-    process.exit(0)
-  }
-})
+// Tauri sidecar 生命周期由 Rust 端管理（SIGTERM + kill），
+// stdin 关闭通常意味着父进程退出，此时服务器自动跟随退出。
