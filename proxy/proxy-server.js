@@ -2,16 +2,17 @@
 // 代理服务器 Sidecar 入口。通过 stdin/stdout JSON Lines IPC 接收配置。
 // 对外暴露 /v1/chat/completions, /v1/responses, /v1/messages, /v1/models
 
-const http = require('http')
-const https = require('https')
-const { URL } = require('url')
-const { HttpProxyAgent } = require('http-proxy-agent')
-const { HttpsProxyAgent } = require('https-proxy-agent')
+import http from 'http'
+import https from 'https'
+import { URL } from 'url'
+import { HttpProxyAgent } from 'http-proxy-agent'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 
 // --- State ---
 
 let currentConfig = null // { profile: {...}, models: [...] }
 let logEnabled = false
+let initialized = false
 
 // --- Path → source format mapping ---
 
@@ -1709,6 +1710,7 @@ process.stdin.on('data', (chunk) => {
     let msg
     try { msg = JSON.parse(line) } catch { continue }
     if (msg.type === 'init') {
+      initialized = true
       currentConfig = msg.config
       const port = msg.config.settings?.port || 9999
       server.listen(port, '127.0.0.1', () => {
@@ -1738,7 +1740,9 @@ server.on('error', (err) => {
 
 // stdin 关闭后自动关闭 HTTP server 并退出
 process.stdin.on('end', () => {
-  try { server.closeAllConnections() } catch {}
-  server.close()
-  process.exit(0)
+  if (!initialized) {
+    try { server.closeAllConnections() } catch {}
+    server.close()
+    process.exit(0)
+  }
 })
