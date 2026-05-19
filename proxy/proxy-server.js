@@ -1683,6 +1683,10 @@ const server = http.createServer(async (req, res) => {
         req._onResponseBody = (body) => { responseBody = body }
       }
       await handleApiRequest(req, res)
+      // handleApiRequest may have mapped the model — update to reflect actual model sent
+      if (rawBody && rawBody.model && rawBody.model !== model) {
+        model = rawBody.model
+      }
     } else {
       // 尝试读取请求体用于日志记录
       let bodyForLog = null

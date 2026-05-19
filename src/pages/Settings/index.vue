@@ -235,7 +235,12 @@ const filteredLogs = computed(() => {
   const s = logSearch.value
   return logs.value.filter(l => {
     if (s.provider && !(l.provider || '').toLowerCase().includes(s.provider.toLowerCase())) return false
-    if (s.model && !(l.model || '').toLowerCase().includes(s.model.toLowerCase())) return false
+    if (s.model) {
+      const q = s.model.toLowerCase()
+      const matchModel = (l.model || '').toLowerCase().includes(q)
+      const matchOriginal = (l.originalModel || '').toLowerCase().includes(q)
+      if (!matchModel && !matchOriginal) return false
+    }
     if (s.dateFrom) {
       const from = new Date(s.dateFrom).getTime()
       if (l.timestamp < from) return false
@@ -692,7 +697,7 @@ onUnmounted(() => {
               </div>
               <div class="log-meta">
                 <span>{{ l.provider || '-' }}</span>
-                <span v-if="l.modelMapping" class="log-mapping">{{ l.originalModel }} → {{ l.modelMapping }} | {{ l.provider || '-' }}</span>
+                <span v-if="l.originalModel && l.originalModel !== l.model" class="log-mapping">{{ l.originalModel }} → {{ l.model }}</span>
                 <span v-else>{{ l.model }}</span>
                 <span class="log-dur">{{ l.duration }}ms</span>
                 <span class="log-tokens" v-if="l.totalTokens">P {{ fmtTok(l.promptTokens) }} / C {{ fmtTok(l.completionTokens) }} / T {{ fmtTok(l.totalTokens) }}</span>
