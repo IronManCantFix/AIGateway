@@ -85,7 +85,10 @@ function fmtLocal(ts) {
   const d = new Date(ts)
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
 }
-const DAY_MS=86400000; const HEAT_COLORS=['#f1f5f9','#dbeafe','#93c5fd','#3b82f6','#1d4ed8']
+const DAY_MS=86400000
+const HEAT_COLORS_REQ=['#f1f5f9','#dbeafe','#93c5fd','#3b82f6','#1d4ed8']
+const HEAT_COLORS_TOK=['#fefce8','#fef08a','#fbbf24','#f59e0b','#d97706']
+const heatHover = ref(null) // { date, count, mode, left, top }
 
 const heatmapData = computed(() => {
   if (!stats.value||!stats.value.yearMap) return { columns:[], months:[] }
@@ -99,11 +102,12 @@ const heatmapData = computed(() => {
   const end=new Date(today.getTime())
 
   const maxCount=Math.max(1,...Object.values(ym))
+  const colors=isToken?HEAT_COLORS_TOK:HEAT_COLORS_REQ
   const allDays=[]
   for (let d=new Date(start);d<=end;d.setDate(d.getDate()+1)) {
     const ds=fmtLocal(d.getTime()); const cnt=ym[ds]||0
     const lv=cnt===0?0:Math.min(4,Math.ceil((cnt/maxCount)*4))
-    allDays.push({date:ds,count:cnt,color:HEAT_COLORS[lv],level:lv})
+    allDays.push({date:ds,count:cnt,color:colors[lv],level:lv})
   }
 
   const columns=[]
@@ -249,7 +253,9 @@ const checkingUpdate = ref(false)
 async function checkForUpdates() {
   checkingUpdate.value = true
   try {
-    updateInfo.value = await api.checkForUpdates()
+    const info = await api.checkForUpdates()
+    // 开发版本（默认 1.0.0）不显示更新提示
+    updateInfo.value = info.currentVersion === '1.0.0' ? null : info
   } catch (e) {
     console.error('检查更新失败:', e)
   } finally {
@@ -364,13 +370,13 @@ onMounted(async () => { await loadSettings(); await loadStats(); checkForUpdates
         <div class="card-body" v-if="trendTab === 'year'">
           <div class="heat-mode-toggle">
             <button :class="{ active: heatMode === 'requests' }" @click="heatMode = 'requests'">请求数</button>
-            <button :class="{ active: heatMode === 'tokens' }" @click="heatMode = 'tokens'">Token</button>
+            <button :class="{ 'active-tok': heatMode === 'tokens' }" @click="heatMode = 'tokens'">Token</button>
           </div>
           <div class="heatmap-wrap" v-if="heatmapData.columns.length">
             <div class="heatmap-months" :style="{ gridTemplateColumns: 'repeat('+heatmapData.columns.length+', 1fr)' }">
               <span v-for="m in heatmapData.months" :key="m.col" :style="{ gridColumnStart: m.col + 1 }">{{ m.label }}</span>
             </div>
-            <div class="heatmap-body">
+            <div class="heatmap-body" style="position:relative">
               <div class="heatmap-grid" :style="{ gridTemplateColumns: '20px repeat('+heatmapData.columns.length+', 1fr)' }">
                 <span class="heat-wd" style="grid-row:1">一</span>
                 <span class="heat-wd" style="grid-row:2"></span>
@@ -382,13 +388,21 @@ onMounted(async () => { await loadSettings(); await loadStats(); checkForUpdates
                 <template v-for="col in heatmapData.columns" :key="col[0].date">
                   <span v-for="day in col" :key="day.date"
                     class="heat-cell" :style="{ background: day.color }"
-                    :title="day.date + ' — ' + (heatMode === 'tokens' ? day.count.toLocaleString() + ' tokens' : day.count + ' 次')"></span>
+                    @mouseenter="heatHover = (() => { const t = $event.target; const p = t.closest('.heatmap-body'); const r = t.getBoundingClientRect(); const pr = p.getBoundingClientRect(); return { date: day.date, count: day.count, mode: heatMode, left: r.left - pr.left + r.width / 2, top: r.top - pr.top } })()"
+                    @mouseleave="heatHover = null"></span>
                 </template>
               </div>
+              <Transition name="fade">
+                <div v-if="heatHover" class="heat-tooltip"
+                  :style="{ left: heatHover.left + 'px', top: heatHover.top + 'px' }">
+                  <div class="heat-tip-date">{{ heatHover.date }}</div>
+                  <div class="heat-tip-val">{{ heatHover.mode === 'tokens' ? heatHover.count.toLocaleString() + ' tokens' : heatHover.count + ' 次请求' }}</div>
+                </div>
+              </Transition>
             </div>
             <div class="heatmap-legend">
               <span>少</span>
-              <span v-for="c in HEAT_COLORS" :key="c" class="legend-cell" :style="{ background: c }"></span>
+              <span v-for="c in (heatMode === 'tokens' ? HEAT_COLORS_TOK : HEAT_COLORS_REQ)" :key="c" class="legend-cell" :style="{ background: c }"></span>
               <span>多</span>
             </div>
           </div>
@@ -614,7 +628,7 @@ onMounted(async () => { await loadSettings(); await loadStats(); checkForUpdates
     <!-- 关于 -->
     <div class="about">
       <p><strong>AIGateway</strong></p>
-      <p>版本 {{ updateInfo?.currentVersion || '...' }}</p>
+      <p>版本 {{ updateInfo?.currentVersion || '开发版' }}</p>
       <p>作者 Claude Code &amp; DeepSeek v4 Pro &amp; mimo-v2.5-pro</p>
       <p><a class="github-link" href="https://github.com/IronManCantFix/AIGateway" target="_blank"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg> GitHub</a></p>
     </div>
@@ -688,6 +702,11 @@ onMounted(async () => { await loadSettings(); await loadStats(); checkForUpdates
 .heat-mode-toggle { display: flex; gap: 4px; margin-bottom: 12px; }
 .heat-mode-toggle button { padding: 4px 12px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; font-size: 12px; color: #64748b; cursor: pointer; transition: all .15s; }
 .heat-mode-toggle button.active { background: #6366f1; color: #fff; border-color: #6366f1; }
+.heat-mode-toggle button.active-tok { background: #f59e0b; color: #fff; border-color: #f59e0b; }
+.heat-tooltip { position: absolute; transform: translate(-50%, -110%); background: #1e293b; color: #e2e8f0; padding: 6px 10px; border-radius: 6px; font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+.heat-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 4px solid transparent; border-top-color: #1e293b; }
+.heat-tip-date { color: #94a3b8; font-size: 10px; margin-bottom: 2px; }
+.heat-tip-val { font-weight: 600; font-family: 'SF Mono',monospace; }
 
 .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
 .stat-row + .stat-row { border-top: 1px solid #f1f5f9; }
