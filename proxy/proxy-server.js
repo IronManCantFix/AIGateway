@@ -1522,6 +1522,8 @@ async function handleApiRequest(req, res) {
       if (body.model.toLowerCase() === rule.from.toLowerCase()) {
         body.model = rule.to
         modelMappingInfo = rule.to
+        req._originalModel = originalModel
+        req._modelMapping = modelMappingInfo
         console.log(`[Model Mapping] ${rule.from} → ${rule.to} (matched: ${body.model})`)
         break
       }
@@ -1582,8 +1584,6 @@ async function handleApiRequest(req, res) {
   const baseUrl = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
   const upstreamUrl = `${baseUrl}${meta.path}`
   req._upstreamUrl = upstreamUrl
-  req._modelMapping = modelMappingInfo
-  req._originalModel = originalModel
   const needStream = req.headers.accept?.includes('text/event-stream') || body.stream
   let sseConverter = needStream ? createSSEConverter(source, meta.target) : null
   // Same-format chat_completions: convert reasoning_details / <think> tags
@@ -1683,9 +1683,9 @@ const server = http.createServer(async (req, res) => {
         req._onResponseBody = (body) => { responseBody = body }
       }
       await handleApiRequest(req, res)
-      // handleApiRequest may have mapped the model — update to reflect actual model sent
-      if (rawBody && rawBody.model && rawBody.model !== model) {
-        model = rawBody.model
+      // handleApiRequest may have mapped the model — use mapped name for log
+      if (req._modelMapping) {
+        model = req._modelMapping
       }
     } else {
       // 尝试读取请求体用于日志记录
