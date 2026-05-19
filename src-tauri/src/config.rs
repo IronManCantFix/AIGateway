@@ -97,6 +97,14 @@ pub struct LogEntry {
     pub completion_tokens: Option<u64>,
     #[serde(rename = "totalTokens", default)]
     pub total_tokens: Option<u64>,
+    #[serde(rename = "upstreamUrl", default)]
+    pub upstream_url: Option<String>,
+    #[serde(default)]
+    pub proxy: Option<bool>,
+    #[serde(rename = "modelMapping", default)]
+    pub model_mapping: Option<String>,
+    #[serde(rename = "originalModel", default)]
+    pub original_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

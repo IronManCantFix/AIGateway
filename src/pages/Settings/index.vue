@@ -106,6 +106,13 @@ function endpointLabel(ep) {
   const m = { '/v1/chat/completions':'Chat','/v1/responses':'Responses','/v1/messages':'Messages','/v1/models':'Models' }
   return m[ep] || ep
 }
+function shortUrl(url) {
+  if (!url) return ''
+  try {
+    const u = new URL(url)
+    return u.hostname + u.pathname
+  } catch { return url }
+}
 function fmtTime(ts) {
   const d = new Date(ts)
   const hh = String(d.getHours()).padStart(2, '0')
@@ -678,12 +685,15 @@ onUnmounted(() => {
             <div class="log-item" v-for="l in pagedLogs" :key="l.timestamp">
               <div class="log-top">
                 <span class="log-badge" :class="statusLabel(l.statusCode)">{{ l.statusCode }}</span>
+                <span class="log-badge log-proxy" v-if="l.proxy">PROXY</span>
                 <span class="log-ep">{{ endpointLabel(l.endpoint) }}</span>
+                <span class="log-upstream" v-if="l.upstreamUrl" :title="l.upstreamUrl">{{ shortUrl(l.upstreamUrl) }}</span>
                 <span class="log-time">{{ fmtTime(l.timestamp) }}</span>
               </div>
               <div class="log-meta">
                 <span>{{ l.provider || '-' }}</span>
-                <span>{{ l.model }}</span>
+                <span v-if="l.modelMapping" class="log-mapping">{{ l.originalModel || '?' }} → {{ l.modelMapping }} | {{ l.provider || '-' }}</span>
+                <span v-else>{{ l.model }}</span>
                 <span class="log-dur">{{ l.duration }}ms</span>
                 <span class="log-tokens" v-if="l.totalTokens">P {{ fmtTok(l.promptTokens) }} / C {{ fmtTok(l.completionTokens) }} / T {{ fmtTok(l.totalTokens) }}</span>
               </div>
@@ -870,11 +880,14 @@ onUnmounted(() => {
 .log-badge.success { background: #dcfce7; color: #16a34a; }
 .log-badge.warn { background: #fef9c3; color: #ca8a04; }
 .log-badge.error { background: #fee2e2; color: #dc2626; }
+.log-proxy { background: #dbeafe; color: #2563eb; font-size: 10px; }
+.log-upstream { font-size: 11px; color: #94a3b8; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-ep { font-size: 13px; color: #334155; }
 .log-time { font-size: 11px; color: #94a3b8; margin-left: auto; }
 .log-meta { display: flex; gap: 12px; margin-top: 3px; font-size: 12px; color: #64748b; }
 .log-dur { font-family: 'SF Mono',monospace; }
 .log-tokens { font-family: 'SF Mono',monospace; color: #6366f1; }
+.log-mapping { font-family: 'SF Mono',monospace; color: #8b5cf6; font-size: 11px; }
 .log-err { font-size: 12px; color: #dc2626; margin-top: 3px; }
 .divider { height: 1px; background: #e2e8f0; margin: 8px 16px; }
 .log-detail { margin-top: 6px; }

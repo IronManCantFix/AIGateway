@@ -134,6 +134,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
   // 检查是否需要使用代理
   const proxyConfig = currentConfig?.settings?.httpProxy
   const agent = createProxyAgent(proxyConfig, isHttps, profileId)
+  clientReq._usedProxy = !!agent
 
   const bodyStr = JSON.stringify(body)
 
@@ -1514,10 +1515,13 @@ async function handleApiRequest(req, res) {
   body = flattenBodyMessages(body)
 
   // Apply model mapping if enabled
+  let originalModel = body.model
+  let modelMappingInfo = null
   if (currentConfig.modelMappings && currentConfig.modelMappings.enabled && body.model) {
     for (const rule of currentConfig.modelMappings.rules) {
       if (body.model.toLowerCase() === rule.from.toLowerCase()) {
         body.model = rule.to
+        modelMappingInfo = `${rule.from} → ${rule.to}`
         console.log(`[Model Mapping] ${rule.from} → ${rule.to} (matched: ${body.model})`)
         break
       }
@@ -1577,6 +1581,9 @@ async function handleApiRequest(req, res) {
 
   const baseUrl = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
   const upstreamUrl = `${baseUrl}${meta.path}`
+  req._upstreamUrl = upstreamUrl
+  req._modelMapping = modelMappingInfo
+  req._originalModel = originalModel
   const needStream = req.headers.accept?.includes('text/event-stream') || body.stream
   let sseConverter = needStream ? createSSEConverter(source, meta.target) : null
   // Same-format chat_completions: convert reasoning_details / <think> tags
@@ -1601,7 +1608,7 @@ async function handleApiRequest(req, res) {
 
 // --- HTTP Server ---
 
-function logRequest(endpoint, model, statusCode, duration, error, requestBody, responseBody, providerName) {
+function logRequest(endpoint, model, statusCode, duration, error, requestBody, responseBody, providerName, extra) {
   const data = {
     timestamp: Date.now(),
     endpoint,
@@ -1610,6 +1617,12 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
     statusCode,
     duration,
     error: error || null
+  }
+  if (extra) {
+    if (extra.upstreamUrl) data.upstreamUrl = extra.upstreamUrl
+    if (extra.usedProxy) data.proxy = true
+    if (extra.modelMapping) data.modelMapping = extra.modelMapping
+    if (extra.originalModel) data.originalModel = extra.originalModel
   }
   // 仅当开启详细日志时才记录请求/响应体
   if (logEnabled) {
@@ -1689,12 +1702,14 @@ const server = http.createServer(async (req, res) => {
       responseBody = errorBody
     }
     model = model || '-'
-    logRequest(endpoint, model, res.statusCode || 500, Date.now() - startTime, err.message, rawBody, responseBody, req._providerName)
+    const errExtra = { upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel }
+    logRequest(endpoint, model, res.statusCode || 500, Date.now() - startTime, err.message, rawBody, responseBody, req._providerName, errExtra)
     return
   }
 
   res.on('finish', () => {
-    logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName)
+    const extra = { upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel }
+    logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra)
   })
 })
 
