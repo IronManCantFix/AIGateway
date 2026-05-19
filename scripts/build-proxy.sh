@@ -10,9 +10,10 @@ mkdir -p "$OUT_DIR"
 
 echo "Building proxy-server for all platforms..."
 
-# macOS ARM
+# macOS ARM (also copy as bare "proxy-server" for Tauri dev mode)
 echo "  → bun-darwin-arm64"
 cd "$PROXY_DIR" && bun build --compile --target=bun-darwin-arm64 proxy-server.js --outfile "$OUT_DIR/proxy-server-aarch64-apple-darwin"
+cp "$OUT_DIR/proxy-server-aarch64-apple-darwin" "$OUT_DIR/proxy-server"
 
 # macOS Intel
 echo "  → bun-darwin-x64"

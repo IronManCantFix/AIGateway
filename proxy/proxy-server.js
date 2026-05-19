@@ -2,14 +2,18 @@
 // 代理服务器 Sidecar 入口。通过 stdin/stdout JSON Lines IPC 接收配置。
 // 对外暴露 /v1/chat/completions, /v1/responses, /v1/messages, /v1/models
 
-const http = require('http')
-const https = require('https')
-const { URL } = require('url')
+import http from 'http'
+import https from 'https'
+import { URL } from 'url'
+import { HttpProxyAgent } from 'http-proxy-agent'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 
 // --- State ---
 
 let currentConfig = null // { profile: {...}, models: [...] }
 let logEnabled = false
+let initialized = false
+let startupKeepAlive = null
 
 // --- Path → source format mapping ---
 
@@ -94,10 +98,43 @@ function flattenBodyMessages(body) {
 
 // --- Forward request to upstream ---
 
-function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat) {
+function createProxyAgent(proxyConfig, isHttps, profileId) {
+  if (!proxyConfig?.enabled || !proxyConfig?.url) {
+    return undefined
+  }
+
+  // 检查当前 profile 是否在排除列表中
+  if (proxyConfig.excludeProfiles?.includes(profileId)) {
+    return undefined
+  }
+
+  try {
+    const proxyUrl = new URL(proxyConfig.url)
+    if (proxyConfig.username) {
+      proxyUrl.username = proxyConfig.username
+    }
+    if (proxyConfig.password) {
+      proxyUrl.password = proxyConfig.password
+    }
+
+    return isHttps
+      ? new HttpsProxyAgent(proxyUrl.toString())
+      : new HttpProxyAgent(proxyUrl.toString())
+  } catch (e) {
+    console.error('Failed to create proxy agent:', e.message)
+    return undefined
+  }
+}
+
+function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId) {
   const parsed = new URL(upstreamUrl)
   const isHttps = parsed.protocol === 'https:'
   const transport = isHttps ? https : http
+
+  // 检查是否需要使用代理
+  const proxyConfig = currentConfig?.settings?.httpProxy
+  const agent = createProxyAgent(proxyConfig, isHttps, profileId)
+  clientReq._usedProxy = !!agent
 
   const bodyStr = JSON.stringify(body)
 
@@ -106,6 +143,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     port: parsed.port || (isHttps ? 443 : 80),
     path: parsed.pathname + parsed.search,
     method: clientReq.method,
+    agent,
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
@@ -1477,10 +1515,15 @@ async function handleApiRequest(req, res) {
   body = flattenBodyMessages(body)
 
   // Apply model mapping if enabled
+  let originalModel = body.model
+  let modelMappingInfo = null
   if (currentConfig.modelMappings && currentConfig.modelMappings.enabled && body.model) {
     for (const rule of currentConfig.modelMappings.rules) {
       if (body.model.toLowerCase() === rule.from.toLowerCase()) {
         body.model = rule.to
+        modelMappingInfo = rule.to
+        req._originalModel = originalModel
+        req._modelMapping = modelMappingInfo
         console.log(`[Model Mapping] ${rule.from} → ${rule.to} (matched: ${body.model})`)
         break
       }
@@ -1540,6 +1583,7 @@ async function handleApiRequest(req, res) {
 
   const baseUrl = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
   const upstreamUrl = `${baseUrl}${meta.path}`
+  req._upstreamUrl = upstreamUrl
   const needStream = req.headers.accept?.includes('text/event-stream') || body.stream
   let sseConverter = needStream ? createSSEConverter(source, meta.target) : null
   // Same-format chat_completions: convert reasoning_details / <think> tags
@@ -1557,13 +1601,14 @@ async function handleApiRequest(req, res) {
   forwardRequest(req, res, upstreamUrl, profile.apiKey, body, sseConverter,
     req._onResponseBody || null,
     responseBodyConverter,
-    source
+    source,
+    profile.id
   )
 }
 
 // --- HTTP Server ---
 
-function logRequest(endpoint, model, statusCode, duration, error, requestBody, responseBody, providerName) {
+function logRequest(endpoint, model, statusCode, duration, error, requestBody, responseBody, providerName, extra) {
   const data = {
     timestamp: Date.now(),
     endpoint,
@@ -1572,6 +1617,12 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
     statusCode,
     duration,
     error: error || null
+  }
+  if (extra) {
+    if (extra.upstreamUrl) data.upstreamUrl = extra.upstreamUrl
+    if (extra.usedProxy) data.proxy = true
+    if (extra.modelMapping) data.modelMapping = extra.modelMapping
+    if (extra.originalModel) data.originalModel = extra.originalModel
   }
   // 仅当开启详细日志时才记录请求/响应体
   if (logEnabled) {
@@ -1632,6 +1683,10 @@ const server = http.createServer(async (req, res) => {
         req._onResponseBody = (body) => { responseBody = body }
       }
       await handleApiRequest(req, res)
+      // handleApiRequest may have mapped the model — use mapped name for log
+      if (req._modelMapping) {
+        model = req._modelMapping
+      }
     } else {
       // 尝试读取请求体用于日志记录
       let bodyForLog = null
@@ -1651,12 +1706,14 @@ const server = http.createServer(async (req, res) => {
       responseBody = errorBody
     }
     model = model || '-'
-    logRequest(endpoint, model, res.statusCode || 500, Date.now() - startTime, err.message, rawBody, responseBody, req._providerName)
+    const errExtra = { upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel }
+    logRequest(endpoint, model, res.statusCode || 500, Date.now() - startTime, err.message, rawBody, responseBody, req._providerName, errExtra)
     return
   }
 
   res.on('finish', () => {
-    logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName)
+    const extra = { upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel }
+    logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra)
   })
 })
 
@@ -1673,12 +1730,21 @@ process.stdin.on('data', (chunk) => {
     let msg
     try { msg = JSON.parse(line) } catch { continue }
     if (msg.type === 'init') {
+      initialized = true
       currentConfig = msg.config
       const port = msg.config.settings?.port || 9999
+      logEnabled = !!(msg.config.settings && msg.config.settings.logEnabled)
+      // keepalive timer: bun compile 会优化掉空回调的 timer
+      // 使用有 I/O 副作用的回调防止被优化
+      startupKeepAlive = setInterval(() => {
+        // noop with side-effect: touch a global to prevent dead-code elimination
+        globalThis.__proxy_keepalive = Date.now()
+      }, 60000)
       server.listen(port, '127.0.0.1', () => {
+        clearInterval(startupKeepAlive)
+        startupKeepAlive = null
         process.stdout.write(JSON.stringify({ type: 'started', port }) + '\n')
       })
-      logEnabled = !!(msg.config.settings && msg.config.settings.logEnabled)
     } else if (msg.type === 'reload') {
       currentConfig = msg.config
       logEnabled = !!(msg.config.settings && msg.config.settings.logEnabled)
@@ -1687,6 +1753,13 @@ process.stdin.on('data', (chunk) => {
       server.close()
       process.exit(0)
     }
+  }
+})
+
+// stdin 关闭时：未初始化则退出，已初始化则继续运行
+process.stdin.on('end', () => {
+  if (!initialized) {
+    process.exit(1)
   }
 })
 
@@ -1700,9 +1773,5 @@ server.on('error', (err) => {
   }
 })
 
-// stdin 关闭后自动关闭 HTTP server 并退出
-process.stdin.on('end', () => {
-  try { server.closeAllConnections() } catch {}
-  server.close()
-  process.exit(0)
-})
+// Tauri sidecar 生命周期由 Rust 端管理（SIGTERM + kill），
+// stdin 关闭通常意味着父进程退出，此时服务器自动跟随退出。

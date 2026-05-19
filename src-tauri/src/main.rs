@@ -12,7 +12,7 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use commands::AppState;
-use config::ConfigStore;
+use config::{ConfigStore, HttpProxyConfig};
 use proxy::ProxyManager;
 
 fn build_tray_menu(app: &tauri::AppHandle, config_store: &ConfigStore, proxy_manager: &ProxyManager) -> tauri::menu::Menu<tauri::Wry> {
@@ -52,6 +52,20 @@ fn build_tray_menu(app: &tauri::AppHandle, config_store: &ConfigStore, proxy_man
         .checked(settings.auto_start)
         .build(app)
         .unwrap();
+
+    // HTTP 代理开关
+    let http_proxy_enabled = settings.http_proxy
+        .as_ref()
+        .map(|p| p.enabled)
+        .unwrap_or(false);
+
+    let http_proxy_toggle = CheckMenuItemBuilder::with_id(
+        "toggle_http_proxy",
+        "HTTP 代理"
+    )
+    .checked(http_proxy_enabled)
+    .build(app)
+    .unwrap();
 
     // 提供商子菜单
     let mut profile_items: Vec<tauri::menu::CheckMenuItem<tauri::Wry>> = Vec::new();
@@ -117,6 +131,7 @@ fn build_tray_menu(app: &tauri::AppHandle, config_store: &ConfigStore, proxy_man
         .separator()
         .item(&proxy_toggle)
         .item(&autostart_toggle)
+        .item(&http_proxy_toggle)
         .separator()
         .item(&profiles_submenu)
         .item(&models_submenu)
@@ -186,6 +201,29 @@ fn main() {
                             }
                             // Rebuild menu to update state
                             rebuild_tray_menu(app, &state);
+                        }
+                        "toggle_http_proxy" => {
+                            let mut settings = state.config.get_settings();
+                            if let Some(ref mut proxy) = settings.http_proxy {
+                                proxy.enabled = !proxy.enabled;
+                            } else {
+                                settings.http_proxy = Some(HttpProxyConfig {
+                                    enabled: true,
+                                    url: String::new(),
+                                    username: None,
+                                    password: None,
+                                    exclude_profiles: vec![],
+                                });
+                            }
+                            state.config.set_settings(&settings).ok();
+                            // 如果代理正在运行，重新加载配置
+                            if state.proxy.get_status().status == "running" {
+                                state.proxy.reload().ok();
+                            }
+                            // 重建菜单
+                            rebuild_tray_menu(app, &state);
+                            // 通知前端刷新
+                            app.emit("proxy-settings-changed", ()).ok();
                         }
                         "address" => {
                             let status = state.proxy.get_status();

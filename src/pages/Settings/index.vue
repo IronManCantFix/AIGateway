@@ -1,15 +1,27 @@
 <script setup>
-import { ref, onMounted, inject, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, inject, computed, watch } from 'vue'
+import { listen } from '@tauri-apps/api/event'
 import { api } from '../../api.js'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import iconUrl from '../../assets/icon.png'
 
 const navigate = inject('navigate')
+let unlistenProxySettings = null
 
 const port = ref(9999)
 const autoStart = ref(false)
 const logEnabled = ref(false)
 const saved = ref(false)
+
+const httpProxyEnabled = ref(false)
+const httpProxyUrl = ref('')
+const httpProxyUsername = ref('')
+const httpProxyPassword = ref('')
+const httpProxyExcludeProfiles = ref([])
+const showProxyAuth = ref(false)
+
+// 提供商列表
+const profiles = ref([])
 
 const stats = ref(null)
 const logs = ref([])
@@ -36,12 +48,40 @@ async function loadSettings() {
   port.value = s.port || 9999
   autoStart.value = s.autoStart || false
   logEnabled.value = await api.getLogEnabled()
+
+  // 加载代理配置
+  if (s.httpProxy) {
+    httpProxyEnabled.value = s.httpProxy.enabled || false
+    httpProxyUrl.value = s.httpProxy.url || ''
+    httpProxyUsername.value = s.httpProxy.username || ''
+    httpProxyPassword.value = s.httpProxy.password || ''
+    httpProxyExcludeProfiles.value = s.httpProxy.excludeProfiles || []
+  }
 }
+async function loadProfiles() {
+  profiles.value = await api.getProfiles()
+}
+
 async function saveSettings() {
   const n = parseInt(port.value, 10)
   if (isNaN(n) || n < 1 || n > 65535) { port.value = 9999; return }
-  await api.setSettings({ port: n, autoStart: autoStart.value, logEnabled: logEnabled.value })
+  await api.setSettings({
+    port: n,
+    autoStart: autoStart.value,
+    logEnabled: logEnabled.value,
+    httpProxy: {
+      enabled: httpProxyEnabled.value,
+      url: httpProxyUrl.value,
+      username: httpProxyUsername.value || null,
+      password: httpProxyPassword.value || null,
+      excludeProfiles: httpProxyExcludeProfiles.value
+    }
+  })
   saved.value = true; setTimeout(() => saved.value = false, 1500)
+}
+
+async function saveProxySettings() {
+  await saveSettings()
 }
 async function toggleLogging() { await api.setLogEnabled(logEnabled.value) }
 async function loadStats() { stats.value = await api.getStats(); logs.value = await api.getLogs(1000) }
@@ -65,6 +105,13 @@ function statusLabel(c) {
 function endpointLabel(ep) {
   const m = { '/v1/chat/completions':'Chat','/v1/responses':'Responses','/v1/messages':'Messages','/v1/models':'Models' }
   return m[ep] || ep
+}
+function shortUrl(url) {
+  if (!url) return ''
+  try {
+    const u = new URL(url)
+    return u.hostname + u.pathname
+  } catch { return url }
 }
 function fmtTime(ts) {
   const d = new Date(ts)
@@ -188,7 +235,12 @@ const filteredLogs = computed(() => {
   const s = logSearch.value
   return logs.value.filter(l => {
     if (s.provider && !(l.provider || '').toLowerCase().includes(s.provider.toLowerCase())) return false
-    if (s.model && !(l.model || '').toLowerCase().includes(s.model.toLowerCase())) return false
+    if (s.model) {
+      const q = s.model.toLowerCase()
+      const matchModel = (l.model || '').toLowerCase().includes(q)
+      const matchOriginal = (l.originalModel || '').toLowerCase().includes(q)
+      if (!matchModel && !matchOriginal) return false
+    }
     if (s.dateFrom) {
       const from = new Date(s.dateFrom).getTime()
       if (l.timestamp < from) return false
@@ -281,8 +333,18 @@ function openGithub() {
 
 onMounted(async () => {
   await loadSettings()
+  await loadProfiles()
   await loadStats()
   currentVersion.value = await api.getAppVersion()
+
+  // 监听托盘菜单的代理设置变化
+  unlistenProxySettings = await listen('proxy-settings-changed', async () => {
+    await loadSettings()
+  })
+})
+
+onUnmounted(() => {
+  unlistenProxySettings?.()
 })
 </script>
 
@@ -306,6 +368,52 @@ onMounted(async () => {
         <div class="field-row">
           <input v-model.number="port" type="number" min="1" max="65535" @change="saveSettings" />
           <span class="saved" v-if="saved">&check; 已保存</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- HTTP 代理 -->
+    <div class="card">
+      <div class="card-header"><h3>HTTP 代理</h3></div>
+      <div class="card-body">
+        <label class="check-field">
+          <input type="checkbox" v-model="httpProxyEnabled" @change="saveProxySettings" />
+          <span>启用 HTTP 代理</span>
+        </label>
+
+        <div class="proxy-config" v-if="httpProxyEnabled">
+          <div class="proxy-field">
+            <label>代理地址</label>
+            <input v-model="httpProxyUrl" placeholder="http://127.0.0.1:7890" @change="saveProxySettings" />
+          </div>
+
+          <div class="proxy-auth-toggle" @click="showProxyAuth = !showProxyAuth">
+            {{ showProxyAuth ? '隐藏认证信息' : '显示认证信息（可选）' }}
+          </div>
+
+          <div class="proxy-auth" v-if="showProxyAuth">
+            <div class="proxy-field">
+              <label>用户名</label>
+              <input v-model="httpProxyUsername" placeholder="可选" @change="saveProxySettings" />
+            </div>
+            <div class="proxy-field">
+              <label>密码</label>
+              <input v-model="httpProxyPassword" type="password" placeholder="可选" @change="saveProxySettings" />
+            </div>
+          </div>
+
+          <div class="proxy-exclude" v-if="profiles.length > 0">
+            <label>不需要代理的提供商</label>
+            <div class="exclude-list">
+              <label v-for="p in profiles" :key="p.id" class="check-field exclude-item">
+                <input type="checkbox"
+                  :value="p.id"
+                  v-model="httpProxyExcludeProfiles"
+                  @change="saveProxySettings" />
+                <span>{{ p.name }}</span>
+              </label>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -582,12 +690,15 @@ onMounted(async () => {
             <div class="log-item" v-for="l in pagedLogs" :key="l.timestamp">
               <div class="log-top">
                 <span class="log-badge" :class="statusLabel(l.statusCode)">{{ l.statusCode }}</span>
+                <span class="log-badge log-proxy" v-if="l.proxy">PROXY</span>
                 <span class="log-ep">{{ endpointLabel(l.endpoint) }}</span>
+                <span class="log-upstream" v-if="l.upstreamUrl" :title="l.upstreamUrl">{{ shortUrl(l.upstreamUrl) }}</span>
                 <span class="log-time">{{ fmtTime(l.timestamp) }}</span>
               </div>
               <div class="log-meta">
                 <span>{{ l.provider || '-' }}</span>
-                <span>{{ l.model }}</span>
+                <span v-if="l.originalModel && l.originalModel !== l.model" class="log-mapping">{{ l.originalModel }} → {{ l.model }}</span>
+                <span v-else>{{ l.model }}</span>
                 <span class="log-dur">{{ l.duration }}ms</span>
                 <span class="log-tokens" v-if="l.totalTokens">P {{ fmtTok(l.promptTokens) }} / C {{ fmtTok(l.completionTokens) }} / T {{ fmtTok(l.totalTokens) }}</span>
               </div>
@@ -774,11 +885,14 @@ onMounted(async () => {
 .log-badge.success { background: #dcfce7; color: #16a34a; }
 .log-badge.warn { background: #fef9c3; color: #ca8a04; }
 .log-badge.error { background: #fee2e2; color: #dc2626; }
+.log-proxy { background: #dbeafe; color: #2563eb; font-size: 10px; }
+.log-upstream { font-size: 11px; color: #94a3b8; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-ep { font-size: 13px; color: #334155; }
 .log-time { font-size: 11px; color: #94a3b8; margin-left: auto; }
 .log-meta { display: flex; gap: 12px; margin-top: 3px; font-size: 12px; color: #64748b; }
 .log-dur { font-family: 'SF Mono',monospace; }
 .log-tokens { font-family: 'SF Mono',monospace; color: #6366f1; }
+.log-mapping { font-family: 'SF Mono',monospace; color: #8b5cf6; font-size: 11px; }
 .log-err { font-size: 12px; color: #dc2626; margin-top: 3px; }
 .divider { height: 1px; background: #e2e8f0; margin: 8px 16px; }
 .log-detail { margin-top: 6px; }
@@ -792,6 +906,19 @@ onMounted(async () => {
 .fade-leave-active { transition: all .15s ease-in; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 .log-body pre { margin-top: 4px; padding: 8px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 11px; font-family: 'SF Mono',monospace; color: #475569; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+
+/* HTTP Proxy */
+.proxy-config { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
+.proxy-field { margin-bottom: 12px; }
+.proxy-field label { display: block; font-size: 13px; font-weight: 600; color: #64748b; margin-bottom: 6px; }
+.proxy-field input { width: 100%; padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 14px; outline: none; transition: all .15s; background: #f8fafc; }
+.proxy-field input:focus { border-color: #a5b4fc; background: #fff; box-shadow: 0 0 0 3px rgba(165,180,252,.15); }
+.proxy-auth-toggle { font-size: 13px; color: #6366f1; cursor: pointer; margin-bottom: 12px; user-select: none; }
+.proxy-auth-toggle:hover { text-decoration: underline; }
+.proxy-exclude { margin-top: 16px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
+.proxy-exclude > label { display: block; font-size: 13px; font-weight: 600; color: #64748b; margin-bottom: 10px; }
+.exclude-list { display: flex; flex-direction: column; gap: 8px; }
+.exclude-item { font-size: 13px; }
 
 .about-version { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; color: #94a3b8; font-family: 'SF Mono',monospace; }
 .about-update-hint { font-size: 12px; color: #6366f1; margin: -4px 0 0; }
