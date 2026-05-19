@@ -8,6 +8,9 @@ OUT_DIR="$PROJECT_DIR/src-tauri/binaries"
 
 mkdir -p "$OUT_DIR"
 
+echo "Installing proxy dependencies..."
+cd "$PROXY_DIR" && bun install
+
 echo "Building proxy-server for all platforms..."
 
 # macOS ARM (also copy as bare "proxy-server" for Tauri dev mode)
