@@ -49,6 +49,9 @@ export const api = {
   // --- Fetch provider models ---
   fetchProviderModels: (profile) => invoke('fetch_provider_models', { profile }),
 
+  // --- Update check ---
+  checkForUpdates: () => invoke('check_for_updates'),
+
   // --- Events ---
   onStatusChange: (fn) => {
     listen('proxy-status-changed', (event) => fn(event.payload))
