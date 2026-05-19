@@ -201,6 +201,7 @@ SSE 流式响应也会实时转换。
 |---------------|-----------|-------------------------|---|
 | Codex App     | MiMo      | `openai-responses`      | ✅ |
 | Codex App     | DeepSeek  | `openai-responses`      | ✅ |
+| Codex App     | GLM       | `openai-responses`      | ✅ |
 | Cherry Studio | MiniMax   | `openai-chat、Anthropic` | ✅ |
 | Cherry Studio | MiMo      | `openai-chat、Anthropic` | ✅ |
 | Cherry Studio | DeepSeek  | `openai-chat、Anthropic` | ✅ |

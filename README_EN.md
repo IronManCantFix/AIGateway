@@ -201,6 +201,7 @@ The following clients have been tested with Codex App, Cherry Studio, and Claude
 |---|---|---|---|
 | Codex App | MiMo | `openai-responses` | ✅ |
 | Codex App | DeepSeek | `openai-responses` | ✅ |
+| Codex App | GLM | `openai-responses` | ✅ |
 | Cherry Studio | MiniMax | `openai-chat, Anthropic` | ✅ |
 | Cherry Studio | MiMo | `openai-chat, Anthropic` | ✅ |
 | Cherry Studio | DeepSeek | `openai-chat, Anthropic` | ✅ |
