@@ -131,6 +131,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // On macOS, hide dock icon to run as menu bar only app
             #[cfg(target_os = "macos")]

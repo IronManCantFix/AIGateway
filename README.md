@@ -221,6 +221,16 @@ npm run proxy:build   # 编译 Sidecar（所有平台）
 npm run tauri build   # 构建应用
 ```
 
+### 生成应用图标
+
+准备一张 1024x1024 的 PNG 图片，然后运行：
+
+```bash
+npx tauri icon <path-to-your-icon.png>
+```
+
+该命令会自动生成所有平台（macOS、Windows、Linux、iOS）所需的图标尺寸，输出到 `src-tauri/icons/` 目录。
+
 ### 何时需要重新编译代理服务器
 
 代理服务器（`proxy/proxy-server.js`）会被 `bun compile` 编译为独立的二进制文件（Sidecar），嵌入到应用中运行。因此，**修改 `proxy/proxy-server.js` 后必须重新编译才能生效**。
