@@ -360,6 +360,52 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- HTTP 代理 -->
+    <div class="card">
+      <div class="card-header"><h3>HTTP 代理</h3></div>
+      <div class="card-body">
+        <label class="check-field">
+          <input type="checkbox" v-model="httpProxyEnabled" @change="saveProxySettings" />
+          <span>启用 HTTP 代理</span>
+        </label>
+
+        <div class="proxy-config" v-if="httpProxyEnabled">
+          <div class="proxy-field">
+            <label>代理地址</label>
+            <input v-model="httpProxyUrl" placeholder="http://127.0.0.1:7890" @change="saveProxySettings" />
+          </div>
+
+          <div class="proxy-auth-toggle" @click="showProxyAuth = !showProxyAuth">
+            {{ showProxyAuth ? '隐藏认证信息' : '显示认证信息（可选）' }}
+          </div>
+
+          <div class="proxy-auth" v-if="showProxyAuth">
+            <div class="proxy-field">
+              <label>用户名</label>
+              <input v-model="httpProxyUsername" placeholder="可选" @change="saveProxySettings" />
+            </div>
+            <div class="proxy-field">
+              <label>密码</label>
+              <input v-model="httpProxyPassword" type="password" placeholder="可选" @change="saveProxySettings" />
+            </div>
+          </div>
+
+          <div class="proxy-exclude" v-if="profiles.length > 0">
+            <label>不需要代理的提供商</label>
+            <div class="exclude-list">
+              <label v-for="p in profiles" :key="p.id" class="check-field exclude-item">
+                <input type="checkbox"
+                  :value="p.id"
+                  v-model="httpProxyExcludeProfiles"
+                  @change="saveProxySettings" />
+                <span>{{ p.name }}</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 自动启动 -->
     <div class="card">
       <div class="card-body">
@@ -842,6 +888,19 @@ onUnmounted(() => {
 .fade-leave-active { transition: all .15s ease-in; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 .log-body pre { margin-top: 4px; padding: 8px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 11px; font-family: 'SF Mono',monospace; color: #475569; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+
+/* HTTP Proxy */
+.proxy-config { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
+.proxy-field { margin-bottom: 12px; }
+.proxy-field label { display: block; font-size: 13px; font-weight: 600; color: #64748b; margin-bottom: 6px; }
+.proxy-field input { width: 100%; padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 14px; outline: none; transition: all .15s; background: #f8fafc; }
+.proxy-field input:focus { border-color: #a5b4fc; background: #fff; box-shadow: 0 0 0 3px rgba(165,180,252,.15); }
+.proxy-auth-toggle { font-size: 13px; color: #6366f1; cursor: pointer; margin-bottom: 12px; user-select: none; }
+.proxy-auth-toggle:hover { text-decoration: underline; }
+.proxy-exclude { margin-top: 16px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
+.proxy-exclude > label { display: block; font-size: 13px; font-weight: 600; color: #64748b; margin-bottom: 10px; }
+.exclude-list { display: flex; flex-direction: column; gap: 8px; }
+.exclude-item { font-size: 13px; }
 
 .about-version { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; color: #94a3b8; font-family: 'SF Mono',monospace; }
 .about-update-hint { font-size: 12px; color: #6366f1; margin: -4px 0 0; }
