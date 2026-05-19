@@ -1,11 +1,12 @@
 <script setup>
-import { ref, onMounted, inject, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, inject, computed, watch } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { api } from '../../api.js'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import iconUrl from '../../assets/icon.png'
 
 const navigate = inject('navigate')
+let unlistenProxySettings = null
 
 const port = ref(9999)
 const autoStart = ref(false)
@@ -325,9 +326,13 @@ onMounted(async () => {
   currentVersion.value = await api.getAppVersion()
 
   // 监听托盘菜单的代理设置变化
-  listen('proxy-settings-changed', async () => {
+  unlistenProxySettings = await listen('proxy-settings-changed', async () => {
     await loadSettings()
   })
+})
+
+onUnmounted(() => {
+  unlistenProxySettings?.()
 })
 </script>
 
