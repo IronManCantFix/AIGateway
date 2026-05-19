@@ -367,3 +367,8 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
         download_url,
     })
 }
+
+#[tauri::command]
+pub fn get_app_version(app_handle: tauri::AppHandle) -> String {
+    app_handle.package_info().version.to_string()
+}

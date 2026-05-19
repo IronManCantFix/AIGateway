@@ -306,6 +306,7 @@ fn main() {
             commands::clear_aggregated_stats,
             commands::fetch_provider_models,
             commands::check_for_updates,
+            commands::get_app_version,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

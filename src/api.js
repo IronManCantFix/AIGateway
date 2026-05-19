@@ -51,6 +51,7 @@ export const api = {
 
   // --- Update check ---
   checkForUpdates: () => invoke('check_for_updates'),
+  getAppVersion: () => invoke('get_app_version'),
 
   // --- Events ---
   onStatusChange: (fn) => {

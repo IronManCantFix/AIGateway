@@ -776,6 +776,8 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: 380px;
+  overflow-y: auto;
 }
 
 .model-row {

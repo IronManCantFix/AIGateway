@@ -251,6 +251,7 @@ watch([logTotalPages, logPageSize], () => {
 
 const updateInfo = ref(null)
 const checkingUpdate = ref(false)
+const currentVersion = ref('')
 const isDev = import.meta.env.DEV
 
 async function checkForUpdates() {
@@ -278,7 +279,11 @@ function openGithub() {
   openUrl('https://github.com/IronManCantFix/AIGateway').catch(e => console.error('openUrl failed:', e))
 }
 
-onMounted(async () => { await loadSettings(); await loadStats() })
+onMounted(async () => {
+  await loadSettings()
+  await loadStats()
+  currentVersion.value = await api.getAppVersion()
+})
 </script>
 
 <template>
@@ -622,7 +627,7 @@ onMounted(async () => { await loadSettings(); await loadStats() })
       <img :src="iconUrl" class="about-logo" alt="AIGateway" />
       <p><strong>AIGateway</strong></p>
       <p class="about-version">
-        {{ isDev ? '开发版' : (updateInfo?.current_version || '...') }}
+        {{ isDev ? '开发版' : (currentVersion || '...') }}
         <button class="check-update-btn" @click="checkForUpdates" :disabled="checkingUpdate">
           {{ checkingUpdate ? '检查中...' : '检查更新' }}
         </button>
