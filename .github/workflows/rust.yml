@@ -68,7 +68,7 @@ jobs:
       - name: Build sidecar
         run: |
           mkdir -p src-tauri/binaries
-          cd proxy && bun build --compile --target=${{ matrix.bun_target }} proxy-server.js --outfile ../src-tauri/binaries/${{ matrix.sidecar }}
+          cd proxy && bun install && bun build --compile --target=${{ matrix.bun_target }} proxy-server.js --outfile ../src-tauri/binaries/${{ matrix.sidecar }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
