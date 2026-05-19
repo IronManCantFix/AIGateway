@@ -1521,7 +1521,7 @@ async function handleApiRequest(req, res) {
     for (const rule of currentConfig.modelMappings.rules) {
       if (body.model.toLowerCase() === rule.from.toLowerCase()) {
         body.model = rule.to
-        modelMappingInfo = `${rule.from} → ${rule.to}`
+        modelMappingInfo = rule.to
         console.log(`[Model Mapping] ${rule.from} → ${rule.to} (matched: ${body.model})`)
         break
       }

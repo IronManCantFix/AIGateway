@@ -692,7 +692,7 @@ onUnmounted(() => {
               </div>
               <div class="log-meta">
                 <span>{{ l.provider || '-' }}</span>
-                <span v-if="l.modelMapping" class="log-mapping">{{ l.originalModel || '?' }} → {{ l.modelMapping }} | {{ l.provider || '-' }}</span>
+                <span v-if="l.modelMapping" class="log-mapping">{{ l.originalModel }} → {{ l.modelMapping }} | {{ l.provider || '-' }}</span>
                 <span v-else>{{ l.model }}</span>
                 <span class="log-dur">{{ l.duration }}ms</span>
                 <span class="log-tokens" v-if="l.totalTokens">P {{ fmtTok(l.promptTokens) }} / C {{ fmtTok(l.completionTokens) }} / T {{ fmtTok(l.totalTokens) }}</span>
