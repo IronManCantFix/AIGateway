@@ -1734,8 +1734,12 @@ process.stdin.on('data', (chunk) => {
       currentConfig = msg.config
       const port = msg.config.settings?.port || 9999
       logEnabled = !!(msg.config.settings && msg.config.settings.logEnabled)
-      // keepalive timer 防止 stdin 关闭后事件循环退出
-      startupKeepAlive = setInterval(() => {}, 60000)
+      // keepalive timer: bun compile 会优化掉空回调的 timer
+      // 使用有 I/O 副作用的回调防止被优化
+      startupKeepAlive = setInterval(() => {
+        // noop with side-effect: touch a global to prevent dead-code elimination
+        globalThis.__proxy_keepalive = Date.now()
+      }, 60000)
       server.listen(port, '127.0.0.1', () => {
         clearInterval(startupKeepAlive)
         startupKeepAlive = null
