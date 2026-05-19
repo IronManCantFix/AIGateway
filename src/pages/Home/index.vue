@@ -243,6 +243,11 @@ onMounted(async () => {
   await loadData()
   api.onStatusChange((payload) => {
     proxyStatus.value = payload.status
+    if (payload.error === 'EADDRINUSE') {
+      showToast('启动失败: 端口 ' + (payload.message?.match(/\d+/)?.[0] || '') + ' 已被占用')
+    } else if (payload.crashed) {
+      showToast('代理异常退出')
+    }
   })
   // Listen for toast messages from tray menu
   listen('show-toast', (event) => {

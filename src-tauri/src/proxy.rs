@@ -222,6 +222,26 @@ impl ProxyManager {
                         let error = msg.get("error").and_then(|e| e.as_str()).unwrap_or("unknown");
                         let message = msg.get("message").and_then(|m| m.as_str()).unwrap_or("");
                         eprintln!("Sidecar error: {} - {}", error, message);
+                        // EADDRINUSE: port occupied, clean up and notify frontend
+                        if error == "EADDRINUSE" {
+                            {
+                                let mut guard = inner_clone.lock().unwrap();
+                                guard.status = "stopped".to_string();
+                                if let Some(mut child) = guard.child.take() {
+                                    child.kill().ok();
+                                }
+                            }
+                            if let Some(tray) = tray_clone.lock().unwrap().as_ref() {
+                                set_tray_icon(tray, false);
+                            }
+                            app_handle_clone
+                                .emit("proxy-status-changed", serde_json::json!({
+                                    "status": "stopped",
+                                    "error": "EADDRINUSE",
+                                    "message": message
+                                }))
+                                .ok();
+                        }
                     }
                     _ => {}
                 }
