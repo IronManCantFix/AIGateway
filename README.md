@@ -294,6 +294,10 @@ aigateway/
 - 感谢 **小米 Orbit 百万亿 Token 计划**，提供了免费的 Pro 月度套餐，本桌面版从 utools 版迁移而来，使用 MiMo-V2.5-Pro 开发
 - 感谢 **Claude Code** 这么好用的开发工具，让开发效率大幅提升
 
+## 🗓️ 后期计划
+
+- **图像接口兼容** — 支持跨协议的图像请求转换（OpenAI `image_url` ↔ Anthropic `image` 格式），让使用 OpenAI 格式的客户端也能通过 Anthropic 接口发送图片，反之亦然
+
 ## 📄 许可证
 
 MIT

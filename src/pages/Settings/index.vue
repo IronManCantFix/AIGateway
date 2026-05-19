@@ -64,12 +64,14 @@ function endpointLabel(ep) {
   const m = { '/v1/chat/completions':'Chat','/v1/responses':'Responses','/v1/messages':'Messages','/v1/models':'Models' }
   return m[ep] || ep
 }
-function timeAgo(ts) {
-  const s = Math.floor((Date.now()-ts)/1000)
-  if (s < 60) return s+'s'
-  if (s < 3600) return Math.floor(s/60)+'m'
-  if (s < 86400) return Math.floor(s/3600)+'h'
-  return Math.floor(s/86400)+'d'
+function fmtTime(ts) {
+  const d = new Date(ts)
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  const MM = String(d.getMonth() + 1).padStart(2, '0')
+  const DD = String(d.getDate()).padStart(2, '0')
+  return `${MM}-${DD} ${hh}:${mm}:${ss}`
 }
 function fmtTok(n) {
   if (n == null) return '—'
@@ -193,12 +195,16 @@ const filteredLogs = computed(() => {
   })
 })
 
-const logTotalPages = computed(() => Math.max(1, Math.ceil(filteredLogs.value.length / Number(logPageSize.value) || 5)))
+const logTotalPages = computed(() => {
+  const size = parseInt(logPageSize.value) || 5
+  return Math.max(1, Math.ceil(filteredLogs.value.length / size))
+})
 
 const pagedLogs = computed(() => {
-  const size = Number(logPageSize.value) || 5
-  const totalPages = Math.max(1, Math.ceil(filteredLogs.value.length / size))
-  const page = Math.min(Math.max(Math.round(logPage.value), 1), totalPages)
+  const size = parseInt(logPageSize.value) || 5
+  const total = filteredLogs.value.length
+  const totalPages = Math.max(1, Math.ceil(total / size))
+  const page = Math.min(Math.max(parseInt(logPage.value) || 1, 1), totalPages)
   const start = (page - 1) * size
   return filteredLogs.value.slice(start, start + size)
 })
@@ -226,14 +232,15 @@ function copyText(text, label) {
 }
 
 function resetLogPage() { logPage.value = 1 }
-function prevPage() { logPage.value = Math.max(1, logPage.value - 1) }
-function nextPage() { logPage.value = Math.min(logTotalPages.value, logPage.value + 1) }
+function prevPage() { logPage.value = Math.max(1, (parseInt(logPage.value) || 1) - 1) }
+function nextPage() { logPage.value = Math.min(logTotalPages.value, (parseInt(logPage.value) || 1) + 1) }
 
 // Keep logPage in valid range when data/pageSize changes
 watch([logTotalPages, logPageSize], () => {
   const max = logTotalPages.value
-  if (logPage.value > max) logPage.value = max
-  if (logPage.value < 1) logPage.value = 1
+  const cur = parseInt(logPage.value) || 1
+  if (cur > max) logPage.value = max
+  else if (cur < 1) logPage.value = 1
 })
 
 onMounted(async () => { await loadSettings(); await loadStats() })
@@ -515,6 +522,7 @@ onMounted(async () => { await loadSettings(); await loadStats() })
             <div class="log-toolbar-actions">
               <span class="log-count">共 {{ filteredLogs.length }} 条</span>
               <div class="log-clear-btns">
+                <button class="refresh-btn" @click="loadStats">刷新</button>
                 <button class="clear-body-btn" @click="clearLogs">清除日志</button>
                 <button class="clear-body-btn" @click="clearLogsBodyData">清空参数</button>
               </div>
@@ -525,7 +533,7 @@ onMounted(async () => { await loadSettings(); await loadStats() })
               <div class="log-top">
                 <span class="log-badge" :class="statusLabel(l.statusCode)">{{ l.statusCode }}</span>
                 <span class="log-ep">{{ endpointLabel(l.endpoint) }}</span>
-                <span class="log-time">{{ timeAgo(l.timestamp) }}前</span>
+                <span class="log-time">{{ fmtTime(l.timestamp) }}</span>
               </div>
               <div class="log-meta">
                 <span>{{ l.provider || '-' }}</span>
@@ -569,6 +577,7 @@ onMounted(async () => { await loadSettings(); await loadStats() })
       <p><strong>AIGateway</strong></p>
       <p>版本 1.0.0</p>
       <p>作者 Claude Code &amp; DeepSeek v4 Pro &amp; mimo-v2.5-pro</p>
+      <p><a class="github-link" href="https://github.com/IronManCantFix/AIGateway" target="_blank"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg> GitHub</a></p>
     </div>
   </div>
 
@@ -701,8 +710,8 @@ onMounted(async () => { await loadSettings(); await loadStats() })
 .log-badge.warn { background: #fef9c3; color: #ca8a04; }
 .log-badge.error { background: #fee2e2; color: #dc2626; }
 .log-ep { font-size: 13px; color: #334155; }
-.log-time { font-size: 11px; color: #cbd5e1; margin-left: auto; }
-.log-meta { display: flex; gap: 12px; margin-top: 3px; font-size: 12px; color: #94a3b8; }
+.log-time { font-size: 11px; color: #94a3b8; margin-left: auto; }
+.log-meta { display: flex; gap: 12px; margin-top: 3px; font-size: 12px; color: #64748b; }
 .log-dur { font-family: 'SF Mono',monospace; }
 .log-tokens { font-family: 'SF Mono',monospace; color: #6366f1; }
 .log-err { font-size: 12px; color: #dc2626; margin-top: 3px; }
@@ -721,6 +730,8 @@ onMounted(async () => { await loadSettings(); await loadStats() })
 
 .about { text-align: center; padding: 32px 16px; color: #94a3b8; font-size: 13px; line-height: 1.8; }
 .about strong { color: #64748b; }
+.github-link { display: inline-flex; align-items: center; gap: 5px; color: #6366f1; text-decoration: none; vertical-align: middle; }
+.github-link:hover { text-decoration: underline; }
 
 /* Confirm dialog */
 .confirm-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; }

@@ -660,10 +660,12 @@ function chatToMessagesSSEFactory() {
   let thinkingStarted = false
   let thinkingClosed = false
   let textStarted = false
+  let completed = false
   let messageId = 'msg_' + Date.now()
   let model = ''
   let outputTokens = 0
   let lastReasoning = ''
+  let isCumulativeReasoning = false
 
   function ensureStarted(choice) {
     if (started) return ''
@@ -693,6 +695,8 @@ function chatToMessagesSSEFactory() {
   return (line) => {
     if (!line.startsWith('data: ')) return ''
     if (line.startsWith('data: [DONE]')) return ''
+    // Skip all chunks after message is complete (MiniMax sends duplicate finish chunks)
+    if (completed) return ''
 
     try {
       const data = JSON.parse(line.slice(6))
@@ -707,17 +711,50 @@ function chatToMessagesSSEFactory() {
       const rawReasoning = delta.reasoning_content
       const finishReason = choice.finish_reason
 
-      // reasoning_content: auto-detect cumulative (MiniMax) vs incremental (DeepSeek)
+      // reasoning_content: auto-detect cumulative vs incremental
+      // MiniMax: incremental in delta chunks, cumulative in final message chunk
+      // DeepSeek: always incremental
+      // Also handle reasoning_details format (MiniMax reasoning_split=true)
+      // Normalize: coerce non-string reasoning_content to string
+      let normalizedReasoning = rawReasoning
+      if (rawReasoning != null && typeof rawReasoning !== 'string') {
+        normalizedReasoning = typeof rawReasoning === 'object' ? JSON.stringify(rawReasoning) : String(rawReasoning)
+      }
       let reasoning = ''
-      if (rawReasoning != null) {
-        if (rawReasoning.length > lastReasoning.length && rawReasoning.startsWith(lastReasoning)) {
-          // Cumulative: extract delta from the longer string
-          reasoning = rawReasoning.substring(lastReasoning.length)
-          lastReasoning = rawReasoning
-        } else if (rawReasoning !== lastReasoning) {
-          // Incremental: use as-is (or cumulative reset)
-          reasoning = rawReasoning
-          lastReasoning = rawReasoning
+      let hasReasoning = false
+      if (normalizedReasoning != null && typeof normalizedReasoning === 'string' && normalizedReasoning.length > 0) {
+        hasReasoning = true
+        if (isCumulativeReasoning) {
+          // Already detected cumulative mode: extract delta
+          if (normalizedReasoning.length > lastReasoning.length && normalizedReasoning.startsWith(lastReasoning)) {
+            reasoning = normalizedReasoning.substring(lastReasoning.length)
+          }
+          lastReasoning = normalizedReasoning
+        } else if (lastReasoning.length > 0 && normalizedReasoning.length > lastReasoning.length && normalizedReasoning.startsWith(lastReasoning)) {
+          // Cumulative detected (only when lastReasoning is non-empty to avoid false positive on first chunk)
+          isCumulativeReasoning = true
+          reasoning = normalizedReasoning.substring(lastReasoning.length)
+          lastReasoning = normalizedReasoning
+        } else if (normalizedReasoning !== lastReasoning) {
+          // Incremental: use as-is
+          reasoning = normalizedReasoning
+          lastReasoning = normalizedReasoning
+        }
+      } else if (Array.isArray(delta.reasoning_details) && delta.reasoning_details.length > 0) {
+        hasReasoning = true
+        const cur = delta.reasoning_details.map(d => d.text || '').join('')
+        if (isCumulativeReasoning) {
+          if (cur.length > lastReasoning.length && cur.startsWith(lastReasoning)) {
+            reasoning = cur.substring(lastReasoning.length)
+          }
+          lastReasoning = cur
+        } else if (lastReasoning.length > 0 && cur.length > lastReasoning.length && cur.startsWith(lastReasoning)) {
+          isCumulativeReasoning = true
+          reasoning = cur.substring(lastReasoning.length)
+          lastReasoning = cur
+        } else if (cur !== lastReasoning) {
+          reasoning = cur
+          lastReasoning = cur
         }
       }
 
@@ -730,8 +767,7 @@ function chatToMessagesSSEFactory() {
       out += ensureStarted(choice)
 
       // Handle reasoning content → thinking block
-      // Start thinking block on first encounter of reasoning_content field (even if empty)
-      if (rawReasoning != null) {
+      if (hasReasoning) {
         out += startThinking()
       }
       if (reasoning) {
@@ -739,7 +775,7 @@ function chatToMessagesSSEFactory() {
       }
 
       // Handle text content → text block
-      if (content != null && content !== '') {
+      if (content != null && typeof content === 'string' && content !== '') {
         out += closeThinking()
         out += startText()
         out += fmtAnthropicSSE('content_block_delta', { type: 'content_block_delta', index: thinkingStarted ? 1 : 0, delta: { type: 'text_delta', text: content } })
@@ -753,6 +789,7 @@ function chatToMessagesSSEFactory() {
         out += fmtAnthropicSSE('content_block_stop', { type: 'content_block_stop', index: textIdx })
         out += fmtAnthropicSSE('message_delta', { type: 'message_delta', delta: { stop_reason: mapFinishReason(finishReason) }, usage: { output_tokens: outputTokens } })
         out += fmtAnthropicSSE('message_stop', { type: 'message_stop' })
+        completed = true
       }
 
       return out
@@ -1090,6 +1127,7 @@ converters['responses->messages'].sseFactory           = responsesToMessagesSSEF
 function reasoningSSEFactory() {
   let inThinking = false
   let lastReasoning = ''
+  let isCumulative = false
   var TO = '\x3Cthink\x3E'
   var TC = '\x3C/think\x3E'
 
@@ -1106,8 +1144,23 @@ function reasoningSSEFactory() {
       var details = choice.delta && choice.delta.reasoning_details
       if (details && details.length > 0) {
         var cur = details.map(function(d) { return d.text || '' }).join('')
-        var inc = cur.substring(lastReasoning.length)
-        lastReasoning = cur
+        var inc = ''
+        if (isCumulative) {
+          // Cumulative mode: extract delta
+          if (cur.length > lastReasoning.length && cur.startsWith(lastReasoning)) {
+            inc = cur.substring(lastReasoning.length)
+          }
+          lastReasoning = cur
+        } else if (lastReasoning.length > 0 && cur.length > lastReasoning.length && cur.startsWith(lastReasoning)) {
+          // Cumulative detected (only when lastReasoning is non-empty)
+          isCumulative = true
+          inc = cur.substring(lastReasoning.length)
+          lastReasoning = cur
+        } else if (cur !== lastReasoning) {
+          // Incremental: use as-is
+          inc = cur
+          lastReasoning = cur
+        }
         if (inc) choice.delta.reasoning_content = inc
         delete choice.delta.reasoning_details
         return 'data: ' + JSON.stringify(data) + '\n\n'
@@ -1177,8 +1230,10 @@ function convertChatResponseToMessages(data) {
   const message = choice?.message || {}
   const reverseFinish = { stop: 'end_turn', length: 'max_tokens', tool_calls: 'tool_use' }
   const content = []
-  if (message.reasoning_content) {
-    content.push({ type: 'thinking', thinking: message.reasoning_content })
+  const reasoning = message.reasoning_content
+    || (Array.isArray(message.reasoning_details) ? message.reasoning_details.map(d => d.text || '').join('') : '')
+  if (reasoning) {
+    content.push({ type: 'thinking', thinking: reasoning })
   }
   content.push({ type: 'text', text: message.content || '' })
   return {
@@ -1444,8 +1499,8 @@ async function handleApiRequest(req, res) {
       }
     }
     if (!profile) {
-      res.writeHead(503, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: `AI 网关未匹配到模型: ${requestedModel}` }))
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: { message: `AI 网关未匹配到模型: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
       return
     }
   } else {
