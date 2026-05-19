@@ -3,5 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "type": "commonjs",
-  "dependencies": {}
+  "dependencies": {
+    "http-proxy-agent": "^9.0.0",
+    "https-proxy-agent": "^9.0.0"
+  }
 }
