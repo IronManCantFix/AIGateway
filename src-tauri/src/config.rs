@@ -22,6 +22,18 @@ pub struct Profile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpProxyConfig {
+    pub enabled: bool,
+    pub url: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(rename = "excludeProfiles", default)]
+    pub exclude_profiles: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default = "default_port")]
     pub port: u16,
@@ -29,13 +41,15 @@ pub struct Settings {
     pub auto_start: bool,
     #[serde(rename = "logEnabled", default)]
     pub log_enabled: bool,
+    #[serde(rename = "httpProxy", default)]
+    pub http_proxy: Option<HttpProxyConfig>,
 }
 
 fn default_port() -> u16 { 9999 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { port: 9999, auto_start: false, log_enabled: false }
+        Self { port: 9999, auto_start: false, log_enabled: false, http_proxy: None }
     }
 }
 
@@ -441,6 +455,7 @@ impl ConfigStore {
             "settings": {
                 "port": settings.port,
                 "logEnabled": log_enabled,
+                "httpProxy": settings.http_proxy,
             },
             "models": models,
             "modelMappings": model_mappings,
