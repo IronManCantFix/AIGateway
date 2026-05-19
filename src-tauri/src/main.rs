@@ -304,6 +304,7 @@ fn main() {
             commands::clear_logs_bodies,
             commands::clear_aggregated_stats,
             commands::fetch_provider_models,
+            commands::check_for_updates,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

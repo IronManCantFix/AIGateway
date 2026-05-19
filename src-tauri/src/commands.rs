@@ -9,6 +9,14 @@ pub struct AppState {
     pub proxy: ProxyManager,
 }
 
+#[derive(serde::Serialize)]
+pub struct UpdateInfo {
+    pub current_version: String,
+    pub latest_version: String,
+    pub has_update: bool,
+    pub download_url: String,
+}
+
 // --- Proxy commands ---
 
 #[tauri::command]
@@ -296,4 +304,65 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
     } else {
         Err(format!("未知响应格式: {}", serde_json::to_string(&body).unwrap_or_default().chars().take(300).collect::<String>()))
     }
+}
+
+fn compare_versions(current: &str, latest: &str) -> bool {
+    let current_parts: Vec<u32> = current.split('.').filter_map(|s| s.parse().ok()).collect();
+    let latest_parts: Vec<u32> = latest.split('.').filter_map(|s| s.parse().ok()).collect();
+    for i in 0..3 {
+        let c = current_parts.get(i).unwrap_or(&0);
+        let l = latest_parts.get(i).unwrap_or(&0);
+        if l > c { return true; }
+        if l < c { return false; }
+    }
+    false
+}
+
+#[tauri::command]
+pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    let current_version = app_handle.package_info().version.to_string();
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
+
+    let resp = client
+        .get("https://api.github.com/repos/IronManCantFix/AIGateway/releases/latest")
+        .header("User-Agent", "AIGateway")
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("GitHub API 返回错误: {}", resp.status()));
+    }
+
+    let body: serde_json::Value = resp.json().await
+        .map_err(|e| format!("JSON解析失败: {}", e))?;
+
+    let latest_version = body.get("tag_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim_start_matches('v')
+        .to_string();
+
+    let download_url = body.get("html_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if latest_version.is_empty() {
+        return Err("无法获取最新版本号".to_string());
+    }
+
+    let has_update = compare_versions(&current_version, &latest_version);
+
+    Ok(UpdateInfo {
+        current_version,
+        latest_version,
+        has_update,
+        download_url,
+    })
 }
