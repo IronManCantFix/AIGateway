@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, inject, computed, watch } from 'vue'
+import { listen } from '@tauri-apps/api/event'
 import { api } from '../../api.js'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import iconUrl from '../../assets/icon.png'
@@ -10,6 +11,16 @@ const port = ref(9999)
 const autoStart = ref(false)
 const logEnabled = ref(false)
 const saved = ref(false)
+
+const httpProxyEnabled = ref(false)
+const httpProxyUrl = ref('')
+const httpProxyUsername = ref('')
+const httpProxyPassword = ref('')
+const httpProxyExcludeProfiles = ref([])
+const showProxyAuth = ref(false)
+
+// 提供商列表
+const profiles = ref([])
 
 const stats = ref(null)
 const logs = ref([])
@@ -36,12 +47,40 @@ async function loadSettings() {
   port.value = s.port || 9999
   autoStart.value = s.autoStart || false
   logEnabled.value = await api.getLogEnabled()
+
+  // 加载代理配置
+  if (s.httpProxy) {
+    httpProxyEnabled.value = s.httpProxy.enabled || false
+    httpProxyUrl.value = s.httpProxy.url || ''
+    httpProxyUsername.value = s.httpProxy.username || ''
+    httpProxyPassword.value = s.httpProxy.password || ''
+    httpProxyExcludeProfiles.value = s.httpProxy.excludeProfiles || []
+  }
 }
+async function loadProfiles() {
+  profiles.value = await api.getProfiles()
+}
+
 async function saveSettings() {
   const n = parseInt(port.value, 10)
   if (isNaN(n) || n < 1 || n > 65535) { port.value = 9999; return }
-  await api.setSettings({ port: n, autoStart: autoStart.value, logEnabled: logEnabled.value })
+  await api.setSettings({
+    port: n,
+    autoStart: autoStart.value,
+    logEnabled: logEnabled.value,
+    httpProxy: {
+      enabled: httpProxyEnabled.value,
+      url: httpProxyUrl.value,
+      username: httpProxyUsername.value || null,
+      password: httpProxyPassword.value || null,
+      excludeProfiles: httpProxyExcludeProfiles.value
+    }
+  })
   saved.value = true; setTimeout(() => saved.value = false, 1500)
+}
+
+async function saveProxySettings() {
+  await saveSettings()
 }
 async function toggleLogging() { await api.setLogEnabled(logEnabled.value) }
 async function loadStats() { stats.value = await api.getStats(); logs.value = await api.getLogs(1000) }
@@ -281,8 +320,14 @@ function openGithub() {
 
 onMounted(async () => {
   await loadSettings()
+  await loadProfiles()
   await loadStats()
   currentVersion.value = await api.getAppVersion()
+
+  // 监听托盘菜单的代理设置变化
+  listen('proxy-settings-changed', async () => {
+    await loadSettings()
+  })
 })
 </script>
 
