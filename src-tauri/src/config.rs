@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
 // --- Data Types ---
@@ -105,6 +106,10 @@ pub struct LogEntry {
     pub model_mapping: Option<String>,
     #[serde(rename = "originalModel", default)]
     pub original_model: Option<String>,
+    #[serde(rename = "bodySizeBefore", default)]
+    pub body_size_before: Option<u64>,
+    #[serde(rename = "bodySizeAfter", default)]
+    pub body_size_after: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -311,25 +316,103 @@ impl ConfigStore {
 
     // --- Logs & Stats ---
 
-    pub fn get_logs(&self, limit: Option<usize>) -> Vec<LogEntry> {
+    fn logs_jsonl_path(&self) -> PathBuf {
+        self.path("logs.jsonl")
+    }
+
+    fn read_legacy_logs(&self, limit: Option<usize>, offset: Option<usize>) -> Vec<LogEntry> {
         let snapshot: StatsSnapshot = self.read_json("stats-snapshot.json");
-        let mut logs = snapshot.logs;
-        logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        if let Some(n) = limit {
-            logs.truncate(n);
-        }
+        let len = snapshot.logs.len();
+        let offset = offset.unwrap_or(0).min(len);
+        let limit = limit.unwrap_or(len.saturating_sub(offset));
+        let end = len.saturating_sub(offset);
+        let start = end.saturating_sub(limit);
+        let mut logs: Vec<LogEntry> = snapshot.logs[start..end].to_vec();
+        logs.reverse();
         logs
     }
 
-    pub fn add_log(&self, entry: &LogEntry) -> Result<(), String> {
-        // Save to logs
-        let mut snapshot: StatsSnapshot = self.read_json("stats-snapshot.json");
-        snapshot.logs.push(entry.clone());
-        if snapshot.logs.len() > 5000 {
-            let drain_count = snapshot.logs.len() - 5000;
-            snapshot.logs.drain(0..drain_count);
+    fn read_logs_jsonl(&self, limit: Option<usize>, offset: Option<usize>) -> Result<Vec<LogEntry>, String> {
+        let path = self.logs_jsonl_path();
+        let file = fs::File::open(&path).map_err(|e| e.to_string())?;
+        let lines: Vec<String> = BufReader::new(file)
+            .lines()
+            .map_while(Result::ok)
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        let len = lines.len();
+        let offset = offset.unwrap_or(0).min(len);
+        let limit = limit.unwrap_or(len.saturating_sub(offset));
+        let end = len.saturating_sub(offset);
+        let start = end.saturating_sub(limit);
+        let mut logs = Vec::new();
+        for line in lines[start..end].iter().rev() {
+            if let Ok(entry) = serde_json::from_str::<LogEntry>(line) {
+                logs.push(entry);
+            }
         }
-        self.write_json("stats-snapshot.json", &snapshot)?;
+        Ok(logs)
+    }
+
+    fn append_log_jsonl(&self, entry: &LogEntry) -> Result<(), String> {
+        let path = self.logs_jsonl_path();
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| e.to_string())?;
+        let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
+        writeln!(file, "{}", line).map_err(|e| e.to_string())?;
+        self.trim_logs_jsonl_if_large(50 * 1024 * 1024, 5000)
+    }
+
+    fn trim_logs_jsonl_if_large(&self, max_bytes: u64, keep_lines: usize) -> Result<(), String> {
+        let path = self.logs_jsonl_path();
+        let Ok(meta) = fs::metadata(&path) else { return Ok(()); };
+        if meta.len() <= max_bytes {
+            return Ok(());
+        }
+        let file = fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mut lines: Vec<String> = BufReader::new(file)
+            .lines()
+            .map_while(Result::ok)
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        if lines.len() > keep_lines {
+            let drain_count = lines.len() - keep_lines;
+            lines.drain(0..drain_count);
+        }
+        let tmp = path.with_extension("jsonl.tmp");
+        {
+            let mut file = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+            for line in lines {
+                writeln!(file, "{}", line).map_err(|e| e.to_string())?;
+            }
+        }
+        fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    }
+
+    pub fn get_logs(&self, limit: Option<usize>, offset: Option<usize>) -> Vec<LogEntry> {
+        if self.logs_jsonl_path().exists() {
+            return self.read_logs_jsonl(limit, offset).unwrap_or_default();
+        }
+        self.read_legacy_logs(limit, offset)
+    }
+
+    pub fn get_log_file_size(&self) -> u64 {
+        let jsonl = self.logs_jsonl_path();
+        if let Ok(meta) = fs::metadata(&jsonl) {
+            return meta.len();
+        }
+        let legacy = self.path("stats-snapshot.json");
+        if let Ok(meta) = fs::metadata(&legacy) {
+            return meta.len();
+        }
+        0
+    }
+
+    pub fn add_log(&self, entry: &LogEntry) -> Result<(), String> {
+        self.append_log_jsonl(entry)?;
 
         // Update aggregated stats
         let mut stats: AggregatedStats = self.read_json("aggregated-stats.json");
@@ -364,11 +447,32 @@ impl ConfigStore {
     }
 
     pub fn clear_logs(&self) -> Result<(), String> {
+        fs::remove_file(self.logs_jsonl_path()).ok();
         let snapshot = StatsSnapshot { logs: vec![] };
         self.write_json("stats-snapshot.json", &snapshot)
     }
 
     pub fn clear_logs_bodies(&self) -> Result<(), String> {
+        let path = self.logs_jsonl_path();
+        if path.exists() {
+            let file = fs::File::open(&path).map_err(|e| e.to_string())?;
+            let tmp = path.with_extension("jsonl.tmp");
+            {
+                let mut out = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+                for line in BufReader::new(file).lines().map_while(Result::ok) {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    if let Ok(mut entry) = serde_json::from_str::<LogEntry>(&line) {
+                        entry.request_body = None;
+                        entry.response_body = None;
+                        let json = serde_json::to_string(&entry).map_err(|e| e.to_string())?;
+                        writeln!(out, "{}", json).map_err(|e| e.to_string())?;
+                    }
+                }
+            }
+            return fs::rename(&tmp, &path).map_err(|e| e.to_string());
+        }
         let mut snapshot: StatsSnapshot = self.read_json("stats-snapshot.json");
         for log in &mut snapshot.logs {
             log.request_body = None;
@@ -378,6 +482,7 @@ impl ConfigStore {
     }
 
     pub fn clear_all_data(&self) -> Result<(), String> {
+        fs::remove_file(self.logs_jsonl_path()).ok();
         fs::remove_file(self.path("stats-snapshot.json")).ok();
         fs::remove_file(self.path("aggregated-stats.json")).ok();
         Ok(())

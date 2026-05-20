@@ -230,7 +230,7 @@ SSE streaming responses are also converted in real-time.
 | Codex App | DeepSeek | `openai-responses` | ✅ |
 | Codex App | GLM | `openai-responses` | ✅ |
 | Codex App | GPT | `openai-responses` | ✅ |
-| Codex App | Claude | `openai-responses` | ✅ |
+| Codex App | MiniMax | `openai-responses` | ✅ |
 | Cherry Studio | MiniMax | `openai-chat, Anthropic` | ✅ |
 | Cherry Studio | MiMo | `openai-chat, Anthropic` | ✅ |
 | Cherry Studio | DeepSeek | `openai-chat, Anthropic` | ✅ |

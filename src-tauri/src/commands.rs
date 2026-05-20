@@ -210,8 +210,13 @@ pub fn get_stats(state: State<'_, AppState>) -> serde_json::Value {
 }
 
 #[tauri::command]
-pub fn get_logs(state: State<'_, AppState>, limit: Option<usize>) -> Vec<crate::config::LogEntry> {
-    state.config.get_logs(limit)
+pub fn get_logs(state: State<'_, AppState>, limit: Option<usize>, offset: Option<usize>) -> Vec<crate::config::LogEntry> {
+    state.config.get_logs(limit, offset)
+}
+
+#[tauri::command]
+pub fn get_log_file_size(state: State<'_, AppState>) -> u64 {
+    state.config.get_log_file_size()
 }
 
 #[tauri::command]

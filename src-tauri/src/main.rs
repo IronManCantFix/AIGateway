@@ -338,6 +338,7 @@ fn main() {
             commands::set_log_enabled,
             commands::get_stats,
             commands::get_logs,
+            commands::get_log_file_size,
             commands::clear_logs,
             commands::clear_all_data,
             commands::clear_logs_bodies,
