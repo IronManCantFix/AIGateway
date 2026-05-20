@@ -408,7 +408,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     }
   })
 
-  upstreamReq.setTimeout(300000, () => {
+  upstreamReq.setTimeout(600000, () => {
     upstreamReq.destroy(new Error('upstream request timeout'))
   })
 
@@ -1649,8 +1649,16 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
 }
 
 const server = http.createServer(async (req, res) => {
-  // 防止长连接（SSE）被默认超时断开
-  req.setTimeout(0)
+  // 请求级超时：20 分钟，防止僵尸连接无限存活
+  const REQUEST_TIMEOUT = 1200000
+  req.setTimeout(REQUEST_TIMEOUT, () => {
+    if (!res.headersSent) {
+      res.writeHead(504, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Gateway Timeout', message: 'request timeout (20min)' }))
+    } else {
+      res.end()
+    }
+  })
   res.setTimeout(0)
   const startTime = Date.now()
   const endpoint = req.url
