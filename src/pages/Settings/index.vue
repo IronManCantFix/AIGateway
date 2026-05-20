@@ -84,7 +84,7 @@ async function saveProxySettings() {
   await saveSettings()
 }
 async function toggleLogging() { await api.setLogEnabled(logEnabled.value) }
-async function loadStats() { stats.value = await api.getStats(); logs.value = await api.getLogs(1000) }
+async function loadStats() { stats.value = await api.getStats(); const raw = await api.getLogs(1000); raw.forEach((l, i) => { if (!l._id) l._id = l.timestamp + '_' + i }); logs.value = raw }
 async function clearLogs() {
   if (!await showConfirm('确定要清除所有请求日志吗？统计计数将保留。')) return
   await api.clearLogs(); await loadStats()
@@ -254,16 +254,13 @@ const filteredLogs = computed(() => {
 })
 
 const logTotalPages = computed(() => {
-  const size = parseInt(logPageSize.value) || 5
+  const size = logPageSize.value || 5
   return Math.max(1, Math.ceil(filteredLogs.value.length / size))
 })
 
 const pagedLogs = computed(() => {
-  const size = parseInt(logPageSize.value) || 5
-  const total = filteredLogs.value.length
-  const totalPages = Math.max(1, Math.ceil(total / size))
-  const page = Math.min(Math.max(parseInt(logPage.value) || 1, 1), totalPages)
-  const start = (page - 1) * size
+  const size = logPageSize.value || 5
+  const start = (logPage.value - 1) * size
   return filteredLogs.value.slice(start, start + size)
 })
 
@@ -290,15 +287,12 @@ function copyText(text, label) {
 }
 
 function resetLogPage() { logPage.value = 1 }
-function prevPage() { logPage.value = Math.max(1, (parseInt(logPage.value) || 1) - 1) }
-function nextPage() { logPage.value = Math.min(logTotalPages.value, (parseInt(logPage.value) || 1) + 1) }
+function prevPage() { if (logPage.value > 1) logPage.value-- }
+function nextPage() { if (logPage.value < logTotalPages.value) logPage.value++ }
 
 // Keep logPage in valid range when data/pageSize changes
-watch([logTotalPages, logPageSize], () => {
-  const max = logTotalPages.value
-  const cur = parseInt(logPage.value) || 1
-  if (cur > max) logPage.value = max
-  else if (cur < 1) logPage.value = 1
+watch(logTotalPages, (max) => {
+  if (logPage.value > max) logPage.value = max
 })
 
 const updateInfo = ref(null)
@@ -678,7 +672,6 @@ onUnmounted(() => {
               <input type="date" v-model="logSearch.dateTo" @change="resetLogPage" class="log-filter" placeholder="结束日期" />
             </div>
             <div class="log-toolbar-actions">
-              <span class="log-count">共 {{ filteredLogs.length }} 条</span>
               <div class="log-clear-btns">
                 <button class="refresh-btn" @click="loadStats">刷新</button>
                 <button class="clear-body-btn" @click="clearLogs">清除日志</button>
@@ -687,7 +680,7 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="log-list" v-if="pagedLogs.length">
-            <div class="log-item" v-for="l in pagedLogs" :key="l.timestamp">
+            <div class="log-item" v-for="(l, idx) in pagedLogs" :key="l._id || idx">
               <div class="log-top">
                 <span class="log-badge" :class="statusLabel(l.statusCode)">{{ l.statusCode }}</span>
                 <span class="log-badge log-proxy" v-if="l.proxy">PROXY</span>
@@ -712,7 +705,7 @@ onUnmounted(() => {
           </div>
           <div class="log-pagination">
             <div class="page-size">
-              <span>每页</span>
+              <span>共 {{ filteredLogs.length }} 条，每页</span>
               <select v-model.number="logPageSize" @change="resetLogPage">
                 <option :value="5">5</option>
                 <option :value="10">10</option>
