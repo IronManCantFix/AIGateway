@@ -207,26 +207,43 @@ The proxy automatically handles cross-conversion between client request formats 
 
 SSE streaming responses are also converted in real-time.
 
-## ✅ Tested Clients
+## ✅ Tested Models
 
-The following clients have been tested with Codex App, Cherry Studio, and Claude App:
+### Tested Model Families
+
+| Family | Models | Provider Type | Streaming |
+|--------|--------|--------------|-----------|
+| GLM | GLM-5.1, GLM-4.7 | `openai-chat` | ✅ |
+| MiniMax | MiniMax-M2.5, MiniMax-M2.7 | `openai-chat` | ✅ |
+| MiMo | mimo-v2-pro, MiMo-2.5-pro | `openai-chat` | ✅ |
+| DeepSeek | DeepSeek V4 Pro, DeepSeek V4 Flash | `openai-chat` | ✅ |
+| GPT | gpt-5.4, gpt-5.4-mini, gpt-5.5 | `openai-chat` | ✅ |
+| Claude | claude-opus-4-7, claude-sonnet-4-6, claude-opus-4-6 | `anthropic-message` | ✅ |
+
+> All models above have been tested with cross-protocol conversion (e.g., OpenAI-format clients calling Anthropic-format providers).
+
+### Tested Clients
 
 | Client | Provider | Protocol | Result |
 |---|---|---|---|
 | Codex App | MiMo | `openai-responses` | ✅ |
 | Codex App | DeepSeek | `openai-responses` | ✅ |
 | Codex App | GLM | `openai-responses` | ✅ |
+| Codex App | GPT | `openai-responses` | ✅ |
+| Codex App | Claude | `openai-responses` | ✅ |
 | Cherry Studio | MiniMax | `openai-chat, Anthropic` | ✅ |
 | Cherry Studio | MiMo | `openai-chat, Anthropic` | ✅ |
 | Cherry Studio | DeepSeek | `openai-chat, Anthropic` | ✅ |
 | Cherry Studio | GLM | `openai-chat, Anthropic` | ✅ |
+| Cherry Studio | GPT | `openai-chat, Anthropic` | ✅ |
+| Cherry Studio | Claude | `openai-chat, Anthropic` | ✅ |
 | Claude App | GLM | `Anthropic` | ✅ |
 | Claude App | MiMo | `Anthropic` | ✅ |
 | Claude App | DeepSeek | `Anthropic` | ✅ |
 | Claude App | MiniMax | `Anthropic` | ✅ |
+| Claude App | GPT | `Anthropic` | ✅ |
 
-I haven't personally tested every AI tool on the market — only the tools and models I commonly use. I don't have access to international models for testing.
-Currently, streaming requests are the primary focus. Non-streaming requests haven't been thoroughly tested. Feel free to report bugs.
+Streaming requests are the primary testing focus. Feel free to report bugs.
 
 > Issues reporting compatibility with other models or clients are welcome.
 

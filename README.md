@@ -209,24 +209,41 @@ SSE 流式响应也会实时转换。
 
 ## ✅ 测试说明
 
-目前使用 Codex App 、 Cherry Studio 、Claude App 进行了以下测试：
+### 已测试模型系列
+
+| 系列 | 模型 | 提供商类型 | 流式 |
+|------|------|-----------|------|
+| GLM | GLM-5.1, GLM-4.7 | `openai-chat` | ✅ |
+| MiniMax | MiniMax-M2.5, MiniMax-M2.7 | `openai-chat` | ✅ |
+| MiMo | mimo-v2-pro, MiMo-2.5-pro | `openai-chat` | ✅ |
+| DeepSeek | DeepSeek V4 Pro, DeepSeek V4 Flash | `openai-chat` | ✅ |
+| GPT | gpt-5.4, gpt-5.4-mini, gpt-5.5 | `openai-chat` | ✅ |
+| Claude | claude-opus-4-7, claude-sonnet-4-6, claude-opus-4-6 | `anthropic-message` | ✅ |
+
+> 以上模型均通过代理的协议转换测试（如 OpenAI 格式客户端调用 Anthropic 格式提供商等）。
+
+### 已测试客户端
 
 | 客户端           | 提供商       | 协议                      | 结果 |
 |---------------|-----------|-------------------------|---|
 | Codex App     | MiMo      | `openai-responses`      | ✅ |
 | Codex App     | DeepSeek  | `openai-responses`      | ✅ |
 | Codex App     | GLM       | `openai-responses`      | ✅ |
+| Codex App     | GPT       | `openai-responses`      | ✅ |
+| Codex App     | Claude    | `openai-responses`      | ✅ |
 | Cherry Studio | MiniMax   | `openai-chat、Anthropic` | ✅ |
 | Cherry Studio | MiMo      | `openai-chat、Anthropic` | ✅ |
 | Cherry Studio | DeepSeek  | `openai-chat、Anthropic` | ✅ |
 | Cherry Studio | GLM       | `openai-chat、Anthropic` | ✅ |
+| Cherry Studio | GPT       | `openai-chat、Anthropic` | ✅ |
+| Cherry Studio | Claude    | `openai-chat、Anthropic` | ✅ |
 | Claude App    | GLM       | `Anthropic` | ✅ |
 | Claude App    | MiMo      | `Anthropic` | ✅ |
 | Claude App    | DeepSeek  | `Anthropic` | ✅ |
 | Claude App    | MiniMax   | `Anthropic` | ✅ |
+| Claude App    | GPT       | `Anthropic` | ✅ |
 
-我个人没有把市面上常见的AI工具都下载下来一一测试，只测试了我常用的工具和模型，国外的模型我没有购买所以无法测试。 
-目前基本上都是使用流式请求，非流式请求没有进行测试，有bug可以反馈。
+目前基本上都是使用流式请求进行测试，有bug可以反馈。
 
 > 欢迎提交 Issue 反馈其他模型或客户端的兼容性情况。
 
