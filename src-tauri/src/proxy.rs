@@ -134,18 +134,28 @@ impl ProxyManager {
                 .join("binaries").join(sidecar_name)),
         ].into_iter().flatten().collect();
 
-        let sidecar_path = candidates.iter()
-            .find(|p| p.exists())
-            .cloned()
-            .ok_or_else(|| {
-                let tried = candidates.iter()
-                    .map(|p| format!("  - {}", p.display()))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                format!("Sidecar not found: {}\nTried paths:\n{}", sidecar_name, tried)
-            })?;
-
-        let mut cmd = Command::new(&sidecar_path);
+        let dev_proxy_script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(|d| d.join("proxy").join("proxy-server.js"));
+        let mut cmd = if cfg!(debug_assertions)
+            && dev_proxy_script.as_ref().is_some_and(|p| p.exists())
+        {
+            let mut cmd = Command::new("node");
+            cmd.arg(dev_proxy_script.unwrap());
+            cmd
+        } else {
+            let sidecar_path = candidates.iter()
+                .find(|p| p.exists())
+                .cloned()
+                .ok_or_else(|| {
+                    let tried = candidates.iter()
+                        .map(|p| format!("  - {}", p.display()))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    format!("Sidecar not found: {}\nTried paths:\n{}", sidecar_name, tried)
+                })?;
+            Command::new(&sidecar_path)
+        };
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, inject, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, inject, nextTick } from 'vue'
 import { api } from '../../api.js'
 import { listen } from '@tauri-apps/api/event'
 import iconUrl from '../../assets/icon.png'
@@ -13,6 +13,10 @@ const activeProfileIds = ref([])
 const toast = ref('')
 const modelMappings = ref({ enabled: false, rules: [] })
 const confirmState = ref({ visible: false, message: '', resolve: null })
+let statusUnlisten = null
+let toastUnlisten = null
+let refreshUnlisten = null
+let mappingSaveTimer = 0
 
 const proxyUrl = computed(() => `http://127.0.0.1:${proxyPort.value}`)
 
@@ -81,12 +85,7 @@ async function toggleProfile(id) {
 }
 
 function copyUrl() {
-  const el = document.createElement('textarea')
-  el.value = proxyUrl.value
-  el.style.position = 'fixed'; el.style.left = '-9999px'
-  document.body.appendChild(el)
-  el.select(); document.execCommand('copy')
-  document.body.removeChild(el)
+  api.copyText(proxyUrl.value)
   showToast('已复制代理地址')
 }
 
@@ -237,12 +236,24 @@ async function updateMappingRule(index, field, value) {
   const rules = [...modelMappings.value.rules]
   rules[index] = { ...rules[index], [field]: value }
   modelMappings.value = { ...modelMappings.value, rules }
-  await api.setModelMappings(modelMappings.value)
+  scheduleMappingSave()
+}
+
+function scheduleMappingSave() {
+  clearTimeout(mappingSaveTimer)
+  mappingSaveTimer = setTimeout(async () => {
+    try {
+      await api.setModelMappings(modelMappings.value)
+    } catch (err) {
+      showToast('模型映射保存失败: ' + (typeof err === 'string' ? err : err.message || ''))
+      await loadData()
+    }
+  }, 400)
 }
 
 onMounted(async () => {
   await loadData()
-  api.onStatusChange((payload) => {
+  statusUnlisten = await api.onStatusChange((payload) => {
     proxyStatus.value = payload.status
     if (payload.error === 'EADDRINUSE') {
       showToast('启动失败: 端口 ' + (payload.message?.match(/\d+/)?.[0] || '') + ' 已被占用')
@@ -251,13 +262,20 @@ onMounted(async () => {
     }
   })
   // Listen for toast messages from tray menu
-  listen('show-toast', (event) => {
+  toastUnlisten = await listen('show-toast', (event) => {
     showToast(event.payload)
   })
   // Listen for data refresh from tray menu
-  listen('refresh-data', () => {
+  refreshUnlisten = await listen('refresh-data', () => {
     loadData()
   })
+})
+
+onUnmounted(() => {
+  clearTimeout(mappingSaveTimer)
+  statusUnlisten?.()
+  toastUnlisten?.()
+  refreshUnlisten?.()
 })
 </script>
 

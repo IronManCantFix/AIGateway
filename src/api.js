@@ -35,7 +35,8 @@ export const api = {
 
   // --- Stats & Logs ---
   getStats: () => invoke('get_stats'),
-  getLogs: (limit) => invoke('get_logs', { limit }),
+  getLogs: (limit, offset = 0) => invoke('get_logs', { limit, offset }),
+  getLogFileSize: () => invoke('get_log_file_size'),
   clearLogs: () => invoke('clear_logs'),
   clearAllData: () => invoke('clear_all_data'),
   clearLogsBodies: () => invoke('clear_logs_bodies'),
@@ -55,6 +56,6 @@ export const api = {
 
   // --- Events ---
   onStatusChange: (fn) => {
-    listen('proxy-status-changed', (event) => fn(event.payload))
+    return listen('proxy-status-changed', (event) => fn(event.payload))
   },
 }

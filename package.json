@@ -4,7 +4,8 @@
     "dev": "vite",
     "build": "vite build",
     "tauri": "tauri",
-    "proxy:build": "bash scripts/build-proxy.sh"
+    "proxy:build": "bash scripts/build-proxy.sh",
+    "test:proxy": "node --test proxy/*.test.js"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",

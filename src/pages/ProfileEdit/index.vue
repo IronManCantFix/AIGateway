@@ -73,9 +73,9 @@ async function save() {
   }
 }
 
-function copyKey() {
+async function copyKey() {
   if (!form.value.apiKey) return
-  navigator.clipboard.writeText(form.value.apiKey)
+  await api.copyText(form.value.apiKey)
   copied.value = true
   setTimeout(() => { copied.value = false }, 1500)
 }
