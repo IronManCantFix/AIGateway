@@ -11,16 +11,30 @@
 **AIGateway 坐在所有工具和所有 API 之间：**
 
 ```
-Codex / Cursor / 脚本 / ...
-        │
-        ▼
-  localhost:9999  ← 统一入口，固定不变
-        │
-        ▼
-   AIGateway 自动做协议转换
-        │
-        ▼
-  OpenAI / Anthropic / 中转站 / ...
+┌─ Client ──────────────────────────────────────┐
+│  curl · Claude Code · Continue · ChatGPT 等   │
+│  统一请求: /v1/chat/completions               │
+│  model: "claude-sonnet-4-20250514"            │
+└────────────────────┬──────────────────────────┘
+                     │ HTTP localhost:9999
+┌────────────────────▼──────────────────────────┐
+│  AIGateway                                    │
+│                                               │
+│  ┌─────────────────────────────────────────┐  │
+│  │  Model Router（配置驱动）                │  │
+│  │  model ID → 匹配 Profile → 协议转换     │  │
+│  │                                         │  │
+│  │  claude-*   → Anthropic Messages API    │  │
+│  │  gpt-*      → OpenAI Chat API           │  │
+│  │  gemini-*   → Google Gemini API         │  │
+│  │  deepseek-* → DeepSeek API              │  │
+│  │  (任意 model ID，配置即路由)             │  │
+│  └─────────────────────────────────────────┘  │
+└────────────────────┬──────────────────────────┘
+           ┌─────────┼─────────┬─────────┐
+           ▼         ▼         ▼         ▼
+       Anthropic   OpenAI    Google    DeepSeek
+       Messages    Chat API  Gemini    API
 ```
 
 - 📌 工具侧只认一个地址 `http://127.0.0.1:9999`，永远不用改

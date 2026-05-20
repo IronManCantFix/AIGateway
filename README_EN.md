@@ -11,16 +11,30 @@ You have multiple AI tools: Codex CLI, Cursor, CherryStudio, custom scripts... e
 **AIGateway sits between all tools and all APIs:**
 
 ```
-Codex / Cursor / Scripts / ...
-        │
-        ▼
-  localhost:9999  ← unified endpoint, never changes
-        │
-        ▼
-   AIGateway handles protocol conversion
-        │
-        ▼
-  OpenAI / Anthropic / Relays / ...
+┌─ Client ──────────────────────────────────────┐
+│  curl · Claude Code · Continue · ChatGPT etc. │
+│  Unified endpoint: /v1/chat/completions       │
+│  model: "claude-sonnet-4-20250514"            │
+└────────────────────┬──────────────────────────┘
+                     │ HTTP localhost:9999
+┌────────────────────▼──────────────────────────┐
+│  AIGateway                                    │
+│                                               │
+│  ┌─────────────────────────────────────────┐  │
+│  │  Model Router (config-driven)           │  │
+│  │  model ID → match Profile → convert     │  │
+│  │                                         │  │
+│  │  claude-*   → Anthropic Messages API    │  │
+│  │  gpt-*      → OpenAI Chat API           │  │
+│  │  gemini-*   → Google Gemini API         │  │
+│  │  deepseek-* → DeepSeek API              │  │
+│  │  (any model ID, just configure to route)│  │
+│  └─────────────────────────────────────────┘  │
+└────────────────────┬──────────────────────────┘
+           ┌─────────┼─────────┬─────────┐
+           ▼         ▼         ▼         ▼
+       Anthropic   OpenAI    Google    DeepSeek
+       Messages    Chat API  Gemini    API
 ```
 
 - 📌 Tools only know one address `http://127.0.0.1:9999`, never need to change
