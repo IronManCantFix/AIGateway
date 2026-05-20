@@ -46,7 +46,7 @@
 
 ### 0️⃣ 下载安装
 
-前往 [GitHub Releases](https://github.com/a471640241/AIGateway/releases) 页面下载对应平台的安装包：
+前往 [GitHub Releases](https://github.com/IronManCantFix/AIGateway/releases) 页面下载对应平台的安装包：
 
 | 平台 | 安装包 |
 |---|---|

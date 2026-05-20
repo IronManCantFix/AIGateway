@@ -46,7 +46,7 @@ You have multiple AI tools: Codex CLI, Cursor, CherryStudio, custom scripts... e
 
 ### 0️⃣ Download & Install
 
-Go to the [GitHub Releases](https://github.com/a471640241/AIGateway/releases) page to download the installer for your platform:
+Go to the [GitHub Releases](https://github.com/IronManCantFix/AIGateway/releases) page to download the installer for your platform:
 
 | Platform | Installer |
 |---|---|
