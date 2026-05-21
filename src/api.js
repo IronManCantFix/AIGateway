@@ -35,7 +35,7 @@ export const api = {
 
   // --- Stats & Logs ---
   getStats: () => invoke('get_stats'),
-  getLogs: (limit, offset = 0) => invoke('get_logs', { limit, offset }),
+  getLogs: (limit, offset = 0, filter = null) => invoke('get_logs', { limit, offset, filter }),
   getLogFileSize: () => invoke('get_log_file_size'),
   clearLogs: () => invoke('clear_logs'),
   clearAllData: () => invoke('clear_all_data'),

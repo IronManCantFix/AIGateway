@@ -79,6 +79,8 @@ pub struct LogEntry {
     pub timestamp: u64,
     pub endpoint: String,
     #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
     pub model: String,
     #[serde(default)]
     pub provider: String,
@@ -116,6 +118,69 @@ pub struct LogEntry {
 pub struct StatsSnapshot {
     #[serde(default)]
     pub logs: Vec<LogEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct LogFilter {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(rename = "statusClass", default)]
+    pub status_class: Option<String>,
+    #[serde(rename = "dateFrom", default)]
+    pub date_from: Option<u64>,
+    #[serde(rename = "dateTo", default)]
+    pub date_to: Option<u64>,
+}
+
+impl LogFilter {
+    fn matches(&self, e: &LogEntry) -> bool {
+        if let Some(p) = self.provider.as_ref().filter(|s| !s.is_empty()) {
+            if !e.provider.eq_ignore_ascii_case(p) {
+                return false;
+            }
+        }
+        if let Some(m) = self.model.as_ref().filter(|s| !s.is_empty()) {
+            let ml = m.to_lowercase();
+            let model_match = e.model.to_lowercase().contains(&ml);
+            let orig_match = e.original_model.as_ref()
+                .map(|o| o.to_lowercase().contains(&ml))
+                .unwrap_or(false);
+            if !model_match && !orig_match {
+                return false;
+            }
+        }
+        if let Some(sc) = self.status_class.as_ref().filter(|s| !s.is_empty()) {
+            let c = e.status_code;
+            let ok = match sc.as_str() {
+                "2xx" => (200..300).contains(&c),
+                "4xx" => (400..500).contains(&c),
+                "5xx" => (500..600).contains(&c),
+                _ => true,
+            };
+            if !ok {
+                return false;
+            }
+        }
+        if let Some(from) = self.date_from {
+            if e.timestamp < from {
+                return false;
+            }
+        }
+        if let Some(to) = self.date_to {
+            if e.timestamp >= to {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LogsPage {
+    pub logs: Vec<LogEntry>,
+    pub total: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -320,38 +385,35 @@ impl ConfigStore {
         self.path("logs.jsonl")
     }
 
-    fn read_legacy_logs(&self, limit: Option<usize>, offset: Option<usize>) -> Vec<LogEntry> {
+    fn read_legacy_logs_filtered(&self, filter: &LogFilter, limit: Option<usize>, offset: Option<usize>) -> LogsPage {
         let snapshot: StatsSnapshot = self.read_json("stats-snapshot.json");
-        let len = snapshot.logs.len();
-        let offset = offset.unwrap_or(0).min(len);
-        let limit = limit.unwrap_or(len.saturating_sub(offset));
-        let end = len.saturating_sub(offset);
-        let start = end.saturating_sub(limit);
-        let mut logs: Vec<LogEntry> = snapshot.logs[start..end].to_vec();
-        logs.reverse();
-        logs
+        // 旧存储是按 append 顺序，反转后是最新优先
+        let mut entries: Vec<LogEntry> = snapshot.logs.into_iter().rev().collect();
+        entries.retain(|e| filter.matches(e));
+        let total = entries.len();
+        let offset = offset.unwrap_or(0).min(total);
+        let limit = limit.unwrap_or(total.saturating_sub(offset));
+        let end = (offset + limit).min(total);
+        LogsPage { logs: entries[offset..end].to_vec(), total }
     }
 
-    fn read_logs_jsonl(&self, limit: Option<usize>, offset: Option<usize>) -> Result<Vec<LogEntry>, String> {
+    fn read_logs_jsonl_filtered(&self, filter: &LogFilter, limit: Option<usize>, offset: Option<usize>) -> Result<LogsPage, String> {
         let path = self.logs_jsonl_path();
         let file = fs::File::open(&path).map_err(|e| e.to_string())?;
-        let lines: Vec<String> = BufReader::new(file)
+        // 一次读完，按时间倒序（最新在前），再筛选，再分页
+        let mut entries: Vec<LogEntry> = BufReader::new(file)
             .lines()
             .map_while(Result::ok)
             .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| serde_json::from_str::<LogEntry>(&line).ok())
             .collect();
-        let len = lines.len();
-        let offset = offset.unwrap_or(0).min(len);
-        let limit = limit.unwrap_or(len.saturating_sub(offset));
-        let end = len.saturating_sub(offset);
-        let start = end.saturating_sub(limit);
-        let mut logs = Vec::new();
-        for line in lines[start..end].iter().rev() {
-            if let Ok(entry) = serde_json::from_str::<LogEntry>(line) {
-                logs.push(entry);
-            }
-        }
-        Ok(logs)
+        entries.reverse();
+        entries.retain(|e| filter.matches(e));
+        let total = entries.len();
+        let offset = offset.unwrap_or(0).min(total);
+        let limit = limit.unwrap_or(total.saturating_sub(offset));
+        let end = (offset + limit).min(total);
+        Ok(LogsPage { logs: entries[offset..end].to_vec(), total })
     }
 
     fn append_log_jsonl(&self, entry: &LogEntry) -> Result<(), String> {
@@ -392,11 +454,12 @@ impl ConfigStore {
         fs::rename(&tmp, &path).map_err(|e| e.to_string())
     }
 
-    pub fn get_logs(&self, limit: Option<usize>, offset: Option<usize>) -> Vec<LogEntry> {
+    pub fn get_logs(&self, limit: Option<usize>, offset: Option<usize>, filter: LogFilter) -> LogsPage {
         if self.logs_jsonl_path().exists() {
-            return self.read_logs_jsonl(limit, offset).unwrap_or_default();
+            return self.read_logs_jsonl_filtered(&filter, limit, offset)
+                .unwrap_or(LogsPage { logs: vec![], total: 0 });
         }
-        self.read_legacy_logs(limit, offset)
+        self.read_legacy_logs_filtered(&filter, limit, offset)
     }
 
     pub fn get_log_file_size(&self) -> u64 {

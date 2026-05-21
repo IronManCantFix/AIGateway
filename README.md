@@ -152,11 +152,14 @@ wire_api = "responses"
 
 日志页记录每一次代理请求，支持：
 
-- 按**提供商**、**模型**、**日期范围**筛选
-- 分页浏览（每页 5 / 10 / 20 / 50 条）
-- 每条日志显示：状态码、接口类型、上游请求地址、提供商、模型、耗时、Token 用量（P / C / T）
+- 按**提供商**、**模型**、**状态码**（2xx 成功 / 4xx 客户端错误 / 5xx 服务端错误）、**日期范围**筛选
+- 提供商和模型下拉项来自已配置的提供商；选中某提供商后，模型下拉只显示该提供商的模型（联动过滤）
+- **筛选与分页均在后端完成**：每次只取当前页的数据，不会一次性加载全部日志，避免 logEnabled 开启时大日志拖慢前端
+- 分页浏览（每页 5 / 10 / 20 / 50 条），底部显示 `共 X 条 / 第 Y / Z 页`
+- 每条日志显示：状态码、HTTP 方法、接口类型、上游请求地址、提供商、模型、耗时、Token 用量（P / C / T）
 - 通过代理发出的请求会显示蓝色 `PROXY` 标签
 - 经过模型映射的请求会显示 `原始模型 → 映射后模型 | 提供商`
+- **404 路由未匹配请求**会额外记录：HTTP 方法、从请求体提取的 model、完整的请求/响应体（无需开启调试日志），便于排查客户端发错地址或参数
 
 ### 调试日志
 
@@ -259,21 +262,27 @@ cd proxy && bun install && cd ..
 ### 开发模式
 
 ```bash
-# 编译 Sidecar（首次）
-mkdir -p src-tauri/binaries
-cd proxy && bun build --compile proxy-server.js --outfile ../src-tauri/binaries/proxy-server && cd ..
-TARGET=$(rustc -vV | grep host | cut -d' ' -f2)
-ln -sf proxy-server "src-tauri/binaries/proxy-server-$TARGET"
-
-# 启动
 npm run tauri dev
 ```
+
+> `tauri dev` 启动前会自动执行 `npm run proxy:build:current`，根据当前主机平台编译 Sidecar，无需手动操作。
 
 ### 生产构建
 
 ```bash
 npm run proxy:build   # 编译 Sidecar（所有平台）
 npm run tauri build   # 构建应用
+```
+
+也可以按平台单独构建 Sidecar：
+
+```bash
+npm run proxy:build:current      # 自动检测当前主机平台
+npm run proxy:build:mac          # macOS (ARM + Intel)
+npm run proxy:build:mac-arm      # 仅 macOS ARM (M 系列)
+npm run proxy:build:mac-intel    # 仅 macOS Intel
+npm run proxy:build:windows      # 仅 Windows x64
+npm run proxy:build:linux        # 仅 Linux x64
 ```
 
 ### 生成应用图标
@@ -306,15 +315,17 @@ npx tauri icon <path-to-your-icon.png>
 **开发模式下重新编译代理（当前平台）：**
 
 ```bash
-cd proxy && bun build --compile proxy-server.js --outfile ../src-tauri/binaries/proxy-server && cd ..
-TARGET=$(rustc -vV | grep host | cut -d' ' -f2)
-ln -sf proxy-server "src-tauri/binaries/proxy-server-$TARGET"
+npm run proxy:build:current      # 仅编译当前主机平台
+# 或直接 npm run tauri dev —— 会自动触发当前平台 Sidecar 编译
 ```
 
-**生产构建（所有平台）：**
+**生产构建（按需选择平台）：**
 
 ```bash
-npm run proxy:build
+npm run proxy:build              # 所有平台
+npm run proxy:build:mac          # macOS (ARM + Intel)
+npm run proxy:build:windows      # 仅 Windows x64
+# ... 详见 上文「生产构建」章节
 ```
 
 重新编译后需要重启应用才能生效。
