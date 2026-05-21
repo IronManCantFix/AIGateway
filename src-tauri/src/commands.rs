@@ -268,7 +268,8 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
 
     let status = resp.status();
     if !status.is_success() {
-        let code = match status.as_u16() {
+        let status_code = status.as_u16();
+        let code = match status_code {
             401 => "upstream.unauthorized",
             403 => "upstream.forbidden",
             404 => "upstream.endpointNotFound",
@@ -279,9 +280,12 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
             _ => "upstream.unknown",
         };
         let body = resp.text().await.unwrap_or_default();
+        // Body excerpt logged to stderr for developer debugging; NOT sent to frontend
+        // (upstream responses can contain echoed auth headers / partial tokens)
+        let body_excerpt: String = body.chars().take(200).collect();
+        eprintln!("[fetch_provider_models] upstream {} body excerpt: {}", status_code, body_excerpt);
         return Err(crate::error::AppError::new(code)
-            .with_params(serde_json::json!({ "status": status.as_u16() }))
-            .with_detail(body.chars().take(200).collect::<String>()));
+            .with_params(serde_json::json!({ "status": status_code })));
     }
 
     let body: serde_json::Value = resp.json().await?;
@@ -313,8 +317,9 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
             .collect();
         Ok(models)
     } else {
-        Err(crate::error::AppError::new("upstream.unknownResponseFormat")
-            .with_detail(serde_json::to_string(&body).unwrap_or_default().chars().take(300).collect::<String>()))
+        let body_excerpt: String = serde_json::to_string(&body).unwrap_or_default().chars().take(300).collect();
+        eprintln!("[fetch_provider_models] unknown response format: {}", body_excerpt);
+        Err(crate::error::AppError::new("upstream.unknownResponseFormat"))
     }
 }
 
