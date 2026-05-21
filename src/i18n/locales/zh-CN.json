@@ -242,6 +242,8 @@
       "requestFailed": "检查更新失败",
       "githubError": "GitHub API 返回错误 ({status})",
       "noVersionTag": "无法获取最新版本号"
-    }
+    },
+    "settings": { "saveFailed": "保存设置失败" },
+    "tray": { "setMenuFailed": "重建托盘菜单失败" }
   }
 }

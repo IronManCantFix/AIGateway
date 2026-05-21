@@ -388,3 +388,26 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
 pub fn get_app_version(app_handle: tauri::AppHandle) -> String {
     app_handle.package_info().version.to_string()
 }
+
+/// Update the user's language preference and rebuild the tray menu.
+/// Frontend calls this when the user switches language via the Settings UI.
+#[tauri::command]
+pub async fn set_tray_menu_language(
+    app: tauri::AppHandle,
+    lang: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), crate::error::AppError> {
+    // Persist new language to settings
+    let mut settings = state.config.get_settings();
+    settings.language = lang;
+    state.config.set_settings(&settings)
+        .map_err(|e| crate::error::AppError::new("settings.saveFailed").with_detail(e))?;
+
+    // Rebuild tray menu with the new language
+    let menu = crate::tray::build_tray_menu(&app, &state.config, &state.proxy);
+    if let Some(tray) = app.tray_by_id("main") {
+        tray.set_menu(Some(menu))
+            .map_err(|e| crate::error::AppError::new("tray.setMenuFailed").with_detail(e.to_string()))?;
+    }
+    Ok(())
+}

@@ -242,6 +242,8 @@
       "requestFailed": "Update check failed",
       "githubError": "GitHub API error ({status})",
       "noVersionTag": "Could not fetch latest version"
-    }
+    },
+    "settings": { "saveFailed": "Failed to save settings" },
+    "tray": { "setMenuFailed": "Failed to rebuild tray menu" }
   }
 }

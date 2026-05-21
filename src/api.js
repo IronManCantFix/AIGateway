@@ -54,6 +54,9 @@ export const api = {
   checkForUpdates: () => invoke('check_for_updates'),
   getAppVersion: () => invoke('get_app_version'),
 
+  // --- i18n / Tray ---
+  setTrayMenuLanguage: (lang) => invoke('set_tray_menu_language', { lang }),
+
   // --- Events ---
   onStatusChange: (fn) => {
     return listen('proxy-status-changed', (event) => fn(event.payload))
