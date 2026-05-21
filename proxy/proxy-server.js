@@ -693,9 +693,10 @@ async function handleApiRequest(req, res) {
   req._bodySizeBefore = bodySizeBefore
   req._bodySizeAfter = bodySizeAfter
 
-  // For providers that support system role in messages (not MiniMax/newapi),
-  // move system field back into messages array as system message
-  if (body.system && profile.providerType !== 'newapi' && Array.isArray(body.messages)) {
+  // OpenAI Chat-compatible providers expect system instructions inside
+  // messages[]. Anthropic Messages-compatible providers require the top-level
+  // system field, so leave it untouched for meta.target === 'messages'.
+  if (body.system && meta.target === 'chat_completions' && profile.providerType !== 'newapi' && Array.isArray(body.messages)) {
     body.messages.unshift({ role: 'system', content: body.system })
     delete body.system
   }
