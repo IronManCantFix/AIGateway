@@ -70,7 +70,7 @@ async function save() {
     navigate('gateway')
   } catch (e) {
     console.error('Save failed:', e)
-    error.value = e.message || String(e)
+    error.value = translateError(e)
   } finally {
     saving.value = false
   }

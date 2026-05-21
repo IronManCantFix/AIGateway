@@ -8,7 +8,9 @@ pub struct AppError {
     pub code: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
-    /// 仅用于 dev/log 的英文 detail（前端不展示，DevTools 可见）
+    /// 英文 detail，主要用于开发期调试。会随 AppError 一起跨 IPC 发送给前端，
+    /// 但前端 translateError 不会将其展示给用户——仅在 i18n key 缺失时输出到 console.warn。
+    /// 严禁在此放置可能泄露上游凭证的数据（例如上游响应原文）；那类信息请用 eprintln! 留在 Rust 侧。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
