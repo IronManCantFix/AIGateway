@@ -55,7 +55,7 @@ export const api = {
   getAppVersion: () => invoke('get_app_version'),
 
   // --- i18n / Tray ---
-  setTrayMenuLanguage: (lang) => invoke('set_tray_menu_language', { lang }),
+  setLanguage: (lang) => invoke('set_language', { lang }),
 
   // --- Events ---
   onStatusChange: (fn) => {

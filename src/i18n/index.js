@@ -25,20 +25,20 @@ export const i18n = createI18n({
   warnHtmlMessage: false
 })
 
-export async function setLocale(lang, { persist = true } = {}) {
+export async function setLocale(lang, { persist = false } = {}) {
   i18n.global.locale.value = lang
   document.documentElement.lang = lang
   if (persist) {
     try {
-      await api.setTrayMenuLanguage(lang)
+      await api.setLanguage(lang)
     } catch (e) {
-      console.error('Failed to rebuild tray menu after locale change:', e)
+      console.error('Failed to persist language to Rust:', e)
     }
   }
 }
 
 export async function applyLocaleFromSetting(settingValue) {
   const lang = resolveLocale(settingValue)
-  await setLocale(lang, { persist: false })
+  await setLocale(lang)
   return lang
 }

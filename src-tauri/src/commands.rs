@@ -389,10 +389,11 @@ pub fn get_app_version(app_handle: tauri::AppHandle) -> String {
     app_handle.package_info().version.to_string()
 }
 
-/// Update the user's language preference and rebuild the tray menu.
-/// Frontend calls this when the user switches language via the Settings UI.
+/// Update the user's language preference, persist it, and rebuild the tray menu.
+///
+/// No proxy reload needed: language is UI-only and doesn't affect proxy behavior.
 #[tauri::command]
-pub async fn set_tray_menu_language(
+pub async fn set_language(
     app: tauri::AppHandle,
     lang: String,
     state: tauri::State<'_, AppState>,

@@ -223,7 +223,7 @@ fn main() {
             commands::fetch_provider_models,
             commands::check_for_updates,
             commands::get_app_version,
-            commands::set_tray_menu_language,
+            commands::set_language,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
