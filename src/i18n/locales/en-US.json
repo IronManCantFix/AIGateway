@@ -2,6 +2,7 @@
   "common": {
     "save": "Save",
     "cancel": "Cancel",
+    "ok": "OK",
     "confirm": "Confirm",
     "copy": "Copy",
     "copySuccess": "{label} copied",
@@ -35,13 +36,10 @@
       "start": "Start",
       "stop": "Stop",
       "add": "+ Add",
-      "copy": "Copy",
       "edit": "Edit",
-      "delete": "Delete",
       "enabled": "Enabled",
       "disabled": "Disabled",
-      "addMapping": "+ Add mapping",
-      "ok": "OK"
+      "addMapping": "+ Add mapping"
     },
     "label": {
       "clickToCopy": "Click to copy",

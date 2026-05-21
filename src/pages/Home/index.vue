@@ -354,9 +354,9 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="pr-actions">
-            <button class="act-btn" @click="copyProfile(p)">{{ $t('home.button.copy') }}</button>
+            <button class="act-btn" @click="copyProfile(p)">{{ $t('common.copy') }}</button>
             <button class="act-btn" @click="navigate('gw-add', { editId: p.id })">{{ $t('home.button.edit') }}</button>
-            <button class="act-btn danger" @click="confirmDelete(p.id)">{{ $t('home.button.delete') }}</button>
+            <button class="act-btn danger" @click="confirmDelete(p.id)">{{ $t('common.delete') }}</button>
           </div>
         </div>
       </div>
@@ -451,7 +451,7 @@ onUnmounted(() => {
         <p class="confirm-msg">{{ confirmState.message }}</p>
         <div class="confirm-actions">
           <button class="confirm-cancel" @click="confirmCancel">{{ $t('common.cancel') }}</button>
-          <button class="confirm-ok" @click="confirmOk">{{ $t('home.button.ok') }}</button>
+          <button class="confirm-ok" @click="confirmOk">{{ $t('common.ok') }}</button>
         </div>
       </div>
     </div>

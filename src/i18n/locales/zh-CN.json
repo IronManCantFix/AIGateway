@@ -2,6 +2,7 @@
   "common": {
     "save": "保存",
     "cancel": "取消",
+    "ok": "确定",
     "confirm": "确认",
     "copy": "复制",
     "copySuccess": "{label}复制成功",
@@ -35,13 +36,10 @@
       "start": "启动",
       "stop": "停止",
       "add": "+ 添加",
-      "copy": "复制",
       "edit": "编辑",
-      "delete": "删除",
       "enabled": "已启用",
       "disabled": "已禁用",
-      "addMapping": "+ 添加映射",
-      "ok": "确定"
+      "addMapping": "+ 添加映射"
     },
     "label": {
       "clickToCopy": "点击复制",
