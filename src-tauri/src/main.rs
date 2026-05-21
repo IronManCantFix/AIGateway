@@ -3,6 +3,7 @@
 mod config;
 mod proxy;
 mod commands;
+mod error;
 
 use std::sync::Arc;
 use tauri::{Emitter, Listener, Manager};
