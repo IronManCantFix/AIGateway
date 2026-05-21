@@ -87,7 +87,8 @@
       "auto": "跟随系统",
       "zh-CN": "简体中文",
       "en-US": "English",
-      "changed": "语言已切换"
+      "changed": "语言已切换",
+      "changeFailed": "语言切换失败，请重试"
     },
     "label": {
       "saved": "已保存",

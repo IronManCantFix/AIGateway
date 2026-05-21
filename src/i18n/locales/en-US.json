@@ -87,7 +87,8 @@
       "auto": "Follow system",
       "zh-CN": "简体中文",
       "en-US": "English",
-      "changed": "Language updated"
+      "changed": "Language updated",
+      "changeFailed": "Failed to change language. Please try again."
     },
     "label": {
       "saved": "Saved",

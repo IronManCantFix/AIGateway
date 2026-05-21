@@ -112,6 +112,9 @@ async function onLanguageChange() {
     copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
   } catch (e) {
     console.error('Failed to change language:', e)
+    copyMsg.value = t('settings.language.changeFailed')
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copyMsg.value = '' }, 2500)
   }
 }
 async function loadStats() {
