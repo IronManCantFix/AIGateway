@@ -706,7 +706,7 @@ onUnmounted(() => {
                 <span class="stat-name">{{ pv.provider }}</span>
                 <div class="stat-vals">
                   <span class="stat-val token-val" v-if="providerTokenMap[pv.provider]">{{ fmtTok(providerTokenMap[pv.provider]) }}</span>
-                  <span class="stat-val">{{ pv.count }}<span class="unit">{{ $t('settings.label.unitTimes') }}</span></span>
+                  <span class="stat-val">{{ $t('settings.label.requestCount', { count: pv.count }) }}</span>
                 </div>
               </div>
               <div class="sub-row" v-for="m in pv.models" :key="m.model">
@@ -792,14 +792,14 @@ onUnmounted(() => {
           </div>
           <div class="log-pagination" v-if="logTotal > 0">
             <div class="page-size">
-              <span>{{ $t('settings.label.paginationCount', { count: logTotal }) }}</span>
+              <span>{{ $t('settings.label.perPagePrefix', { count: logTotal }) }}</span>
               <select v-model.number="logPageSize" @change="resetLogPage">
                 <option :value="5">5</option>
                 <option :value="10">10</option>
                 <option :value="20">20</option>
                 <option :value="50">50</option>
               </select>
-              <span>{{ $t('settings.label.paginationPer') }}</span>
+              <span>{{ $t('settings.label.perPageSuffix') }}</span>
             </div>
             <button :disabled="logPage <= 1 || logsLoading" @click="prevPage">{{ $t('settings.button.prevPage') }}</button>
             <span class="page-info">{{ $t('settings.label.pageInfo', { page: logPage, total: logTotalPages }) }}</span>
