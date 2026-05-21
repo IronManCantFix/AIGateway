@@ -169,6 +169,57 @@
       "responsePayload": "response payload"
     }
   },
-  "profileEdit": {},
+  "profileEdit": {
+    "title": {
+      "add": "Add Provider",
+      "edit": "Edit Provider"
+    },
+    "section": {
+      "pickerTitle": "Select available models"
+    },
+    "label": {
+      "name": "Profile name",
+      "providerType": "Provider type",
+      "baseUrl": "Base URL",
+      "apiKey": "API Key",
+      "defaultModel": "Default model",
+      "availableModels": "Available models",
+      "optional": "(optional)",
+      "availableHint": "(leave empty to skip model routing)",
+      "baseUrlHint": "Do not append /v1; the proxy adds it automatically.",
+      "added": "Added",
+      "copied": "Copied"
+    },
+    "button": {
+      "show": "Show",
+      "hide": "Hide",
+      "fetchModels": "Fetch models",
+      "fetching": "Fetching...",
+      "saving": "Saving...",
+      "selectAll": "Select all",
+      "invertSelection": "Invert selection",
+      "confirmAdd": "Add selected"
+    },
+    "placeholder": {
+      "name": "e.g. My OpenAI",
+      "baseUrl": "e.g. https://api.openai.com",
+      "defaultModel": "e.g. gpt-4o",
+      "addModel": "Enter model ID and press Enter",
+      "searchModels": "Search models..."
+    },
+    "message": {
+      "nameRequired": "Please enter a profile name",
+      "baseUrlRequired": "Please enter a Base URL",
+      "fillRequiredFields": "Please fill in provider type, Base URL and API Key first",
+      "emptyModelList": "The provider returned an empty model list",
+      "noMatchingModels": "No matching results"
+    },
+    "providerType": {
+      "openai-chat": "OpenAI Chat Completions",
+      "openai-response": "OpenAI Responses",
+      "anthropic-message": "Anthropic Messages",
+      "newapi": "NEW API"
+    }
+  },
   "errors": {}
 }

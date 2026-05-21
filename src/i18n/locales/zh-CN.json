@@ -169,6 +169,57 @@
       "responsePayload": "响应参数"
     }
   },
-  "profileEdit": {},
+  "profileEdit": {
+    "title": {
+      "add": "添加提供商",
+      "edit": "编辑提供商"
+    },
+    "section": {
+      "pickerTitle": "选择可用模型"
+    },
+    "label": {
+      "name": "配置名称",
+      "providerType": "提供商类型",
+      "baseUrl": "Base URL",
+      "apiKey": "API Key",
+      "defaultModel": "默认模型",
+      "availableModels": "可用模型",
+      "optional": "(可选)",
+      "availableHint": "(为空则不参与模型路由)",
+      "baseUrlHint": "无需添加 /v1，代理会自动拼接",
+      "added": "已添加",
+      "copied": "已复制"
+    },
+    "button": {
+      "show": "显示",
+      "hide": "隐藏",
+      "fetchModels": "获取模型",
+      "fetching": "获取中...",
+      "saving": "保存中...",
+      "selectAll": "全选",
+      "invertSelection": "反选",
+      "confirmAdd": "确定添加"
+    },
+    "placeholder": {
+      "name": "如：我的 OpenAI",
+      "baseUrl": "如：https://api.openai.com",
+      "defaultModel": "如：gpt-4o",
+      "addModel": "输入模型 ID，回车添加",
+      "searchModels": "搜索模型..."
+    },
+    "message": {
+      "nameRequired": "请输入配置名称",
+      "baseUrlRequired": "请输入 Base URL",
+      "fillRequiredFields": "请先填写提供商类型、Base URL 和 API Key",
+      "emptyModelList": "该提供商返回了空的模型列表",
+      "noMatchingModels": "无匹配结果"
+    },
+    "providerType": {
+      "openai-chat": "OpenAI Chat Completions",
+      "openai-response": "OpenAI Responses",
+      "anthropic-message": "Anthropic Messages",
+      "newapi": "NEW API"
+    }
+  },
   "errors": {}
 }

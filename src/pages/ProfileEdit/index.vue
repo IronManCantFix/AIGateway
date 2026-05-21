@@ -1,7 +1,9 @@
 <script setup>
 import { ref, onMounted, computed, inject } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from '../../api.js'
 
+const { t } = useI18n()
 const navigate = inject('navigate')
 const pagePayload = inject('pagePayload')
 
@@ -40,7 +42,7 @@ const filteredAvailModels = computed(() => {
   return availFetchedModels.value.filter(m => m.id.toLowerCase().includes(q))
 })
 
-const title = computed(() => isEdit.value ? '编辑提供商' : '添加提供商')
+const title = computed(() => isEdit.value ? t('profileEdit.title.edit') : t('profileEdit.title.add'))
 
 async function loadProfile(id) {
   const profiles = await api.getProfiles()
@@ -54,8 +56,8 @@ async function loadProfile(id) {
 
 async function save() {
   error.value = ''
-  if (!form.value.name.trim()) { error.value = '请输入配置名称'; return }
-  if (!form.value.baseUrl.trim()) { error.value = '请输入 Base URL'; return }
+  if (!form.value.name.trim()) { error.value = t('profileEdit.message.nameRequired'); return }
+  if (!form.value.baseUrl.trim()) { error.value = t('profileEdit.message.baseUrlRequired'); return }
   form.value.baseUrl = form.value.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
   saving.value = true
   try {
@@ -86,7 +88,7 @@ function canFetchModels() {
 
 async function fetchModels() {
   if (!canFetchModels()) {
-    error.value = '请先填写提供商类型、Base URL 和 API Key'
+    error.value = t('profileEdit.message.fillRequiredFields')
     return
   }
   fetchingModels.value = true
@@ -97,7 +99,7 @@ async function fetchModels() {
     const cleanForm = { ...form.value, baseUrl: form.value.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '') }
     const models = await api.fetchProviderModels(cleanForm)
     if (models.length === 0) {
-      error.value = '该提供商返回了空的模型列表'
+      error.value = t('profileEdit.message.emptyModelList')
       return
     }
     fetchedModels.value = models
@@ -118,7 +120,7 @@ function selectModel(modelId) {
 
 async function fetchAvailModels() {
   if (!canFetchModels()) {
-    error.value = '请先填写提供商类型、Base URL 和 API Key'
+    error.value = t('profileEdit.message.fillRequiredFields')
     return
   }
   availFetchingModels.value = true
@@ -127,7 +129,7 @@ async function fetchAvailModels() {
     const cleanForm = { ...form.value, baseUrl: form.value.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '') }
     const models = await api.fetchProviderModels(cleanForm)
     if (models.length === 0) {
-      error.value = '该提供商返回了空的模型列表'
+      error.value = t('profileEdit.message.emptyModelList')
       return
     }
     const existing = form.value.models || []
@@ -195,7 +197,7 @@ onMounted(() => {
     <div class="page-header">
       <button class="back-link" @click="navigate('gateway')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-        返回
+        {{ $t('common.back') }}
       </button>
       <h2>{{ title }}</h2>
     </div>
@@ -204,45 +206,45 @@ onMounted(() => {
       <div class="card-body">
         <div class="fields">
           <div class="field">
-            <label>配置名称 <span class="req">*</span></label>
-            <input v-model="form.name" type="text" placeholder="如：我的 OpenAI" />
+            <label>{{ $t('profileEdit.label.name') }} <span class="req">*</span></label>
+            <input v-model="form.name" type="text" :placeholder="$t('profileEdit.placeholder.name')" />
           </div>
 
           <div class="field">
-            <label>提供商类型 <span class="req">*</span></label>
+            <label>{{ $t('profileEdit.label.providerType') }} <span class="req">*</span></label>
             <select v-model="form.providerType">
-              <option value="openai-chat">OpenAI Chat Completions</option>
-              <option value="openai-response">OpenAI Responses</option>
-              <option value="anthropic-message">Anthropic Messages</option>
-              <option value="newapi">NEW API</option>
+              <option value="openai-chat">{{ $t('profileEdit.providerType.openai-chat') }}</option>
+              <option value="openai-response">{{ $t('profileEdit.providerType.openai-response') }}</option>
+              <option value="anthropic-message">{{ $t('profileEdit.providerType.anthropic-message') }}</option>
+              <option value="newapi">{{ $t('profileEdit.providerType.newapi') }}</option>
             </select>
           </div>
 
           <div class="field">
-            <label>Base URL <span class="req">*</span></label>
-            <input v-model="form.baseUrl" type="text" placeholder="如：https://api.openai.com" />
-            <span class="hint">无需添加 /v1，代理会自动拼接</span>
+            <label>{{ $t('profileEdit.label.baseUrl') }} <span class="req">*</span></label>
+            <input v-model="form.baseUrl" type="text" :placeholder="$t('profileEdit.placeholder.baseUrl')" />
+            <span class="hint">{{ $t('profileEdit.label.baseUrlHint') }}</span>
           </div>
 
           <div class="field">
-            <label>API Key <span class="opt">(可选)</span></label>
+            <label>{{ $t('profileEdit.label.apiKey') }} <span class="opt">{{ $t('profileEdit.label.optional') }}</span></label>
             <div class="key-row">
               <input v-model="form.apiKey" :type="showKey ? 'text' : 'password'" placeholder="sk-..." />
               <button type="button" class="toggle-key" @click="showKey = !showKey">
-                {{ showKey ? '隐藏' : '显示' }}
+                {{ showKey ? $t('profileEdit.button.hide') : $t('profileEdit.button.show') }}
               </button>
               <button type="button" class="toggle-key" @click="copyKey" :disabled="!form.apiKey">
-                {{ copied ? '已复制' : '复制' }}
+                {{ copied ? $t('profileEdit.label.copied') : $t('common.copy') }}
               </button>
             </div>
           </div>
 
           <div class="field">
-            <label>默认模型 <span class="opt">(可选)</span></label>
+            <label>{{ $t('profileEdit.label.defaultModel') }} <span class="opt">{{ $t('profileEdit.label.optional') }}</span></label>
             <div class="model-row">
-              <input v-model="form.defaultModel" type="text" placeholder="如：gpt-4o" />
+              <input v-model="form.defaultModel" type="text" :placeholder="$t('profileEdit.placeholder.defaultModel')" />
               <button type="button" class="btn-fetch" :disabled="fetchingModels || !canFetchModels()" @click="fetchModels">
-                {{ fetchingModels ? '获取中...' : '获取模型' }}
+                {{ fetchingModels ? $t('profileEdit.button.fetching') : $t('profileEdit.button.fetchModels') }}
               </button>
             </div>
             <div class="model-dropdown" v-if="showModelDropdown && fetchedModels.length">
@@ -251,7 +253,7 @@ onMounted(() => {
           </div>
 
           <div class="field">
-            <label>可用模型 <span class="opt">(为空则不参与模型路由)</span></label>
+            <label>{{ $t('profileEdit.label.availableModels') }} <span class="opt">{{ $t('profileEdit.label.availableHint') }}</span></label>
             <div class="avail-chips" v-if="form.models && form.models.length > 0">
               <span v-for="m in form.models" :key="m" class="chip">
                 {{ m }}
@@ -259,9 +261,9 @@ onMounted(() => {
               </span>
             </div>
             <div class="model-row">
-              <input v-model="newAvailModel" type="text" placeholder="输入模型 ID，回车添加" @keyup.enter="addAvailModel" />
+              <input v-model="newAvailModel" type="text" :placeholder="$t('profileEdit.placeholder.addModel')" @keyup.enter="addAvailModel" />
               <button type="button" class="btn-fetch" :disabled="availFetchingModels || !canFetchModels()" @click="fetchAvailModels">
-                {{ availFetchingModels ? '获取中...' : '获取模型' }}
+                {{ availFetchingModels ? $t('profileEdit.button.fetching') : $t('profileEdit.button.fetchModels') }}
               </button>
             </div>
           </div>
@@ -269,9 +271,9 @@ onMounted(() => {
           <div class="error" v-if="error">{{ error }}</div>
 
           <div class="actions">
-            <button type="button" class="btn-cancel" @click="navigate('gateway')">取消</button>
+            <button type="button" class="btn-cancel" @click="navigate('gateway')">{{ $t('common.cancel') }}</button>
             <button type="button" class="btn-save" :disabled="saving" @click="save">
-              {{ saving ? '保存中...' : '保存' }}
+              {{ saving ? $t('profileEdit.button.saving') : $t('common.save') }}
             </button>
           </div>
         </div>
@@ -283,27 +285,27 @@ onMounted(() => {
       <div class="modal-overlay" v-if="availShowPicker" @click.self="availShowPicker = false">
         <div class="modal-card">
           <div class="modal-header">
-            <h3>选择可用模型</h3>
+            <h3>{{ $t('profileEdit.section.pickerTitle') }}</h3>
             <button class="modal-close" @click="availShowPicker = false">&times;</button>
           </div>
           <div class="modal-body">
             <div class="modal-search">
-              <input v-model="availSearch" type="text" placeholder="搜索模型..." class="search-input" />
+              <input v-model="availSearch" type="text" :placeholder="$t('profileEdit.placeholder.searchModels')" class="search-input" />
             </div>
             <div class="modal-actions">
-              <button class="link-btn" @click="selectAllAvail">全选</button>
-              <button class="link-btn" @click="invertAvailSelection">反选</button>
+              <button class="link-btn" @click="selectAllAvail">{{ $t('profileEdit.button.selectAll') }}</button>
+              <button class="link-btn" @click="invertAvailSelection">{{ $t('profileEdit.button.invertSelection') }}</button>
             </div>
             <label v-for="m in filteredAvailModels" :key="m.id" class="modal-row" :class="{ disabled: m.exists }">
               <input type="checkbox" :checked="availPickerSelected[m.id]" :disabled="m.exists" @change="availPickerSelected[m.id] = $event.target.checked" />
               <span class="modal-model-id">{{ m.id }}</span>
-              <span class="modal-tag" v-if="m.exists">已添加</span>
+              <span class="modal-tag" v-if="m.exists">{{ $t('profileEdit.label.added') }}</span>
             </label>
-            <div class="modal-empty" v-if="filteredAvailModels.length === 0">无匹配结果</div>
+            <div class="modal-empty" v-if="filteredAvailModels.length === 0">{{ $t('profileEdit.message.noMatchingModels') }}</div>
           </div>
           <div class="modal-footer">
-            <button class="act-btn" @click="availShowPicker = false">取消</button>
-            <button class="btn-save" @click="confirmAvailModels">确定添加</button>
+            <button class="act-btn" @click="availShowPicker = false">{{ $t('common.cancel') }}</button>
+            <button class="btn-save" @click="confirmAvailModels">{{ $t('profileEdit.button.confirmAdd') }}</button>
           </div>
         </div>
       </div>
