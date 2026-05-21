@@ -222,5 +222,26 @@
       "newapi": "NEW API"
     }
   },
-  "errors": {}
+  "errors": {
+    "network": { "requestFailed": "网络请求失败" },
+    "parse": { "jsonFailed": "JSON 解析失败" },
+    "upstream": {
+      "requestFailed": "请求失败",
+      "unauthorized": "API Key 无效或无权限访问 ({status})",
+      "forbidden": "无权限访问该接口 ({status})",
+      "endpointNotFound": "该提供商不支持该端点 ({status})",
+      "rateLimited": "请求过于频繁，请稍后重试 ({status})",
+      "internalError": "上游服务器内部错误 ({status})",
+      "badGateway": "上游网关错误 ({status})",
+      "unavailable": "上游服务暂不可用 ({status})",
+      "unknown": "未知错误 ({status})",
+      "unknownResponseFormat": "未知响应格式"
+    },
+    "http": { "clientFailed": "创建 HTTP 客户端失败" },
+    "update": {
+      "requestFailed": "检查更新失败",
+      "githubError": "GitHub API 返回错误 ({status})",
+      "noVersionTag": "无法获取最新版本号"
+    }
+  }
 }

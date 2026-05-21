@@ -222,5 +222,26 @@
       "newapi": "NEW API"
     }
   },
-  "errors": {}
+  "errors": {
+    "network": { "requestFailed": "Network request failed" },
+    "parse": { "jsonFailed": "JSON parse failed" },
+    "upstream": {
+      "requestFailed": "Request failed",
+      "unauthorized": "Invalid API key or unauthorized ({status})",
+      "forbidden": "Forbidden ({status})",
+      "endpointNotFound": "This provider does not support the endpoint ({status})",
+      "rateLimited": "Too many requests, try again later ({status})",
+      "internalError": "Upstream server error ({status})",
+      "badGateway": "Upstream bad gateway ({status})",
+      "unavailable": "Upstream unavailable ({status})",
+      "unknown": "Unknown error ({status})",
+      "unknownResponseFormat": "Unknown response format"
+    },
+    "http": { "clientFailed": "Failed to create HTTP client" },
+    "update": {
+      "requestFailed": "Update check failed",
+      "githubError": "GitHub API error ({status})",
+      "noVersionTag": "Could not fetch latest version"
+    }
+  }
 }

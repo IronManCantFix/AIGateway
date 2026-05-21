@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../../api.js'
+import { translateError } from '../../i18n/errorCodes.js'
 
 const { t } = useI18n()
 const navigate = inject('navigate')
@@ -105,7 +106,7 @@ async function fetchModels() {
     fetchedModels.value = models
     showModelDropdown.value = true
   } catch (e) {
-    error.value = e.message
+    error.value = translateError(e)
   } finally {
     fetchingModels.value = false
   }
@@ -140,7 +141,7 @@ async function fetchAvailModels() {
     }
     availShowPicker.value = true
   } catch (e) {
-    error.value = e.message
+    error.value = translateError(e)
   } finally {
     availFetchingModels.value = false
   }

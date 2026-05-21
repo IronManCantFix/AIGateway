@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { listen } from '@tauri-apps/api/event'
 import { api } from '../../api.js'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import { translateError } from '../../i18n/errorCodes.js'
 import iconUrl from '../../assets/icon.png'
 
 const { t } = useI18n()
@@ -366,7 +367,7 @@ async function checkForUpdates() {
       if (ok) openUrl(info.download_url).catch(e => console.error('openUrl failed:', e))
     }
   } catch (e) {
-    console.error('检查更新失败:', e)
+    console.error('check_for_updates failed:', translateError(e))
   } finally {
     checkingUpdate.value = false
   }
