@@ -18,14 +18,14 @@
   "home": {
     "status": {
       "running": "Proxy running",
-      "starting": "Starting...",
-      "stopping": "Stopping...",
+      "starting": "Starting…",
+      "stopping": "Stopping…",
       "stopped": "Proxy stopped"
     },
     "section": {
       "providers": "Providers",
-      "models": "Available models",
-      "mappings": "Model mappings"
+      "models": "Available Models",
+      "mappings": "Model Mappings"
     },
     "tip": {
       "providers": "Multiple providers can be enabled at the same time. Requests match model IDs from top to bottom of the list, and the first matching provider handles the request.",
@@ -102,7 +102,7 @@
       "autoStart": "Start proxy automatically on launch",
       "logEnabled": "Record request and response bodies",
       "logHint": "Enable only when troubleshooting; the full request and response bodies are logged, which uses more space and noticeably grows the log file. Takes effect immediately.",
-      "statsLoading": "Loading statistics...",
+      "statsLoading": "Loading statistics…",
       "totalRequests": "Total requests",
       "tokensUsed": "Tokens used",
       "avgPerDay": "Avg per day",
@@ -123,7 +123,7 @@
       "perPagePrefix": "{count} total · show",
       "perPageSuffix": "per page",
       "pageInfo": "Page {page} / {total}",
-      "logsLoading": "Loading logs...",
+      "logsLoading": "Loading logs…",
       "noFilteredLogs": "No logs match the current filters",
       "logsHint": "Switch to the Logs tab to load recent entries",
       "devVersion": "Dev build",
@@ -145,7 +145,7 @@
       "clearBodies": "Clear payloads",
       "prevPage": "Previous",
       "nextPage": "Next",
-      "checking": "Checking...",
+      "checking": "Checking…",
       "checkUpdate": "Check for updates",
       "download": "Download"
     },
@@ -170,6 +170,7 @@
       "heatLevelLow": "Less",
       "heatLevelHigh": "More",
       "requestCountWithUnit": "{count} requests",
+      "tokenCountWithUnit": "{count} tokens",
       "trendCount": "{count}"
     },
     "copyLabel": {
@@ -202,8 +203,8 @@
       "show": "Show",
       "hide": "Hide",
       "fetchModels": "Fetch models",
-      "fetching": "Fetching...",
-      "saving": "Saving...",
+      "fetching": "Fetching…",
+      "saving": "Saving…",
       "selectAll": "Select all",
       "invertSelection": "Invert selection",
       "confirmAdd": "Add selected"
@@ -214,7 +215,7 @@
       "apiKey": "sk-...",
       "defaultModel": "e.g. gpt-4o",
       "addModel": "Enter model ID and press Enter",
-      "searchModels": "Search models..."
+      "searchModels": "Search models…"
     },
     "message": {
       "nameRequired": "Please enter a profile name",

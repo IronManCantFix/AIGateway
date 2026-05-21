@@ -18,8 +18,8 @@
   "home": {
     "status": {
       "running": "代理运行中",
-      "starting": "正在启动...",
-      "stopping": "正在停止...",
+      "starting": "正在启动…",
+      "stopping": "正在停止…",
       "stopped": "代理已停止"
     },
     "section": {
@@ -102,7 +102,7 @@
       "autoStart": "启动应用时自动开启代理",
       "logEnabled": "记录请求参数与返回参数",
       "logHint": "仅在排查报错时开启；开启后会完整记录请求体和响应体，占用更多空间，日志文件会明显变大，立即生效",
-      "statsLoading": "正在加载统计数据...",
+      "statsLoading": "正在加载统计数据…",
       "totalRequests": "总请求数",
       "tokensUsed": "Token 消耗",
       "avgPerDay": "日均请求",
@@ -123,7 +123,7 @@
       "perPagePrefix": "共 {count} 条，每页",
       "perPageSuffix": "条",
       "pageInfo": "第 {page} / {total} 页",
-      "logsLoading": "正在加载日志...",
+      "logsLoading": "正在加载日志…",
       "noFilteredLogs": "没有符合筛选条件的日志",
       "logsHint": "切换到日志后加载最近记录",
       "devVersion": "开发版",
@@ -145,7 +145,7 @@
       "clearBodies": "清空参数",
       "prevPage": "上一页",
       "nextPage": "下一页",
-      "checking": "检查中...",
+      "checking": "检查中…",
       "checkUpdate": "检查更新",
       "download": "前往下载"
     },
@@ -170,6 +170,7 @@
       "heatLevelLow": "少",
       "heatLevelHigh": "多",
       "requestCountWithUnit": "{count} 次请求",
+      "tokenCountWithUnit": "{count} tokens",
       "trendCount": "{count} 次"
     },
     "copyLabel": {
@@ -202,8 +203,8 @@
       "show": "显示",
       "hide": "隐藏",
       "fetchModels": "获取模型",
-      "fetching": "获取中...",
-      "saving": "保存中...",
+      "fetching": "获取中…",
+      "saving": "保存中…",
       "selectAll": "全选",
       "invertSelection": "反选",
       "confirmAdd": "确定添加"
@@ -214,7 +215,7 @@
       "apiKey": "sk-...",
       "defaultModel": "如：gpt-4o",
       "addModel": "输入模型 ID，回车添加",
-      "searchModels": "搜索模型..."
+      "searchModels": "搜索模型…"
     },
     "message": {
       "nameRequired": "请输入配置名称",

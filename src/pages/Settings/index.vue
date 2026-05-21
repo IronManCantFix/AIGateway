@@ -631,7 +631,7 @@ onUnmounted(() => {
                   <div v-if="heatHover" class="heat-tooltip"
                     :style="{ left: heatHover.left + 'px', top: heatHover.top + 'px' }">
                     <div class="heat-tip-date">{{ heatHover.date }}</div>
-                    <div class="heat-tip-val">{{ heatHover.mode === 'tokens' ? fmtTok(heatHover.count) + ' tokens' : $t('settings.chart.requestCountWithUnit', { count: heatHover.count }) }}</div>
+                    <div class="heat-tip-val">{{ heatHover.mode === 'tokens' ? $t('settings.chart.tokenCountWithUnit', { count: fmtTok(heatHover.count) }) : $t('settings.chart.requestCountWithUnit', { count: heatHover.count }) }}</div>
                   </div>
                 </Transition>
               </Teleport>
