@@ -133,15 +133,15 @@ async function loadLogs() {
   }
 }
 async function clearLogs() {
-  if (!await showConfirm('确定要清除所有请求日志吗？统计计数将保留。')) return
+  if (!await showConfirm(t('settings.confirm.clearLogs'))) return
   await api.clearLogs(); logs.value = []; logTotal.value = 0; logPage.value = 1; logsLoaded.value = false; logFileSize.value = 0; await loadStats()
 }
 async function clearAllData() {
-  if (!await showConfirm('确定要清除所有统计数据吗？此操作不可恢复。')) return
+  if (!await showConfirm(t('settings.confirm.clearStats'))) return
   await api.clearAggregatedStats(); stats.value = null; await loadStats()
 }
 async function clearLogsBodyData() {
-  if (!await showConfirm('确定要清空所有请求参数和返回参数吗？统计计数将保留。')) return
+  if (!await showConfirm(t('settings.confirm.clearBodies'))) return
   await api.clearLogsBodies(); await loadLogs()
 }
 function statusLabel(c) {
@@ -211,7 +211,7 @@ const heatmapData = computed(() => {
     columns.push(allDays.slice(i,i+7))
   }
 
-  const months=[]; const mn=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
+  const months=[]; const mn=t('settings.chart.monthsShort').split(',')
   let lm=-1
   for (let c=0;c<columns.length;c++) {
     const m=parseInt(columns[c][0].date.slice(5,7),10)-1
@@ -219,6 +219,8 @@ const heatmapData = computed(() => {
   }
   return {columns,months}
 })
+
+const weekdayLabels = computed(() => t('settings.chart.weekdaysShort').split(','))
 
 const BOTTOM_Y = CHART_H - PAD_B
 function smoothPath(pts) {
@@ -317,7 +319,7 @@ let copyTimer = 0
 const copyMsg = ref('')
 async function copyText(text, label) {
   await api.copyText(text)
-  copyMsg.value = label + '复制成功'
+  copyMsg.value = t('common.copySuccess', { label })
   clearTimeout(copyTimer)
   copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
 }
@@ -360,7 +362,7 @@ async function checkForUpdates() {
     const info = await api.checkForUpdates()
     updateInfo.value = info
     if (!isDev && info.has_update) {
-      const ok = await showConfirm(`发现新版本 ${info.latest_version}，是否前往下载？`)
+      const ok = await showConfirm(t('settings.confirm.downloadUpdate', { version: info.latest_version }))
       if (ok) openUrl(info.download_url).catch(e => console.error('openUrl failed:', e))
     }
   } catch (e) {
@@ -572,13 +574,13 @@ onUnmounted(() => {
             </div>
             <div class="heatmap-body" style="position:relative">
               <div class="heatmap-grid" :style="{ gridTemplateColumns: '20px repeat('+heatmapData.columns.length+', 1fr)' }">
-                <span class="heat-wd" style="grid-row:1">一</span>
+                <span class="heat-wd" style="grid-row:1">{{ weekdayLabels[0] }}</span>
                 <span class="heat-wd" style="grid-row:2"></span>
-                <span class="heat-wd" style="grid-row:3">三</span>
+                <span class="heat-wd" style="grid-row:3">{{ weekdayLabels[1] }}</span>
                 <span class="heat-wd" style="grid-row:4"></span>
-                <span class="heat-wd" style="grid-row:5">五</span>
+                <span class="heat-wd" style="grid-row:5">{{ weekdayLabels[2] }}</span>
                 <span class="heat-wd" style="grid-row:6"></span>
-                <span class="heat-wd" style="grid-row:7">日</span>
+                <span class="heat-wd" style="grid-row:7">{{ weekdayLabels[3] }}</span>
                 <template v-for="col in heatmapData.columns" :key="col[0].date">
                   <span v-for="day in col" :key="day.date"
                     class="heat-cell" :style="{ background: day.color }"
@@ -591,15 +593,15 @@ onUnmounted(() => {
                   <div v-if="heatHover" class="heat-tooltip"
                     :style="{ left: heatHover.left + 'px', top: heatHover.top + 'px' }">
                     <div class="heat-tip-date">{{ heatHover.date }}</div>
-                    <div class="heat-tip-val">{{ heatHover.mode === 'tokens' ? fmtTok(heatHover.count) + ' tokens' : heatHover.count + ' 次请求' }}</div>
+                    <div class="heat-tip-val">{{ heatHover.mode === 'tokens' ? fmtTok(heatHover.count) + ' tokens' : $t('settings.chart.requestCountWithUnit', { count: heatHover.count }) }}</div>
                   </div>
                 </Transition>
               </Teleport>
             </div>
             <div class="heatmap-legend">
-              <span>少</span>
+              <span>{{ $t('settings.chart.heatLevelLow') }}</span>
               <span v-for="c in (heatMode === 'tokens' ? HEAT_COLORS_TOK : HEAT_COLORS_REQ)" :key="c" class="legend-cell" :style="{ background: c }"></span>
-              <span>多</span>
+              <span>{{ $t('settings.chart.heatLevelHigh') }}</span>
             </div>
           </div>
           <div class="card-empty" v-else>{{ $t('settings.label.empty') }}</div>
@@ -621,7 +623,7 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="chart-legend">
-              <span class="legend-item"><span class="legend-dot req"></span>请求数</span>
+              <span class="legend-item"><span class="legend-dot req"></span>{{ $t('settings.chart.requestCountAxis') }}</span>
               <span class="legend-item"><span class="legend-dot tok"></span>Token</span>
             </div>
             <div class="chart-wrap">
@@ -682,7 +684,7 @@ onUnmounted(() => {
                   <line :x1="trendHover.x" :y1="PAD_T" :x2="trendHover.x" :y2="CHART_H-PAD_B" stroke="#94a3b8" stroke-width="0.5" stroke-dasharray="3,3"/>
                   <rect :x="Math.min(trendHover.x+8, CHART_W-PAD_R-100)" :y="Math.max(PAD_T, trendHover.y-36)" width="96" height="30" rx="6" fill="#1e293b" opacity="0.92"/>
                   <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-94)" :y="Math.max(PAD_T+10, trendHover.y-24)" fill="#e2e8f0" font-size="10" font-family="SF Mono, monospace">{{ trendHover.date.slice(5) }}</text>
-                  <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-94)" :y="Math.max(PAD_T+22, trendHover.y-12)" fill="#94a3b8" font-size="9" font-family="SF Mono, monospace">{{ trendHover.count }}次 / {{ fmtTok(trendHover.tokens) }}</text>
+                  <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-94)" :y="Math.max(PAD_T+22, trendHover.y-12)" fill="#94a3b8" font-size="9" font-family="SF Mono, monospace">{{ $t('settings.chart.trendCount', { count: trendHover.count }) }} / {{ fmtTok(trendHover.tokens) }}</text>
                 </g>
               </svg>
             </div>
@@ -785,8 +787,8 @@ onUnmounted(() => {
               <div class="log-err" v-if="l.error">{{ l.error }}</div>
               <details class="log-detail" v-if="l.requestBody || l.responseBody">
                 <summary>{{ $t('settings.label.viewParams') }}</summary>
-                <div class="log-body" v-if="l.requestBody"><span class="log-body-label">{{ $t('settings.label.request') }}</span><button class="copy-body-btn" @click="copyText(l.requestBody, '请求参数')">{{ $t('common.copy') }}</button><pre>{{ l.requestBody }}</pre></div>
-                <div class="log-body" v-if="l.responseBody"><span class="log-body-label">{{ $t('settings.label.response') }}</span><button class="copy-body-btn" @click="copyText(l.responseBody, '响应参数')">{{ $t('common.copy') }}</button><pre>{{ l.responseBody }}</pre></div>
+                <div class="log-body" v-if="l.requestBody"><span class="log-body-label">{{ $t('settings.label.request') }}</span><button class="copy-body-btn" @click="copyText(l.requestBody, $t('settings.copyLabel.requestPayload'))">{{ $t('common.copy') }}</button><pre>{{ l.requestBody }}</pre></div>
+                <div class="log-body" v-if="l.responseBody"><span class="log-body-label">{{ $t('settings.label.response') }}</span><button class="copy-body-btn" @click="copyText(l.responseBody, $t('settings.copyLabel.responsePayload'))">{{ $t('common.copy') }}</button><pre>{{ l.responseBody }}</pre></div>
               </details>
             </div>
           </div>

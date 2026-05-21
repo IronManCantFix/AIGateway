@@ -148,6 +148,25 @@
       "allStatuses": "全部状态",
       "dateFrom": "开始日期",
       "dateTo": "结束日期"
+    },
+    "confirm": {
+      "clearLogs": "确定要清除所有请求日志吗？统计计数将保留。",
+      "clearStats": "确定要清除所有统计数据吗？此操作不可恢复。",
+      "clearBodies": "确定要清空所有请求参数和返回参数吗？统计计数将保留。",
+      "downloadUpdate": "发现新版本 {version}，是否前往下载？"
+    },
+    "chart": {
+      "monthsShort": "1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月",
+      "weekdaysShort": "一,三,五,日",
+      "requestCountAxis": "请求数",
+      "heatLevelLow": "少",
+      "heatLevelHigh": "多",
+      "requestCountWithUnit": "{count} 次请求",
+      "trendCount": "{count} 次"
+    },
+    "copyLabel": {
+      "requestPayload": "请求参数",
+      "responsePayload": "响应参数"
     }
   },
   "profileEdit": {},

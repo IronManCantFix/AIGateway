@@ -148,6 +148,25 @@
       "allStatuses": "All statuses",
       "dateFrom": "From date",
       "dateTo": "To date"
+    },
+    "confirm": {
+      "clearLogs": "Clear all request logs? Statistics counters will be preserved.",
+      "clearStats": "Clear all statistics? This cannot be undone.",
+      "clearBodies": "Clear all request and response payloads? Statistics counters will be preserved.",
+      "downloadUpdate": "New version {version} available. Open download page?"
+    },
+    "chart": {
+      "monthsShort": "Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec",
+      "weekdaysShort": "Mon,Wed,Fri,Sun",
+      "requestCountAxis": "Requests",
+      "heatLevelLow": "Less",
+      "heatLevelHigh": "More",
+      "requestCountWithUnit": "{count} requests",
+      "trendCount": "{count}"
+    },
+    "copyLabel": {
+      "requestPayload": "request payload",
+      "responsePayload": "response payload"
     }
   },
   "profileEdit": {},
