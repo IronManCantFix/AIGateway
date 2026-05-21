@@ -137,6 +137,13 @@ function extractSystemContent(msg) {
   return ''
 }
 
+function extractThinkingContent(msg) {
+  if (!msg) return ''
+  if (typeof msg.reasoning_content === 'string') return msg.reasoning_content
+  if (!Array.isArray(msg.content)) return ''
+  return msg.content.filter(c => c.type === 'thinking').map(c => c.thinking || '').join('')
+}
+
 function convertChatToMessages(body) {
   const { messages, ...rest } = body
   const systemMsg = messages.find(m => m.role === 'system')
@@ -184,13 +191,14 @@ function convertMessagesToChat(body) {
   // Convert message content: Anthropic content blocks → OpenAI string
   // Anthropic: content: [{type: "text", text: "..."}] or content: "..."
   // OpenAI:    content: "..." (string) or content: [{type: "text", text: "..."}] (for vision)
-  result.messages = messages.map(m => {
+  result.messages = messages.flatMap(m => {
     if (typeof m.content === 'string') return m
     if (!Array.isArray(m.content)) return m
+    const thinking = extractThinkingContent(m)
     const toolUseBlocks = m.content.filter(c => c.type === 'tool_use')
     if (toolUseBlocks.length > 0) {
       const text = m.content.filter(c => c.type === 'text').map(c => c.text || '').join('')
-      return {
+      const msg = {
         role: 'assistant',
         content: text || null,
         tool_calls: toolUseBlocks.map(c => ({
@@ -202,15 +210,18 @@ function convertMessagesToChat(body) {
           }
         }))
       }
+      if (thinking) msg.reasoning_content = thinking
+      return msg
     }
     const toolResultBlocks = m.content.filter(c => c.type === 'tool_result')
     if (toolResultBlocks.length > 0) {
-      const first = toolResultBlocks[0]
-      return {
+      const toolMessages = toolResultBlocks.map(block => ({
         role: 'tool',
-        tool_call_id: first.tool_use_id,
-        content: stringifyToolOutput(first.content)
-      }
+        tool_call_id: block.tool_use_id,
+        content: stringifyToolOutput(block.content)
+      }))
+      const text = m.content.filter(c => c.type === 'text').map(c => c.text || '').join('')
+      return text ? [...toolMessages, { role: 'user', content: text }] : toolMessages
     }
     // Check if any non-text content blocks exist (images, etc.)
     const hasNonText = m.content.some(c => c.type === 'image' || c.type === 'image_url' || c.type === 'source')
@@ -233,7 +244,9 @@ function convertMessagesToChat(body) {
     }
     // Text-only: flatten to string
     const text = m.content.filter(c => c.type === 'text').map(c => c.text || '').join('')
-    return { ...m, content: text }
+    const msg = { ...m, content: text }
+    if (thinking) msg.reasoning_content = thinking
+    return msg
   })
   // Convert system field (can be string or content block array)
   if (system) {

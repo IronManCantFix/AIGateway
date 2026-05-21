@@ -75,6 +75,69 @@ test('converts Anthropic Messages tool blocks back into Chat Completions message
   assert.equal(result.messages[0].tool_calls[0].function.arguments, '{"q":"AIGateway"}')
 })
 
+test('converts multiple Anthropic tool_result blocks into matching Chat tool messages', () => {
+  const result = convertMessagesToChat({
+    model: 'deepseek-test',
+    messages: [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'toolu_1', name: 'search', input: { q: 'AIGateway' } },
+          { type: 'tool_use', id: 'toolu_2', name: 'lookup', input: { id: 7 } }
+        ]
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'toolu_1', content: 'search result' },
+          { type: 'tool_result', tool_use_id: 'toolu_2', content: 'lookup result' }
+        ]
+      }
+    ]
+  })
+
+  assert.equal(result.messages[0].tool_calls.length, 2)
+  assert.equal(result.messages[1].role, 'tool')
+  assert.equal(result.messages[1].tool_call_id, 'toolu_1')
+  assert.equal(result.messages[2].role, 'tool')
+  assert.equal(result.messages[2].tool_call_id, 'toolu_2')
+})
+
+test('converts Anthropic thinking blocks back to Chat reasoning_content', () => {
+  const result = convertMessagesToChat({
+    model: 'deepseek-test',
+    messages: [{
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'Need to reason before answering.' },
+        { type: 'text', text: 'The answer is 42.' }
+      ]
+    }]
+  })
+
+  assert.equal(result.messages[0].role, 'assistant')
+  assert.equal(result.messages[0].content, 'The answer is 42.')
+  assert.equal(result.messages[0].reasoning_content, 'Need to reason before answering.')
+})
+
+test('converts Anthropic thinking tool-use history back to Chat reasoning_content', () => {
+  const result = convertMessagesToChat({
+    model: 'deepseek-test',
+    messages: [{
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'Need to call the lookup tool.' },
+        { type: 'tool_use', id: 'toolu_1', name: 'lookup', input: { id: 7 } }
+      ]
+    }]
+  })
+
+  assert.equal(result.messages[0].role, 'assistant')
+  assert.equal(result.messages[0].content, null)
+  assert.equal(result.messages[0].reasoning_content, 'Need to call the lookup tool.')
+  assert.equal(result.messages[0].tool_calls[0].id, 'toolu_1')
+})
+
 test('converts Chat input into Responses function_call items', () => {
   const result = convertChatToResponses({
     model: 'gpt-test',
