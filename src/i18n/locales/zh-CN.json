@@ -1,0 +1,21 @@
+{
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "confirm": "确认",
+    "copy": "复制",
+    "copySuccess": "{label}复制成功",
+    "back": "返回",
+    "delete": "删除",
+    "loading": "加载中…",
+    "empty": "—"
+  },
+  "app": {
+    "bootError": "代理自动启动失败：{msg}",
+    "dismissTip": "点击关闭"
+  },
+  "home": {},
+  "settings": {},
+  "profileEdit": {},
+  "errors": {}
+}

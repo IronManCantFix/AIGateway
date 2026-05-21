@@ -1,0 +1,21 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "copy": "Copy",
+    "copySuccess": "{label} copied",
+    "back": "Back",
+    "delete": "Delete",
+    "loading": "Loading…",
+    "empty": "—"
+  },
+  "app": {
+    "bootError": "Proxy auto-start failed: {msg}",
+    "dismissTip": "Click to dismiss"
+  },
+  "home": {},
+  "settings": {},
+  "profileEdit": {},
+  "errors": {}
+}
