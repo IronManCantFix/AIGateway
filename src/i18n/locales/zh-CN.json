@@ -80,7 +80,8 @@
     "section": {
       "proxyPort": "代理端口",
       "httpProxy": "HTTP 代理",
-      "statsOverview": "请求统计"
+      "statsOverview": "请求统计",
+      "general": "通用设置"
     },
     "language": {
       "title": "界面语言",

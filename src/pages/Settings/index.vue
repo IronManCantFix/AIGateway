@@ -457,39 +457,40 @@ onUnmounted(() => {
       <h2>{{ $t('settings.title') }}</h2>
     </div>
 
-    <!-- 界面语言 -->
+    <!-- 通用设置 -->
     <div class="card">
-      <div class="card-header"><h3>{{ $t('settings.language.title') }}</h3></div>
+      <div class="card-header"><h3>{{ $t('settings.section.general') }}</h3></div>
       <div class="card-body">
-        <select v-model="languageSetting" @change="onLanguageChange" class="lang-select">
-          <option value="auto">{{ $t('settings.language.auto') }}</option>
-          <option value="zh-CN">{{ $t('settings.language.zh-CN') }}</option>
-          <option value="en-US">{{ $t('settings.language.en-US') }}</option>
-        </select>
-      </div>
-    </div>
-
-    <!-- 代理端口 -->
-    <div class="card">
-      <div class="card-header"><h3>{{ $t('settings.section.proxyPort') }}</h3></div>
-      <div class="card-body">
-        <div class="field-row">
-          <input v-model.number="port" type="number" min="1" max="65535" @change="saveSettings" />
-          <span class="saved" v-if="saved">&check; {{ $t('settings.label.saved') }}</span>
+        <!-- 界面语言 -->
+        <div class="setting-row">
+          <div class="setting-label">{{ $t('settings.language.title') }}</div>
+          <div class="setting-control">
+            <select v-model="languageSetting" @change="onLanguageChange" class="lang-select">
+              <option value="auto">{{ $t('settings.language.auto') }}</option>
+              <option value="zh-CN">{{ $t('settings.language.zh-CN') }}</option>
+              <option value="en-US">{{ $t('settings.language.en-US') }}</option>
+            </select>
+          </div>
         </div>
-      </div>
-    </div>
 
-    <!-- HTTP 代理 -->
-    <div class="card">
-      <div class="card-header"><h3>{{ $t('settings.section.httpProxy') }}</h3></div>
-      <div class="card-body">
-        <label class="check-field">
-          <input type="checkbox" v-model="httpProxyEnabled" @change="saveProxySettings" />
-          <span>{{ $t('settings.label.enableHttpProxy') }}</span>
+        <!-- 代理端口 -->
+        <div class="setting-row">
+          <div class="setting-label">{{ $t('settings.section.proxyPort') }}</div>
+          <div class="setting-control">
+            <input class="port-input" v-model.number="port" type="number" min="1" max="65535" @change="saveSettings" />
+            <span class="saved" v-if="saved">&check; {{ $t('settings.label.saved') }}</span>
+          </div>
+        </div>
+
+        <!-- HTTP 代理 -->
+        <label class="setting-row toggle-row" @change="saveProxySettings">
+          <div class="setting-label">{{ $t('settings.section.httpProxy') }}</div>
+          <div class="setting-control">
+            <input type="checkbox" v-model="httpProxyEnabled" />
+          </div>
         </label>
 
-        <div class="proxy-config" v-if="httpProxyEnabled">
+        <div class="setting-nested" v-if="httpProxyEnabled">
           <div class="proxy-field">
             <label>{{ $t('settings.label.proxyAddress') }}</label>
             <input v-model="httpProxyUrl" placeholder="http://127.0.0.1:7890" @change="saveProxySettings" />
@@ -523,27 +524,25 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- 自动启动 -->
-    <div class="card">
-      <div class="card-body">
-        <label class="check-field" @change="saveSettings">
-          <input type="checkbox" v-model="autoStart" />
-          <span>{{ $t('settings.label.autoStart') }}</span>
+        <!-- 自动启动 -->
+        <label class="setting-row toggle-row" @change="saveSettings">
+          <div class="setting-label">{{ $t('settings.label.autoStart') }}</div>
+          <div class="setting-control">
+            <input type="checkbox" v-model="autoStart" />
+          </div>
         </label>
-      </div>
-    </div>
 
-    <!-- 日志开关 -->
-    <div class="card">
-      <div class="card-body">
-        <label class="check-field" @change="toggleLogging">
-          <input type="checkbox" v-model="logEnabled" />
-          <span>{{ $t('settings.label.logEnabled') }}</span>
+        <!-- 日志开关 -->
+        <label class="setting-row toggle-row" @change="toggleLogging">
+          <div class="setting-label">
+            {{ $t('settings.label.logEnabled') }}
+            <p class="field-hint">{{ $t('settings.label.logHint') }}</p>
+          </div>
+          <div class="setting-control">
+            <input type="checkbox" v-model="logEnabled" />
+          </div>
         </label>
-        <p class="field-hint">{{ $t('settings.label.logHint') }}</p>
       </div>
     </div>
 
@@ -912,6 +911,21 @@ onUnmounted(() => {
 .check-field input[type=checkbox] { width: 18px; height: 18px; accent-color: #6366f1; cursor: pointer; }
 .field-hint { font-size: 12px; color: #94a3b8; margin: 6px 0 0; }
 
+/* Unified general-settings card rows */
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid #f1f5f9; }
+.setting-row:last-child { border-bottom: none; padding-bottom: 0; }
+.setting-row:first-child { padding-top: 0; }
+.setting-label { flex: 1; min-width: 0; font-size: 14px; color: #1e293b; font-weight: 500; }
+.setting-label .field-hint { margin: 4px 0 0; font-weight: 400; }
+.setting-control { flex-shrink: 0; display: flex; align-items: center; gap: 10px; }
+.setting-control input[type=checkbox] { width: 18px; height: 18px; accent-color: #6366f1; cursor: pointer; }
+label.toggle-row { cursor: pointer; margin: 0; }
+.setting-nested { padding: 12px 0 14px; border-bottom: 1px solid #f1f5f9; margin-top: -2px; }
+.setting-nested:last-child { border-bottom: none; }
+.port-input { padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-weight: 500; font-family: 'SF Mono','Fira Code',monospace; outline: none; width: 110px; background: #f8fafc; transition: all .15s; }
+.port-input:focus { border-color: #a5b4fc; background: #fff; box-shadow: 0 0 0 3px rgba(165,180,252,.15); }
+.setting-control .lang-select { min-width: 160px; padding-top: 8px; padding-bottom: 8px; }
+
 /* Overview stats */
 .overview-body { padding: 20px 20px 16px; }
 .overview-stats { display: flex; align-items: center; justify-content: center; gap: 0; margin-bottom: 16px; }
@@ -1034,7 +1048,6 @@ onUnmounted(() => {
 .log-body pre { margin-top: 4px; padding: 8px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 11px; font-family: 'SF Mono',monospace; color: #475569; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
 
 /* HTTP Proxy */
-.proxy-config { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
 .proxy-field { margin-bottom: 12px; }
 .proxy-field label { display: block; font-size: 13px; font-weight: 600; color: #64748b; margin-bottom: 6px; }
 .proxy-field input { width: 100%; padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 14px; outline: none; transition: all .15s; background: #f8fafc; }

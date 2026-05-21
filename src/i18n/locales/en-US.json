@@ -80,7 +80,8 @@
     "section": {
       "proxyPort": "Proxy Port",
       "httpProxy": "HTTP Proxy",
-      "statsOverview": "Request Statistics"
+      "statsOverview": "Request Statistics",
+      "general": "General"
     },
     "language": {
       "title": "Language",
