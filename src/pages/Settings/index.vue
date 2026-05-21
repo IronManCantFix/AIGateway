@@ -32,10 +32,9 @@ const logFileSize = ref(0)
 const trendTab = ref('year')
 const statsTab = ref('provider')
 const heatMode = ref('requests')  // 'requests' | 'tokens'
-const logSearch = ref({ provider: '', model: '', dateFrom: '', dateTo: '' })
+const logSearch = ref({ provider: '', model: '', statusCode: '', dateFrom: '', dateTo: '' })
 const logPage = ref(1)
 const logPageSize = ref(5)
-const logHasNextPage = ref(false)
 const trendHover = ref(null) // { x, y, date, count, tokens }
 
 // Custom confirm dialog (window.confirm doesn't work reliably in Tauri WebView)
@@ -98,20 +97,33 @@ async function loadStats() {
     statsLoading.value = false
   }
 }
-async function loadLogs(page = logPage.value) {
+const logTotal = ref(0)
+
+function buildLogFilter() {
+  const s = logSearch.value
+  const filter = {}
+  if (s.provider) filter.provider = s.provider
+  if (s.model) filter.model = s.model
+  if (s.statusCode) filter.statusClass = s.statusCode
+  if (s.dateFrom) filter.dateFrom = new Date(s.dateFrom).getTime()
+  if (s.dateTo) filter.dateTo = new Date(s.dateTo).getTime() + 86400000
+  return Object.keys(filter).length ? filter : null
+}
+
+async function loadLogs() {
   logsLoading.value = true
   try {
     const limit = logPageSize.value
-    const offset = (page - 1) * limit
-    const [raw, size] = await Promise.all([
-      api.getLogs(limit, offset),
+    const offset = (logPage.value - 1) * limit
+    const [page, size] = await Promise.all([
+      api.getLogs(limit, offset, buildLogFilter()),
       api.getLogFileSize()
     ])
-    raw.forEach((l, i) => { if (!l._id) l._id = l.timestamp + '_' + i })
-    logs.value = raw
+    const list = page?.logs || []
+    list.forEach((l, i) => { if (!l._id) l._id = l.timestamp + '_' + i })
+    logs.value = list
+    logTotal.value = page?.total || 0
     logFileSize.value = size || 0
-    logPage.value = page
-    logHasNextPage.value = raw.length === limit
     logsLoaded.value = true
   } finally {
     logsLoading.value = false
@@ -119,7 +131,7 @@ async function loadLogs(page = logPage.value) {
 }
 async function clearLogs() {
   if (!await showConfirm('确定要清除所有请求日志吗？统计计数将保留。')) return
-  await api.clearLogs(); logs.value = []; logsLoaded.value = false; logFileSize.value = 0; await loadStats()
+  await api.clearLogs(); logs.value = []; logTotal.value = 0; logPage.value = 1; logsLoaded.value = false; logFileSize.value = 0; await loadStats()
 }
 async function clearAllData() {
   if (!await showConfirm('确定要清除所有统计数据吗？此操作不可恢复。')) return
@@ -127,7 +139,7 @@ async function clearAllData() {
 }
 async function clearLogsBodyData() {
   if (!await showConfirm('确定要清空所有请求参数和返回参数吗？统计计数将保留。')) return
-  await api.clearLogsBodies(); await loadLogs(logPage.value)
+  await api.clearLogsBodies(); await loadLogs()
 }
 function statusLabel(c) {
   if (c >= 200 && c < 300) return 'success'
@@ -263,41 +275,33 @@ const trendData = computed(() => {
   return {reqPath,reqFill,tokPath,tokFill,circles:reqPts,tokCircles:tokPts,maxCount:mc,maxTokens:mt,total,totalTokens,yTicks,yTicksTok}
 })
 
-const filteredLogs = computed(() => {
-  const s = logSearch.value
-  return logs.value.filter(l => {
-    if (s.provider && !(l.provider || '').toLowerCase().includes(s.provider.toLowerCase())) return false
-    if (s.model) {
-      const q = s.model.toLowerCase()
-      const matchModel = (l.model || '').toLowerCase().includes(q)
-      const matchOriginal = (l.originalModel || '').toLowerCase().includes(q)
-      if (!matchModel && !matchOriginal) return false
-    }
-    if (s.dateFrom) {
-      const from = new Date(s.dateFrom).getTime()
-      if (l.timestamp < from) return false
-    }
-    if (s.dateTo) {
-      const to = new Date(s.dateTo).getTime() + 86400000
-      if (l.timestamp >= to) return false
-    }
-    return true
-  })
-})
-
 const logTotalPages = computed(() => {
   const size = logPageSize.value || 5
-  return Math.max(1, Math.ceil(filteredLogs.value.length / size))
+  return Math.max(1, Math.ceil(logTotal.value / size))
 })
 
-const pagedLogs = computed(() => {
-  const size = logPageSize.value || 5
-  const start = (logPage.value - 1) * size
-  return filteredLogs.value.slice(start, start + size)
+const hasActiveLogFilter = computed(() => {
+  const s = logSearch.value
+  return !!(s.provider || s.model || s.statusCode || s.dateFrom || s.dateTo)
 })
 
-const logProviderOptions = computed(() => [...new Set(logs.value.map(l => l.provider).filter(Boolean))])
-const logModelOptions = computed(() => [...new Set(logs.value.map(l => l.model).filter(Boolean))])
+const logHasNextPage = computed(() => logPage.value < logTotalPages.value)
+
+const logProviderOptions = computed(() => [...new Set(profiles.value.map(p => p.name).filter(Boolean))])
+const logModelOptions = computed(() => {
+  const selectedProvider = logSearch.value.provider
+  const source = selectedProvider
+    ? profiles.value.filter(p => p.name === selectedProvider)
+    : profiles.value
+  return [...new Set(source.flatMap(p => p.models || []).filter(Boolean))]
+})
+
+// 切换提供商时，若当前选中的模型已不在新的可选范围内，清空它
+watch(() => logSearch.value.provider, () => {
+  if (logSearch.value.model && !logModelOptions.value.includes(logSearch.value.model)) {
+    logSearch.value.model = ''
+  }
+})
 
 const providerTokenMap = computed(() => {
   if (!stats.value || !stats.value.byProviderTokens) return {}
@@ -317,22 +321,24 @@ async function copyText(text, label) {
 
 function resetLogPage() {
   logPage.value = 1
-  loadLogs(1).catch(e => console.error('Load logs failed:', e))
+  loadLogs().catch(e => console.error('Load logs failed:', e))
 }
 function prevPage() {
   if (logPage.value > 1) {
-    loadLogs(logPage.value - 1).catch(e => console.error('Load logs failed:', e))
+    logPage.value -= 1
+    loadLogs().catch(e => console.error('Load logs failed:', e))
   }
 }
 function nextPage() {
   if (logHasNextPage.value) {
-    loadLogs(logPage.value + 1).catch(e => console.error('Load logs failed:', e))
+    logPage.value += 1
+    loadLogs().catch(e => console.error('Load logs failed:', e))
   }
 }
 
 watch(statsTab, (tab) => {
   if (tab === 'logs' && !logsLoaded.value && !logsLoading.value) {
-    loadLogs(1).catch(e => console.error('Load logs failed:', e))
+    loadLogs().catch(e => console.error('Load logs failed:', e))
   } else if (tab === 'logs') {
     api.getLogFileSize()
       .then(size => { logFileSize.value = size || 0 })
@@ -727,7 +733,7 @@ onUnmounted(() => {
         </div>
 
         <div class="card-body" v-if="statsTab === 'logs'" style="padding:0">
-          <div class="log-toolbar" v-if="logs.length">
+          <div class="log-toolbar" v-if="logs.length || hasActiveLogFilter">
             <div class="log-search-row">
               <select v-model="logSearch.provider" @change="resetLogPage" class="log-filter">
                 <option value="">全部提供商</option>
@@ -737,22 +743,29 @@ onUnmounted(() => {
                 <option value="">全部模型</option>
                 <option v-for="m in logModelOptions" :key="m" :value="m">{{ m }}</option>
               </select>
+              <select v-model="logSearch.statusCode" @change="resetLogPage" class="log-filter">
+                <option value="">全部状态</option>
+                <option value="2xx">2xx 成功</option>
+                <option value="4xx">4xx 客户端错误</option>
+                <option value="5xx">5xx 服务端错误</option>
+              </select>
               <input type="date" v-model="logSearch.dateFrom" @change="resetLogPage" class="log-filter" placeholder="开始日期" />
               <input type="date" v-model="logSearch.dateTo" @change="resetLogPage" class="log-filter" placeholder="结束日期" />
             </div>
             <div class="log-toolbar-actions">
               <span class="log-size">日志文件 {{ fmtSize(logFileSize) }}</span>
               <div class="log-clear-btns">
-                <button class="refresh-btn" @click="loadLogs(logPage)" :disabled="logsLoading">{{ logsLoading ? '加载中...' : '刷新' }}</button>
+                <button class="refresh-btn" @click="loadLogs()" :disabled="logsLoading">{{ logsLoading ? '加载中...' : '刷新' }}</button>
                 <button class="clear-body-btn" @click="clearLogs">清除日志</button>
                 <button class="clear-body-btn" @click="clearLogsBodyData">清空参数</button>
               </div>
             </div>
           </div>
-          <div class="log-list" v-if="filteredLogs.length">
-            <div class="log-item" v-for="(l, idx) in filteredLogs" :key="l._id || idx">
+          <div class="log-list" v-if="logs.length">
+            <div class="log-item" v-for="(l, idx) in logs" :key="l._id || idx">
               <div class="log-top">
                 <span class="log-badge" :class="statusLabel(l.statusCode)">{{ l.statusCode }}</span>
+                <span class="log-badge log-method" v-if="l.method">{{ l.method }}</span>
                 <span class="log-badge log-proxy" v-if="l.proxy">PROXY</span>
                 <span class="log-ep">{{ endpointLabel(l.endpoint) }}</span>
                 <span class="log-upstream" v-if="l.upstreamUrl" :title="l.upstreamUrl">{{ shortUrl(l.upstreamUrl) }}</span>
@@ -774,9 +787,9 @@ onUnmounted(() => {
               </details>
             </div>
           </div>
-          <div class="log-pagination">
+          <div class="log-pagination" v-if="logTotal > 0">
             <div class="page-size">
-              <span>第 {{ logPage }} 页，每页</span>
+              <span>共 {{ logTotal }} 条，每页</span>
               <select v-model.number="logPageSize" @change="resetLogPage">
                 <option :value="5">5</option>
                 <option :value="10">10</option>
@@ -786,11 +799,11 @@ onUnmounted(() => {
               <span>条</span>
             </div>
             <button :disabled="logPage <= 1 || logsLoading" @click="prevPage">上一页</button>
-            <span class="page-info">第 {{ logPage }} 页</span>
+            <span class="page-info">第 {{ logPage }} / {{ logTotalPages }} 页</span>
             <button :disabled="!logHasNextPage || logsLoading" @click="nextPage">下一页</button>
           </div>
           <div class="card-empty" v-if="logsLoading">正在加载日志...</div>
-          <div class="card-empty" v-else-if="logs.length && !filteredLogs.length">当前页无匹配结果</div>
+          <div class="card-empty" v-else-if="logsLoaded && !logs.length && hasActiveLogFilter">没有符合筛选条件的日志</div>
           <div class="card-empty" v-else-if="logsLoaded && !logs.length">暂无数据</div>
           <div class="card-empty" v-else-if="!logsLoaded">切换到日志后加载最近记录</div>
         </div>
@@ -952,6 +965,7 @@ onUnmounted(() => {
 .log-badge.warn { background: #fef9c3; color: #ca8a04; }
 .log-badge.error { background: #fee2e2; color: #dc2626; }
 .log-proxy { background: #dbeafe; color: #2563eb; font-size: 10px; }
+.log-method { background: #f1f5f9; color: #475569; font-size: 10px; letter-spacing: .3px; }
 .log-upstream { font-size: 11px; color: #94a3b8; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-ep { font-size: 13px; color: #334155; }
 .log-time { font-size: 11px; color: #94a3b8; margin-left: auto; }
@@ -984,8 +998,10 @@ onUnmounted(() => {
 .proxy-auth-toggle:hover { text-decoration: underline; }
 .proxy-exclude { margin-top: 16px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
 .proxy-exclude > label { display: block; font-size: 13px; font-weight: 600; color: #64748b; margin-bottom: 10px; }
-.exclude-list { display: flex; flex-direction: column; gap: 8px; }
-.exclude-item { font-size: 13px; }
+.exclude-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 12px; }
+.exclude-item { font-size: 13px; min-width: 0; padding: 6px 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; transition: all .15s; }
+.exclude-item:hover { border-color: #c7d2fe; background: #fff; }
+.exclude-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .about-version { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; color: #94a3b8; font-family: 'SF Mono',monospace; }
 .about-update-hint { font-size: 12px; color: #6366f1; margin: -4px 0 0; }

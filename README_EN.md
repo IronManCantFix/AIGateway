@@ -152,11 +152,14 @@ The top section shows three core metrics: **Total Requests**, **Token Consumptio
 
 The log page records every proxy request, supporting:
 
-- Filter by **provider**, **model**, **date range**
-- Paginated browsing (5 / 10 / 20 / 50 per page)
-- Each log shows: status code, endpoint type, upstream request URL, provider, model, duration, token usage (P / C / T)
+- Filter by **provider**, **model**, **status code** (2xx success / 4xx client error / 5xx server error), **date range**
+- Provider and model dropdowns are driven by configured profiles; selecting a provider narrows the model dropdown to that provider's models (linked filtering)
+- **Filtering and pagination happen on the backend**: only the current page is loaded, so logs stay responsive even when `logEnabled` is on and bodies are large
+- Paginated browsing (5 / 10 / 20 / 50 per page), footer shows `X total / page Y / Z`
+- Each log shows: status code, HTTP method, endpoint type, upstream request URL, provider, model, duration, token usage (P / C / T)
 - Requests through HTTP proxy show a blue `PROXY` badge
 - Requests with model mapping show `original_model → mapped_model | provider`
+- **404 (route not matched) requests** additionally record: HTTP method, the `model` extracted from the request body, and full request/response bodies (without enabling debug logging), making it easier to diagnose clients hitting wrong endpoints or sending malformed payloads
 
 ### Debug Logging
 
@@ -259,21 +262,27 @@ cd proxy && bun install && cd ..
 ### Development Mode
 
 ```bash
-# Compile Sidecar (first time)
-mkdir -p src-tauri/binaries
-cd proxy && bun build --compile proxy-server.js --outfile ../src-tauri/binaries/proxy-server && cd ..
-TARGET=$(rustc -vV | grep host | cut -d' ' -f2)
-ln -sf proxy-server "src-tauri/binaries/proxy-server-$TARGET"
-
-# Start
 npm run tauri dev
 ```
+
+> `tauri dev` automatically runs `npm run proxy:build:current` first, compiling the Sidecar for your host platform. No manual step required.
 
 ### Production Build
 
 ```bash
 npm run proxy:build   # Compile Sidecar (all platforms)
 npm run tauri build   # Build app
+```
+
+You can also build the Sidecar for a specific platform:
+
+```bash
+npm run proxy:build:current      # auto-detect host platform
+npm run proxy:build:mac          # macOS (ARM + Intel)
+npm run proxy:build:mac-arm      # macOS ARM (M-series) only
+npm run proxy:build:mac-intel    # macOS Intel only
+npm run proxy:build:windows      # Windows x64 only
+npm run proxy:build:linux        # Linux x64 only
 ```
 
 ### Generate App Icon
@@ -306,15 +315,17 @@ Scenarios NOT requiring recompilation:
 **Recompile proxy for development (current platform):**
 
 ```bash
-cd proxy && bun build --compile proxy-server.js --outfile ../src-tauri/binaries/proxy-server && cd ..
-TARGET=$(rustc -vV | grep host | cut -d' ' -f2)
-ln -sf proxy-server "src-tauri/binaries/proxy-server-$TARGET"
+npm run proxy:build:current      # compile for your host platform only
+# or simply: npm run tauri dev  —— it auto-builds the Sidecar for the current platform
 ```
 
-**Production build (all platforms):**
+**Production build (pick the platforms you need):**
 
 ```bash
-npm run proxy:build
+npm run proxy:build              # all platforms
+npm run proxy:build:mac          # macOS (ARM + Intel)
+npm run proxy:build:windows      # Windows x64 only
+# ... see the "Production Build" section above for all variants
 ```
 
 After recompilation, restart the app for changes to take effect.

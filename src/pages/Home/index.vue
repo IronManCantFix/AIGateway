@@ -256,7 +256,9 @@ onMounted(async () => {
   statusUnlisten = await api.onStatusChange((payload) => {
     proxyStatus.value = payload.status
     if (payload.error === 'EADDRINUSE') {
-      showToast('启动失败: 端口 ' + (payload.message?.match(/\d+/)?.[0] || '') + ' 已被占用')
+      // 优先从消息中提取 :PORT 模式，兜底用配置端口
+      const portFromMsg = payload.message?.match(/:(\d{2,5})\b/)?.[1]
+      showToast('启动失败: 端口 ' + (portFromMsg || proxyPort.value) + ' 已被占用')
     } else if (payload.crashed) {
       showToast('代理异常退出')
     }

@@ -740,6 +740,7 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
     error: error || null
   }
   if (extra) {
+    if (extra.method) data.method = extra.method
     if (extra.upstreamUrl) data.upstreamUrl = extra.upstreamUrl
     if (extra.usedProxy) data.proxy = true
     if (extra.modelMapping) data.modelMapping = extra.modelMapping
@@ -752,9 +753,10 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
     data.requestBody = requestBody ? JSON.stringify(requestBody) : null
     data.responseBody = responseBody || null
   }
-  // 404 请求始终记录路径和请求体（用于排查问题）
-  if (statusCode === 404 && requestBody) {
-    data.requestBody = JSON.stringify(requestBody)
+  // 404 请求始终记录请求体和响应体（用于排查问题）
+  if (statusCode === 404) {
+    if (requestBody) data.requestBody = JSON.stringify(requestBody)
+    if (responseBody) data.responseBody = responseBody
   }
   // 解析 token 使用量
   if (responseBody) {
@@ -794,7 +796,7 @@ const server = http.createServer(async (req, res) => {
     if (urlPath === '/v1/models' && req.method === 'GET') {
       handleModels(req, res)
       res.on('finish', () => {
-        logRequest(endpoint, '-', res.statusCode, Date.now() - startTime, null, null, null, '-')
+        logRequest(endpoint, '-', res.statusCode, Date.now() - startTime, null, null, null, '-', { method: req.method })
       })
     } else if (urlPath === '/v1/messages/count_tokens') {
       // Anthropic token counting endpoint — return estimated count since upstream providers don't support it
@@ -805,7 +807,7 @@ const server = http.createServer(async (req, res) => {
       const inputTokens = Math.ceil(bodyStr.length / 3)
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ input_tokens: inputTokens }))
-      logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-')
+      logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-', { method: req.method })
     } else if (PATH_TO_SOURCE[urlPath]) {
       rawBody = await readBody(req)
       model = (rawBody && rawBody.model) || '-'
@@ -825,9 +827,12 @@ const server = http.createServer(async (req, res) => {
         bodyForLog = await readBody(req)
       } catch {}
 
+      const notFoundBody = JSON.stringify({ error: 'Not Found' })
       res.writeHead(404, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Not Found' }))
-      logRequest(endpoint, '-', 404, Date.now() - startTime, 'route_not_found', bodyForLog, null, '-')
+      res.end(notFoundBody)
+      // 尝试从请求体中提取 model，便于排查
+      const modelFromBody = (bodyForLog && bodyForLog.model) || '-'
+      logRequest(endpoint, modelFromBody, 404, Date.now() - startTime, 'route_not_found', bodyForLog, notFoundBody, '-', { method: req.method })
     }
   } catch (err) {
     if (!res.headersSent) {
@@ -837,13 +842,13 @@ const server = http.createServer(async (req, res) => {
       responseBody = errorBody
     }
     model = model || '-'
-    const errExtra = { upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
+    const errExtra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
     logRequest(endpoint, model, res.statusCode || 500, Date.now() - startTime, err.message, rawBody, responseBody, req._providerName, errExtra)
     return
   }
 
   res.on('finish', () => {
-    const extra = { upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
+    const extra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
     logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra)
   })
 })
