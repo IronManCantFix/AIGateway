@@ -82,6 +82,13 @@
       "httpProxy": "HTTP 代理",
       "statsOverview": "请求统计"
     },
+    "language": {
+      "title": "界面语言",
+      "auto": "跟随系统",
+      "zh-CN": "简体中文",
+      "en-US": "English",
+      "changed": "语言已切换"
+    },
     "label": {
       "saved": "已保存",
       "enableHttpProxy": "启用 HTTP 代理",

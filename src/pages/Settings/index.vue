@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event'
 import { api } from '../../api.js'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { translateError } from '../../i18n/errorCodes.js'
+import { setLocale, resolveLocale } from '../../i18n'
 import iconUrl from '../../assets/icon.png'
 
 const { t } = useI18n()
@@ -15,6 +16,7 @@ let unlistenProxySettings = null
 const port = ref(9999)
 const autoStart = ref(false)
 const logEnabled = ref(false)
+const languageSetting = ref('auto')
 const saved = ref(false)
 
 const httpProxyEnabled = ref(false)
@@ -56,6 +58,7 @@ async function loadSettings() {
   port.value = s.port || 9999
   autoStart.value = s.autoStart || false
   logEnabled.value = await api.getLogEnabled()
+  languageSetting.value = s.language || 'auto'
 
   // 加载代理配置
   if (s.httpProxy) {
@@ -92,6 +95,25 @@ async function saveProxySettings() {
   await saveSettings()
 }
 async function toggleLogging() { await api.setLogEnabled(logEnabled.value) }
+
+async function onLanguageChange() {
+  const userChoice = languageSetting.value
+  const resolved = resolveLocale(userChoice)
+  try {
+    // Apply resolved locale: switches UI + rebuilds Rust tray + persists settings.language=resolved
+    await setLocale(resolved, { persist: true })
+    // If user picked "auto", restore settings.language="auto" so future restarts re-detect system locale.
+    if (userChoice === 'auto') {
+      const current = await api.getSettings()
+      await api.setSettings({ ...current, language: 'auto' })
+    }
+    copyMsg.value = t('settings.language.changed')
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
+  } catch (e) {
+    console.error('Failed to change language:', e)
+  }
+}
 async function loadStats() {
   statsLoading.value = true
   try {
@@ -430,6 +452,18 @@ onUnmounted(() => {
         {{ $t('common.back') }}
       </button>
       <h2>{{ $t('settings.title') }}</h2>
+    </div>
+
+    <!-- 界面语言 -->
+    <div class="card">
+      <div class="card-header"><h3>{{ $t('settings.language.title') }}</h3></div>
+      <div class="card-body">
+        <select v-model="languageSetting" @change="onLanguageChange" class="lang-select">
+          <option value="auto">{{ $t('settings.language.auto') }}</option>
+          <option value="zh-CN">{{ $t('settings.language.zh-CN') }}</option>
+          <option value="en-US">{{ $t('settings.language.en-US') }}</option>
+        </select>
+      </div>
     </div>
 
     <!-- 代理端口 -->
@@ -869,6 +903,8 @@ onUnmounted(() => {
 .field-row input[type=number] { padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 15px; font-weight: 500; font-family: 'SF Mono','Fira Code',monospace; outline: none; width: 130px; transition: all .15s; background: #f8fafc; }
 .field-row input[type=number]:focus { border-color: #a5b4fc; background: #fff; box-shadow: 0 0 0 3px rgba(165,180,252,.15); }
 .saved { font-size: 13px; color: #22c55e; font-weight: 500; }
+.lang-select { padding: 10px 36px 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 14px; color: #334155; background: #f8fafc; outline: none; min-width: 180px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; cursor: pointer; transition: all .15s; }
+.lang-select:focus { border-color: #a5b4fc; background: #fff; box-shadow: 0 0 0 3px rgba(165,180,252,.15); }
 .check-field { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #334155; }
 .check-field input[type=checkbox] { width: 18px; height: 18px; accent-color: #6366f1; cursor: pointer; }
 .field-hint { font-size: 12px; color: #94a3b8; margin: 6px 0 0; }
