@@ -1,9 +1,11 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, inject, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from '../../api.js'
 import { listen } from '@tauri-apps/api/event'
 import iconUrl from '../../assets/icon.png'
 
+const { t } = useI18n()
 const navigate = inject('navigate')
 
 const proxyStatus = ref('stopped')
@@ -71,7 +73,8 @@ async function toggleProxy() {
     await api.stopProxy()
   } else {
     try { await api.startProxy() } catch (e) {
-      showToast('启动失败: ' + (typeof e === 'string' ? e : e.message || JSON.stringify(e)))
+      const msg = typeof e === 'string' ? e : (e?.message || JSON.stringify(e))
+      showToast(t('home.toast.startFailed', { msg }))
       return
     }
   }
@@ -86,17 +89,17 @@ async function toggleProfile(id) {
 
 function copyUrl() {
   api.copyText(proxyUrl.value)
-  showToast('已复制代理地址')
+  showToast(t('home.toast.urlCopied'))
 }
 
 async function copyModelId(id) {
   await api.copyText(id)
-  showToast('已复制: ' + id)
+  showToast(t('home.toast.modelCopied', { id }))
 }
 
 async function copyProfile(p) {
   await api.addProfile({
-    name: `${p.name} (副本)`,
+    name: `${p.name} ${t('home.label.copySuffix')}`,
     providerType: p.providerType,
     baseUrl: p.baseUrl,
     apiKey: p.apiKey,
@@ -104,7 +107,7 @@ async function copyProfile(p) {
     models: p.models ? [...p.models] : []
   })
   await loadData()
-  showToast(`已复制「${p.name}」`)
+  showToast(t('home.toast.profileCopied', { name: p.name }))
 }
 
 function showConfirm(message) {
@@ -116,7 +119,7 @@ function confirmOk() { confirmState.value.resolve(true); confirmState.value.visi
 function confirmCancel() { confirmState.value.resolve(false); confirmState.value.visible = false }
 
 async function confirmDelete(id) {
-  if (!await showConfirm('确定要删除该提供商吗？')) return
+  if (!await showConfirm(t('home.confirm.deleteProfile'))) return
   await api.deleteProfile(id)
   await loadData()
 }
@@ -133,8 +136,8 @@ function providerColor(type) {
 
 function modelCountText(p) {
   const count = (p.models && p.models.length) || 0
-  if (count === 0) return '未配置模型'
-  return `${count} 个模型`
+  if (count === 0) return t('home.label.noModels')
+  return t('home.label.modelCount', { count })
 }
 
 // --- Drag & drop reorder (mouse events) ---
@@ -196,7 +199,8 @@ function onHandleMouseDown(e, index) {
     try {
       await api.reorderProfiles(profiles.value.map(p => p.id))
     } catch (err) {
-      showToast('排序保存失败: ' + (typeof err === 'string' ? err : err.message || ''))
+      const msg = typeof err === 'string' ? err : (err?.message || '')
+      showToast(t('home.toast.reorderFailed', { msg }))
       await loadData()
     }
   }
@@ -245,7 +249,8 @@ function scheduleMappingSave() {
     try {
       await api.setModelMappings(modelMappings.value)
     } catch (err) {
-      showToast('模型映射保存失败: ' + (typeof err === 'string' ? err : err.message || ''))
+      const msg = typeof err === 'string' ? err : (err?.message || '')
+      showToast(t('home.toast.mappingsSaveFailed', { msg }))
       await loadData()
     }
   }, 400)
@@ -258,9 +263,10 @@ onMounted(async () => {
     if (payload.error === 'EADDRINUSE') {
       // 优先从消息中提取 :PORT 模式，兜底用配置端口
       const portFromMsg = payload.message?.match(/:(\d{2,5})\b/)?.[1]
-      showToast('启动失败: 端口 ' + (portFromMsg || proxyPort.value) + ' 已被占用')
+      const port = portFromMsg || proxyPort.value
+      showToast(t('home.toast.portInUse', { port }))
     } else if (payload.crashed) {
-      showToast('代理异常退出')
+      showToast(t('home.toast.proxyCrashed'))
     }
   })
   // Listen for toast messages from tray menu
@@ -294,18 +300,18 @@ onUnmounted(() => {
         <img :src="iconUrl" class="hc-logo" alt="AIGateway" />
         <span class="status-dot"></span>
         <div class="hc-info">
-          <span class="hc-label">{{ proxyStatus === 'running' ? '代理运行中' : proxyStatus === 'starting' ? '正在启动...' : proxyStatus === 'stopping' ? '正在停止...' : '代理已停止' }}</span>
-          <span class="hc-addr" @click="copyUrl" title="点击复制">{{ proxyUrl }}</span>
+          <span class="hc-label">{{ proxyStatus === 'running' ? $t('home.status.running') : proxyStatus === 'starting' ? $t('home.status.starting') : proxyStatus === 'stopping' ? $t('home.status.stopping') : $t('home.status.stopped') }}</span>
+          <span class="hc-addr" @click="copyUrl" :title="$t('home.label.clickToCopy')">{{ proxyUrl }}</span>
         </div>
       </div>
       <div class="hc-right">
         <button class="hc-btn-toggle" :disabled="proxyStatus === 'starting' || proxyStatus === 'stopping'" @click="toggleProxy">
-          {{ proxyStatus === 'running' || proxyStatus === 'stopping' ? '停止' : '启动' }}
+          {{ proxyStatus === 'running' || proxyStatus === 'stopping' ? $t('home.button.stop') : $t('home.button.start') }}
         </button>
-        <button class="hc-btn-copy" @click="copyUrl" title="复制地址">
+        <button class="hc-btn-copy" @click="copyUrl" :title="$t('home.label.copyAddress')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         </button>
-        <button class="hc-btn-settings" @click="navigate('gw-set')" title="设置">
+        <button class="hc-btn-settings" @click="navigate('gw-set')" :title="$t('home.label.settings')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
@@ -314,13 +320,13 @@ onUnmounted(() => {
     <!-- 提供商 -->
     <div class="card">
       <div class="card-header">
-        <h3>提供商
+        <h3>{{ $t('home.section.providers') }}
           <span class="tip-icon">
             ?
-            <span class="tip-pop">支持同时启用多个提供商，请求时按照列表从上到下的顺序匹配模型 ID，匹配到的第一个提供商将处理该请求</span>
+            <span class="tip-pop">{{ $t('home.tip.providers') }}</span>
           </span>
         </h3>
-        <button class="link-btn" @click="navigate('gw-add')">+ 添加</button>
+        <button class="link-btn" @click="navigate('gw-add')">{{ $t('home.button.add') }}</button>
       </div>
       <div class="card-body" v-if="profiles.length > 0">
         <div
@@ -329,7 +335,7 @@ onUnmounted(() => {
           class="provider-row"
           :class="{ active: isActive(p.id), dragging: dragIndex === index }"
         >
-          <div class="pr-drag-handle" title="拖拽排序" @mousedown="onHandleMouseDown($event, index)">
+          <div class="pr-drag-handle" :title="$t('home.label.dragToReorder')" @mousedown="onHandleMouseDown($event, index)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
           </div>
           <div class="pr-left" @click="toggleProfile(p.id)">
@@ -348,24 +354,24 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="pr-actions">
-            <button class="act-btn" @click="copyProfile(p)">复制</button>
-            <button class="act-btn" @click="navigate('gw-add', { editId: p.id })">编辑</button>
-            <button class="act-btn danger" @click="confirmDelete(p.id)">删除</button>
+            <button class="act-btn" @click="copyProfile(p)">{{ $t('home.button.copy') }}</button>
+            <button class="act-btn" @click="navigate('gw-add', { editId: p.id })">{{ $t('home.button.edit') }}</button>
+            <button class="act-btn danger" @click="confirmDelete(p.id)">{{ $t('home.button.delete') }}</button>
           </div>
         </div>
       </div>
       <div class="card-empty" v-else>
-        尚未添加提供商，点击「+ 添加」开始配置
+        {{ $t('home.empty.providers') }}
       </div>
     </div>
 
     <!-- 可用模型（聚合自已启用提供商） -->
     <div class="card">
       <div class="card-header">
-        <h3>可用模型
+        <h3>{{ $t('home.section.models') }}
           <span class="tip-icon">
             ?
-            <span class="tip-pop">聚合自已启用提供商的可用模型列表，通过 <code>/v1/models</code> 接口返回给客户端</span>
+            <span class="tip-pop" v-html="$t('home.tip.models')"></span>
           </span>
         </h3>
       </div>
@@ -376,34 +382,34 @@ onUnmounted(() => {
             <div class="model-providers">
               <span v-for="pv in item.providers" :key="pv" class="provider-tag">{{ pv }}</span>
             </div>
-            <button class="model-copy-btn" @click.stop="copyModelId(item.model)" title="复制模型 ID">
+            <button class="model-copy-btn" @click.stop="copyModelId(item.model)" :title="$t('home.label.copyModelId')">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
           </div>
         </div>
-        <div class="card-empty" v-else style="padding: 16px 0;">启用提供商并配置可用模型后，此处自动聚合展示</div>
+        <div class="card-empty" v-else style="padding: 16px 0;">{{ $t('home.empty.models') }}</div>
       </div>
     </div>
 
     <!-- 模型映射 -->
     <div class="card">
       <div class="card-header">
-        <h3>模型映射
+        <h3>{{ $t('home.section.mappings') }}
           <span class="tip-icon">
             ?
-            <span class="tip-pop">将客户端请求的模型 ID 映射为真实模型 ID。适用于客户端固定模型名称（如 Codex 只能调用 gpt5.5）但你没有该模型的场景</span>
+            <span class="tip-pop">{{ $t('home.tip.mappings') }}</span>
           </span>
         </h3>
         <button class="toggle-btn" :class="{ on: modelMappings.enabled }" @click="toggleModelMappings">
-          {{ modelMappings.enabled ? '已启用' : '已禁用' }}
+          {{ modelMappings.enabled ? $t('home.button.enabled') : $t('home.button.disabled') }}
         </button>
       </div>
       <div class="card-body">
         <div class="mapping-rules" v-if="modelMappings.rules.length > 0">
           <div class="mapping-header">
-            <span class="mapping-col-from">请求模型</span>
+            <span class="mapping-col-from">{{ $t('home.label.requestModel') }}</span>
             <span class="mapping-arrow"></span>
-            <span class="mapping-col-to">实际模型</span>
+            <span class="mapping-col-to">{{ $t('home.label.actualModel') }}</span>
             <span class="mapping-col-action"></span>
           </div>
           <div v-for="(rule, index) in modelMappings.rules" :key="index" class="mapping-row">
@@ -411,7 +417,7 @@ onUnmounted(() => {
               class="mapping-input"
               :value="rule.from"
               @input="updateMappingRule(index, 'from', $event.target.value)"
-              placeholder="如 gpt5.5"
+              :placeholder="$t('home.label.fromPlaceholder')"
               :disabled="!modelMappings.enabled"
             />
             <span class="mapping-arrow">
@@ -423,7 +429,7 @@ onUnmounted(() => {
               @change="updateMappingRule(index, 'to', $event.target.value)"
               :disabled="!modelMappings.enabled"
             >
-              <option value="" disabled>选择实际模型</option>
+              <option value="" disabled>{{ $t('home.label.selectActualModel') }}</option>
               <option v-for="item in aggregatedModels" :key="item.model" :value="item.model">{{ item.model }}</option>
             </select>
             <button class="mapping-remove" @click="removeMappingRule(index)" :disabled="!modelMappings.enabled">
@@ -431,9 +437,9 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-        <div class="card-empty" v-else-if="!modelMappings.enabled" style="padding: 16px 0;">启用后可添加模型映射规则</div>
-        <div class="card-empty" v-else style="padding: 16px 0;">暂无映射规则，点击下方添加</div>
-        <button class="add-rule-btn" v-if="modelMappings.enabled" @click="addMappingRule">+ 添加映射</button>
+        <div class="card-empty" v-else-if="!modelMappings.enabled" style="padding: 16px 0;">{{ $t('home.empty.mappingsDisabled') }}</div>
+        <div class="card-empty" v-else style="padding: 16px 0;">{{ $t('home.empty.mappingsRules') }}</div>
+        <button class="add-rule-btn" v-if="modelMappings.enabled" @click="addMappingRule">{{ $t('home.button.addMapping') }}</button>
       </div>
     </div>
   </div>
@@ -444,8 +450,8 @@ onUnmounted(() => {
       <div class="confirm-dialog">
         <p class="confirm-msg">{{ confirmState.message }}</p>
         <div class="confirm-actions">
-          <button class="confirm-cancel" @click="confirmCancel">取消</button>
-          <button class="confirm-ok" @click="confirmOk">确定</button>
+          <button class="confirm-cancel" @click="confirmCancel">{{ $t('common.cancel') }}</button>
+          <button class="confirm-ok" @click="confirmOk">{{ $t('home.button.ok') }}</button>
         </div>
       </div>
     </div>

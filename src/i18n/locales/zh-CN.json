@@ -14,7 +14,69 @@
     "bootError": "代理自动启动失败：{msg}",
     "dismissTip": "点击关闭"
   },
-  "home": {},
+  "home": {
+    "status": {
+      "running": "代理运行中",
+      "starting": "正在启动...",
+      "stopping": "正在停止...",
+      "stopped": "代理已停止"
+    },
+    "section": {
+      "providers": "提供商",
+      "models": "可用模型",
+      "mappings": "模型映射"
+    },
+    "tip": {
+      "providers": "支持同时启用多个提供商，请求时按照列表从上到下的顺序匹配模型 ID，匹配到的第一个提供商将处理该请求",
+      "models": "聚合自已启用提供商的可用模型列表，通过 <code>/v1/models</code> 接口返回给客户端",
+      "mappings": "将客户端请求的模型 ID 映射为真实模型 ID。适用于客户端固定模型名称（如 Codex 只能调用 gpt5.5）但你没有该模型的场景"
+    },
+    "button": {
+      "start": "启动",
+      "stop": "停止",
+      "add": "+ 添加",
+      "copy": "复制",
+      "edit": "编辑",
+      "delete": "删除",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "addMapping": "+ 添加映射",
+      "ok": "确定"
+    },
+    "label": {
+      "clickToCopy": "点击复制",
+      "copyAddress": "复制地址",
+      "settings": "设置",
+      "dragToReorder": "拖拽排序",
+      "copyModelId": "复制模型 ID",
+      "copySuffix": "(副本)",
+      "noModels": "未配置模型",
+      "modelCount": "{count} 个模型",
+      "requestModel": "请求模型",
+      "actualModel": "实际模型",
+      "fromPlaceholder": "如 gpt5.5",
+      "selectActualModel": "选择实际模型"
+    },
+    "empty": {
+      "providers": "尚未添加提供商，点击「+ 添加」开始配置",
+      "models": "启用提供商并配置可用模型后，此处自动聚合展示",
+      "mappingsDisabled": "启用后可添加模型映射规则",
+      "mappingsRules": "暂无映射规则，点击下方添加"
+    },
+    "toast": {
+      "urlCopied": "已复制代理地址",
+      "modelCopied": "已复制: {id}",
+      "profileCopied": "已复制「{name}」",
+      "startFailed": "启动失败: {msg}",
+      "portInUse": "启动失败: 端口 {port} 已被占用",
+      "proxyCrashed": "代理异常退出",
+      "reorderFailed": "排序保存失败: {msg}",
+      "mappingsSaveFailed": "模型映射保存失败: {msg}"
+    },
+    "confirm": {
+      "deleteProfile": "确定要删除该提供商吗？"
+    }
+  },
   "settings": {},
   "profileEdit": {},
   "errors": {}

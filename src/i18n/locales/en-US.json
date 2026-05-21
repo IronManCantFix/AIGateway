@@ -14,7 +14,69 @@
     "bootError": "Proxy auto-start failed: {msg}",
     "dismissTip": "Click to dismiss"
   },
-  "home": {},
+  "home": {
+    "status": {
+      "running": "Proxy running",
+      "starting": "Starting...",
+      "stopping": "Stopping...",
+      "stopped": "Proxy stopped"
+    },
+    "section": {
+      "providers": "Providers",
+      "models": "Available models",
+      "mappings": "Model mappings"
+    },
+    "tip": {
+      "providers": "Multiple providers can be enabled at the same time. Requests match model IDs from top to bottom of the list, and the first matching provider handles the request.",
+      "models": "Aggregated list of models from enabled providers, returned to clients via the <code>/v1/models</code> endpoint.",
+      "mappings": "Map the model ID requested by the client to a real model ID. Useful when the client is locked to a model name (e.g. Codex only calls gpt5.5) but you don't have that model."
+    },
+    "button": {
+      "start": "Start",
+      "stop": "Stop",
+      "add": "+ Add",
+      "copy": "Copy",
+      "edit": "Edit",
+      "delete": "Delete",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "addMapping": "+ Add mapping",
+      "ok": "OK"
+    },
+    "label": {
+      "clickToCopy": "Click to copy",
+      "copyAddress": "Copy address",
+      "settings": "Settings",
+      "dragToReorder": "Drag to reorder",
+      "copyModelId": "Copy model ID",
+      "copySuffix": "(copy)",
+      "noModels": "No models configured",
+      "modelCount": "{count} models",
+      "requestModel": "Request model",
+      "actualModel": "Actual model",
+      "fromPlaceholder": "e.g. gpt5.5",
+      "selectActualModel": "Select actual model"
+    },
+    "empty": {
+      "providers": "No providers yet. Click \"+ Add\" to configure one.",
+      "models": "Enable providers and configure available models to see them aggregated here.",
+      "mappingsDisabled": "Enable to add model mapping rules.",
+      "mappingsRules": "No mapping rules. Click below to add one."
+    },
+    "toast": {
+      "urlCopied": "Proxy address copied",
+      "modelCopied": "Copied: {id}",
+      "profileCopied": "Copied \"{name}\"",
+      "startFailed": "Start failed: {msg}",
+      "portInUse": "Start failed: port {port} is already in use",
+      "proxyCrashed": "Proxy exited unexpectedly",
+      "reorderFailed": "Failed to save order: {msg}",
+      "mappingsSaveFailed": "Failed to save model mappings: {msg}"
+    },
+    "confirm": {
+      "deleteProfile": "Delete this provider?"
+    }
+  },
   "settings": {},
   "profileEdit": {},
   "errors": {}
