@@ -203,6 +203,7 @@
     "placeholder": {
       "name": "如：我的 OpenAI",
       "baseUrl": "如：https://api.openai.com",
+      "apiKey": "sk-...",
       "defaultModel": "如：gpt-4o",
       "addModel": "输入模型 ID，回车添加",
       "searchModels": "搜索模型..."

@@ -203,6 +203,7 @@
     "placeholder": {
       "name": "e.g. My OpenAI",
       "baseUrl": "e.g. https://api.openai.com",
+      "apiKey": "sk-...",
       "defaultModel": "e.g. gpt-4o",
       "addModel": "Enter model ID and press Enter",
       "searchModels": "Search models..."

@@ -229,7 +229,7 @@ onMounted(() => {
           <div class="field">
             <label>{{ $t('profileEdit.label.apiKey') }} <span class="opt">{{ $t('profileEdit.label.optional') }}</span></label>
             <div class="key-row">
-              <input v-model="form.apiKey" :type="showKey ? 'text' : 'password'" placeholder="sk-..." />
+              <input v-model="form.apiKey" :type="showKey ? 'text' : 'password'" :placeholder="$t('profileEdit.placeholder.apiKey')" />
               <button type="button" class="toggle-key" @click="showKey = !showKey">
                 {{ showKey ? $t('profileEdit.button.hide') : $t('profileEdit.button.show') }}
               </button>
