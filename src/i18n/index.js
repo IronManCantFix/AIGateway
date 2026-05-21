@@ -28,3 +28,9 @@ export function setLocale(lang) {
   i18n.global.locale.value = lang
   document.documentElement.lang = lang
 }
+
+export function applyLocaleFromSetting(settingValue) {
+  const lang = resolveLocale(settingValue)
+  setLocale(lang)
+  return lang
+}
