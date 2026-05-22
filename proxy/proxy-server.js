@@ -102,7 +102,6 @@ function readBodyAsBuffer(req, maxBytes) {
         const err = new Error('payload too large')
         err.code = 'PAYLOAD_TOO_LARGE'
         reject(err)
-        req.destroy()
         return
       }
       chunks.push(c)
@@ -851,6 +850,7 @@ const server = http.createServer(async (req, res) => {
             const errBody = JSON.stringify({ error: 'Payload Too Large', maxBytes: MAX_IMAGE_BODY })
             res.writeHead(413, { 'Content-Type': 'application/json' })
             res.end(errBody)
+            req.resume()  // drain remaining upload bytes; socket closes after res.end flushes
             logRequest(endpoint, '-', 413, Date.now() - startTime, 'payload_too_large', null, errBody, '-', { method: req.method })
             return
           }
