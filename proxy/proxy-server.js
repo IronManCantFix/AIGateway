@@ -45,13 +45,17 @@ function cacheReasoning(callId, reasoning) {
 
 // --- Path → source format mapping ---
 
+const MAX_IMAGE_BODY = 200 * 1024 * 1024  // 200 MiB
+
 const PATH_TO_SOURCE = {
   '/v1/chat/completions': 'chat_completions',
   '/v1/responses': 'responses',
   '/v1/messages': 'messages',
   '/chat/completions': 'chat_completions',
   '/responses': 'responses',
-  '/messages': 'messages'
+  '/messages': 'messages',
+  '/v1/images/generations': 'image',
+  '/v1/images/edits': 'image'
 }
 
 // --- Provider type → target format + upstream path ---
@@ -59,8 +63,12 @@ const PATH_TO_SOURCE = {
 const PROVIDER_META = {
   'openai-chat':        { target: 'chat_completions', path: '/v1/chat/completions' },
   'openai-response':    { target: 'responses',        path: '/v1/responses' },
-  'anthropic-message':  { target: 'messages',          path: '/v1/messages' },
-  'newapi':             { target: 'chat_completions', path: '/v1/chat/completions' }
+  'anthropic-message':  { target: 'messages',         path: '/v1/messages' },
+  'newapi':             { target: 'chat_completions', path: '/v1/chat/completions' },
+  'openai-image':       { target: 'image',            paths: {
+                            '/v1/images/generations': '/v1/images/generations',
+                            '/v1/images/edits':       '/v1/images/edits'
+                          } }
 }
 
 // --- Read request body ---
