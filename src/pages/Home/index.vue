@@ -125,12 +125,12 @@ async function confirmDelete(id) {
 }
 
 function providerLabel(type) {
-  const map = { 'openai-chat': 'OpenAI Chat', 'openai-response': 'OpenAI Response', 'anthropic-message': 'Anthropic', 'newapi': 'NEW API' }
+  const map = { 'openai-chat': 'OpenAI Chat', 'openai-response': 'OpenAI Response', 'anthropic-message': 'Anthropic', 'openai-image': 'OpenAI Image', 'newapi': 'NEW API' }
   return map[type] || type
 }
 
 function providerColor(type) {
-  const map = { 'openai-chat': '#10b981', 'openai-response': '#f59e0b', 'anthropic-message': '#8b5cf6', 'newapi': '#06b6d4' }
+  const map = { 'openai-chat': '#10b981', 'openai-response': '#f59e0b', 'anthropic-message': '#8b5cf6', 'openai-image': '#ec4899', 'newapi': '#06b6d4' }
   return map[type] || '#6b7280'
 }
 
