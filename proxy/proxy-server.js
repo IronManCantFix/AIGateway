@@ -88,6 +88,30 @@ function readBody(req) {
   })
 }
 
+// Read entire body as a Buffer, enforcing a hard size limit (used for multipart).
+function readBodyAsBuffer(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let received = 0
+    let aborted = false
+    req.on('data', c => {
+      if (aborted) return
+      received += c.length
+      if (received > maxBytes) {
+        aborted = true
+        const err = new Error('payload too large')
+        err.code = 'PAYLOAD_TOO_LARGE'
+        reject(err)
+        req.destroy()
+        return
+      }
+      chunks.push(c)
+    })
+    req.on('end', () => { if (!aborted) resolve(Buffer.concat(chunks)) })
+    req.on('error', err => { if (!aborted) reject(err) })
+  })
+}
+
 // --- Clean malformed client body ---
 // CherryStudio 等客户端会把未设置的字段发成 "[undefined]" 字符串值，需要过滤掉
 
@@ -817,13 +841,37 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ input_tokens: inputTokens }))
       logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-', { method: req.method })
     } else if (PATH_TO_SOURCE[urlPath]) {
-      rawBody = await readBody(req)
-      model = (rawBody && rawBody.model) || '-'
-      req._body = rawBody
+      const ct = req.headers['content-type'] || ''
+      const isMultipart = ct.startsWith('multipart/form-data')
+      if (isMultipart) {
+        try {
+          req._rawBuffer = await readBodyAsBuffer(req, MAX_IMAGE_BODY)
+        } catch (e) {
+          if (e.code === 'PAYLOAD_TOO_LARGE') {
+            const errBody = JSON.stringify({ error: 'Payload Too Large', maxBytes: MAX_IMAGE_BODY })
+            res.writeHead(413, { 'Content-Type': 'application/json' })
+            res.end(errBody)
+            logRequest(endpoint, '-', 413, Date.now() - startTime, 'payload_too_large', null, errBody, '-', { method: req.method })
+            return
+          }
+          throw e
+        }
+        req._contentType = ct
+        // model resolved later inside handleApiRequest
+      } else {
+        rawBody = await readBody(req)
+        model = (rawBody && rawBody.model) || '-'
+        req._body = rawBody
+      }
       if (logEnabled) {
-        req._onResponseBody = (body) => { responseBody = body }
+        req._onResponseBody = (body) => {
+          responseBody = (PATH_TO_SOURCE[urlPath] === 'image') ? sanitizeImageResponseBody(body) : body
+        }
       }
       await handleApiRequest(req, res)
+      // multipart 路径 handleApiRequest 会回写以下两个字段供日志使用
+      if (req._loggedRequestBody) rawBody = req._loggedRequestBody
+      if (req._resolvedModel) model = req._resolvedModel
       // handleApiRequest may have mapped the model — use mapped name for log
       if (req._modelMapping) {
         model = req._modelMapping
@@ -860,6 +908,9 @@ const server = http.createServer(async (req, res) => {
     logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra)
   })
 })
+
+// Will be implemented in Task 6
+function sanitizeImageResponseBody(body) { return body }
 
 // --- IPC: receive config from parent (stdin JSON Lines) ---
 
