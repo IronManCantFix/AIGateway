@@ -977,8 +977,23 @@ const server = http.createServer(async (req, res) => {
   })
 })
 
-// Will be implemented in Task 6
-function sanitizeImageResponseBody(body) { return body }
+function sanitizeImageResponseBody(rawText) {
+  if (!rawText) return rawText
+  try {
+    const obj = JSON.parse(rawText)
+    if (obj && Array.isArray(obj.data)) {
+      obj.data = obj.data.map(item => {
+        if (item && typeof item.b64_json === 'string') {
+          return { ...item, b64_json: `<base64 stripped, length=${item.b64_json.length}>` }
+        }
+        return item
+      })
+    }
+    return JSON.stringify(obj)
+  } catch {
+    return rawText
+  }
+}
 
 // --- IPC: receive config from parent (stdin JSON Lines) ---
 
