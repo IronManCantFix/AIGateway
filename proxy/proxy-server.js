@@ -909,7 +909,7 @@ const server = http.createServer(async (req, res) => {
       logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-', { method: req.method })
     } else if (PATH_TO_SOURCE[urlPath]) {
       const ct = req.headers['content-type'] || ''
-      const isMultipart = ct.startsWith('multipart/form-data')
+      const isMultipart = PATH_TO_SOURCE[urlPath] === 'image' && ct.startsWith('multipart/form-data')
       if (isMultipart) {
         try {
           req._rawBuffer = await readBodyAsBuffer(req, MAX_IMAGE_BODY)
