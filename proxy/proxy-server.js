@@ -187,7 +187,7 @@ function createProxyAgent(proxyConfig, isHttps, profileId) {
   }
 }
 
-function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId) {
+function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId, contentType) {
   const parsed = new URL(upstreamUrl)
   const isHttps = parsed.protocol === 'https:'
   const transport = isHttps ? https : http
@@ -197,7 +197,8 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
   const agent = createProxyAgent(proxyConfig, isHttps, profileId)
   clientReq._usedProxy = !!agent
 
-  const bodyStr = JSON.stringify(body)
+  const bodyBuf = Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body))
+  const effectiveContentType = contentType || 'application/json'
 
   const options = {
     hostname: parsed.hostname,
@@ -206,9 +207,9 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     method: clientReq.method,
     agent,
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': effectiveContentType,
       'Authorization': `Bearer ${apiKey}`,
-      'Content-Length': Buffer.byteLength(bodyStr)
+      'Content-Length': bodyBuf.length
     }
   }
 
@@ -602,7 +603,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     }
   })
 
-  upstreamReq.write(bodyStr)
+  upstreamReq.write(bodyBuf)
   upstreamReq.end()
 }
 
