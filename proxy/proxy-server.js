@@ -20,6 +20,7 @@ import {
   parseMaybeJson,
   setReasoningCache
 } from './protocol-converters.js'
+import { parseMultipartFields } from './multipart-scanner.js'
 
 
 // --- State ---
@@ -640,7 +641,34 @@ async function handleApiRequest(req, res) {
   }
 
   let body = req._body
-  if (!body) {
+  let multipartFields = null
+  let multipartFiles = null
+
+  if (source === 'image' && req._rawBuffer) {
+    // multipart path
+    const boundaryMatch = /boundary=("?)([^";]+)\1/i.exec(req._contentType || '')
+    if (!boundaryMatch) {
+      const errBody = JSON.stringify({ error: 'Bad multipart: missing boundary' })
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(errBody)
+      if (req._onResponseBody) req._onResponseBody(errBody)
+      return
+    }
+    try {
+      const parsed = parseMultipartFields(req._rawBuffer, boundaryMatch[2])
+      multipartFields = parsed.fields
+      multipartFiles = parsed.files
+    } catch (e) {
+      const errBody = JSON.stringify({ error: 'Bad multipart: ' + e.message })
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(errBody)
+      if (req._onResponseBody) req._onResponseBody(errBody)
+      return
+    }
+    body = { model: multipartFields.model }  // placeholder used only for routing
+    req._loggedRequestBody = { fields: multipartFields, files: multipartFiles }
+    req._resolvedModel = multipartFields.model || '-'
+  } else if (!body) {
     try {
       body = await readBody(req)
     } catch (e) {
@@ -650,9 +678,11 @@ async function handleApiRequest(req, res) {
     }
   }
 
-  // Clean malformed body: strip "[undefined]" strings, flatten input_text content arrays
-  body = cleanBody(body)
-  body = flattenBodyMessages(body)
+  if (source !== 'image') {
+    // Clean malformed body: strip "[undefined]" strings, flatten input_text content arrays
+    body = cleanBody(body)
+    body = flattenBodyMessages(body)
+  }
 
   // Apply model mapping if enabled
   let originalModel = body.model
@@ -676,6 +706,8 @@ async function handleApiRequest(req, res) {
 
   if (requestedModel) {
     for (const p of currentConfig.profiles) {
+      if (source === 'image' && p.providerType !== 'openai-image') continue
+      if (source !== 'image' && p.providerType === 'openai-image') continue
       if (Array.isArray(p.models) && p.models.length > 0 && p.models.includes(requestedModel)) {
         profile = p
         break
@@ -687,8 +719,10 @@ async function handleApiRequest(req, res) {
       return
     }
   } else {
-    // No model specified — use the first profile with models
+    // No model specified — use the first profile with models (matching source family)
     for (const p of currentConfig.profiles) {
+      if (source === 'image' && p.providerType !== 'openai-image') continue
+      if (source !== 'image' && p.providerType === 'openai-image') continue
       if (Array.isArray(p.models) && p.models.length > 0) {
         profile = p
         break
@@ -716,26 +750,59 @@ async function handleApiRequest(req, res) {
   }
 
   // Apply body converter
-  const bodyConverter = getBodyConverter(source, meta.target)
-  let bodySizeBefore = JSON.stringify(body).length
-  if (bodyConverter) {
-    body = bodyConverter(body)
+  if (source !== 'image') {
+    const bodyConverter = getBodyConverter(source, meta.target)
+    let bodySizeBefore = JSON.stringify(body).length
+    if (bodyConverter) {
+      body = bodyConverter(body)
+    }
+    let bodySizeAfter = JSON.stringify(body).length
+    req._bodySizeBefore = bodySizeBefore
+    req._bodySizeAfter = bodySizeAfter
+  } else {
+    const size = req._rawBuffer ? req._rawBuffer.length : JSON.stringify(body).length
+    req._bodySizeBefore = size
+    req._bodySizeAfter = size
   }
-  let bodySizeAfter = JSON.stringify(body).length
-  req._bodySizeBefore = bodySizeBefore
-  req._bodySizeAfter = bodySizeAfter
 
   // OpenAI Chat-compatible providers expect system instructions inside
   // messages[]. Anthropic Messages-compatible providers require the top-level
   // system field, so leave it untouched for meta.target === 'messages'.
-  if (body.system && meta.target === 'chat_completions' && profile.providerType !== 'newapi' && Array.isArray(body.messages)) {
+  if (source !== 'image' && body.system && meta.target === 'chat_completions' && profile.providerType !== 'newapi' && Array.isArray(body.messages)) {
     body.messages.unshift({ role: 'system', content: body.system })
     delete body.system
   }
 
   const baseUrl = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
-  const upstreamUrl = `${baseUrl}${meta.path}`
+  let upstreamPath
+  if (source === 'image') {
+    upstreamPath = meta.paths[urlPath]
+    if (!upstreamPath) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Not Found' }))
+      return
+    }
+  } else {
+    upstreamPath = meta.path
+  }
+  const upstreamUrl = `${baseUrl}${upstreamPath}`
   req._upstreamUrl = upstreamUrl
+
+  if (source === 'image') {
+    // No SSE, no body conversion — pass through.
+    const rawBuffer = req._rawBuffer  // null for JSON path
+    forwardRequest(req, res, upstreamUrl, profile.apiKey,
+      rawBuffer || body,
+      null,
+      req._onResponseBody || null,
+      null,
+      source,
+      profile.id,
+      rawBuffer ? req._contentType : 'application/json'
+    )
+    return
+  }
+
   const needStream = req.headers.accept?.includes('text/event-stream') || body.stream
   let sseConverter = needStream ? createSSEConverter(source, meta.target) : null
   // Same-format chat_completions: convert reasoning_details / <think> tags
