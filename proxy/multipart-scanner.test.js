@@ -72,3 +72,17 @@ test('parseMultipartFields: rejects empty boundary param', () => {
   assert.throws(() => parseMultipartFields(Buffer.from('--X--'), ''),
     /missing boundary/)
 })
+
+test('parseMultipartFields: filename with semicolons inside quotes', () => {
+  const boundary = 'X'
+  const buf = buildBody(boundary, [
+    {
+      headers: 'Content-Disposition: form-data; name="image"; filename="photo; portrait.jpg"\r\nContent-Type: image/jpeg',
+      body: Buffer.from('JPEGBYTES')
+    }
+  ])
+  const result = parseMultipartFields(buf, boundary)
+  assert.equal(result.files.length, 1)
+  assert.equal(result.files[0].filename, 'photo; portrait.jpg')
+  assert.equal(result.files[0].name, 'image')
+})

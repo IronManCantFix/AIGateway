@@ -21,7 +21,17 @@ function parseHeaders(headerBlock) {
 function parseContentDisposition(value) {
   if (!value) return {}
   const params = {}
-  const parts = value.split(';').map(p => p.trim())
+  // Quote-aware split: only treat ';' as a delimiter outside "..." spans.
+  const parts = []
+  let token = ''
+  let inQuotes = false
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i]
+    if (ch === '"') { inQuotes = !inQuotes; token += ch }
+    else if (ch === ';' && !inQuotes) { parts.push(token.trim()); token = '' }
+    else { token += ch }
+  }
+  if (token.trim()) parts.push(token.trim())
   for (const part of parts.slice(1)) {
     const eq = part.indexOf('=')
     if (eq < 0) continue
@@ -33,6 +43,10 @@ function parseContentDisposition(value) {
   return params
 }
 
+/**
+ * @param {Buffer} buf      Raw multipart body
+ * @param {string} boundary Boundary string, unquoted (caller must strip any surrounding `"..."` from the Content-Type header value)
+ */
 export function parseMultipartFields(buf, boundary) {
   if (!Buffer.isBuffer(buf)) throw new Error('Bad multipart: body must be Buffer')
   if (!boundary) throw new Error('Bad multipart: missing boundary')
