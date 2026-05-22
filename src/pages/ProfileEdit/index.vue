@@ -217,6 +217,7 @@ onMounted(() => {
               <option value="openai-chat">{{ $t('profileEdit.providerType.openai-chat') }}</option>
               <option value="openai-response">{{ $t('profileEdit.providerType.openai-response') }}</option>
               <option value="anthropic-message">{{ $t('profileEdit.providerType.anthropic-message') }}</option>
+              <option value="openai-image">{{ $t('profileEdit.providerType.openai-image') }}</option>
               <option value="newapi">{{ $t('profileEdit.providerType.newapi') }}</option>
             </select>
           </div>
