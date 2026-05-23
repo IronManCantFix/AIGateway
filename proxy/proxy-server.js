@@ -20,6 +20,7 @@ import {
   parseMaybeJson,
   setReasoningCache
 } from './protocol-converters.js'
+import { parseMultipartFields } from './multipart-scanner.js'
 
 
 // --- State ---
@@ -45,13 +46,17 @@ function cacheReasoning(callId, reasoning) {
 
 // --- Path → source format mapping ---
 
+const MAX_IMAGE_BODY = 200 * 1024 * 1024  // 200 MiB
+
 const PATH_TO_SOURCE = {
   '/v1/chat/completions': 'chat_completions',
   '/v1/responses': 'responses',
   '/v1/messages': 'messages',
   '/chat/completions': 'chat_completions',
   '/responses': 'responses',
-  '/messages': 'messages'
+  '/messages': 'messages',
+  '/v1/images/generations': 'image',
+  '/v1/images/edits': 'image'
 }
 
 // --- Provider type → target format + upstream path ---
@@ -59,8 +64,12 @@ const PATH_TO_SOURCE = {
 const PROVIDER_META = {
   'openai-chat':        { target: 'chat_completions', path: '/v1/chat/completions' },
   'openai-response':    { target: 'responses',        path: '/v1/responses' },
-  'anthropic-message':  { target: 'messages',          path: '/v1/messages' },
-  'newapi':             { target: 'chat_completions', path: '/v1/chat/completions' }
+  'anthropic-message':  { target: 'messages',         path: '/v1/messages' },
+  'newapi':             { target: 'chat_completions', path: '/v1/chat/completions' },
+  'openai-image':       { target: 'image',            paths: {
+                            '/v1/images/generations': '/v1/images/generations',
+                            '/v1/images/edits':       '/v1/images/edits'
+                          } }
 }
 
 // --- Read request body ---
@@ -77,6 +86,29 @@ function readBody(req) {
       }
     })
     req.on('error', reject)
+  })
+}
+
+// Read entire body as a Buffer, enforcing a hard size limit (used for multipart).
+function readBodyAsBuffer(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let received = 0
+    let aborted = false
+    req.on('data', c => {
+      if (aborted) return
+      received += c.length
+      if (received > maxBytes) {
+        aborted = true
+        const err = new Error('payload too large')
+        err.code = 'PAYLOAD_TOO_LARGE'
+        reject(err)
+        return
+      }
+      chunks.push(c)
+    })
+    req.on('end', () => { if (!aborted) resolve(Buffer.concat(chunks)) })
+    req.on('error', err => { if (!aborted) reject(err) })
   })
 }
 
@@ -156,7 +188,7 @@ function createProxyAgent(proxyConfig, isHttps, profileId) {
   }
 }
 
-function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId) {
+function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId, contentType) {
   const parsed = new URL(upstreamUrl)
   const isHttps = parsed.protocol === 'https:'
   const transport = isHttps ? https : http
@@ -166,7 +198,8 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
   const agent = createProxyAgent(proxyConfig, isHttps, profileId)
   clientReq._usedProxy = !!agent
 
-  const bodyStr = JSON.stringify(body)
+  const bodyBuf = Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body))
+  const effectiveContentType = contentType || 'application/json'
 
   const options = {
     hostname: parsed.hostname,
@@ -175,9 +208,9 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     method: clientReq.method,
     agent,
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': effectiveContentType,
       'Authorization': `Bearer ${apiKey}`,
-      'Content-Length': Buffer.byteLength(bodyStr)
+      'Content-Length': bodyBuf.length
     }
   }
 
@@ -571,7 +604,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     }
   })
 
-  upstreamReq.write(bodyStr)
+  upstreamReq.write(bodyBuf)
   upstreamReq.end()
 }
 
@@ -608,7 +641,34 @@ async function handleApiRequest(req, res) {
   }
 
   let body = req._body
-  if (!body) {
+  let multipartFields = null
+  let multipartFiles = null
+
+  if (source === 'image' && req._rawBuffer) {
+    // multipart path
+    const boundaryMatch = /boundary=("?)([^";]+)\1/i.exec(req._contentType || '')
+    if (!boundaryMatch) {
+      const errBody = JSON.stringify({ error: 'Bad multipart: missing boundary' })
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(errBody)
+      if (req._onResponseBody) req._onResponseBody(errBody)
+      return
+    }
+    try {
+      const parsed = parseMultipartFields(req._rawBuffer, boundaryMatch[2])
+      multipartFields = parsed.fields
+      multipartFiles = parsed.files
+    } catch (e) {
+      const errBody = JSON.stringify({ error: 'Bad multipart: ' + e.message })
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(errBody)
+      if (req._onResponseBody) req._onResponseBody(errBody)
+      return
+    }
+    body = { model: multipartFields.model }  // placeholder used only for routing
+    req._loggedRequestBody = { fields: multipartFields, files: multipartFiles }
+    req._resolvedModel = multipartFields.model || '-'
+  } else if (!body) {
     try {
       body = await readBody(req)
     } catch (e) {
@@ -618,9 +678,11 @@ async function handleApiRequest(req, res) {
     }
   }
 
-  // Clean malformed body: strip "[undefined]" strings, flatten input_text content arrays
-  body = cleanBody(body)
-  body = flattenBodyMessages(body)
+  if (source !== 'image') {
+    // Clean malformed body: strip "[undefined]" strings, flatten input_text content arrays
+    body = cleanBody(body)
+    body = flattenBodyMessages(body)
+  }
 
   // Apply model mapping if enabled
   let originalModel = body.model
@@ -644,6 +706,8 @@ async function handleApiRequest(req, res) {
 
   if (requestedModel) {
     for (const p of currentConfig.profiles) {
+      if (source === 'image' && p.providerType !== 'openai-image') continue
+      if (source !== 'image' && p.providerType === 'openai-image') continue
       if (Array.isArray(p.models) && p.models.length > 0 && p.models.includes(requestedModel)) {
         profile = p
         break
@@ -655,8 +719,10 @@ async function handleApiRequest(req, res) {
       return
     }
   } else {
-    // No model specified — use the first profile with models
+    // No model specified — use the first profile with models (matching source family)
     for (const p of currentConfig.profiles) {
+      if (source === 'image' && p.providerType !== 'openai-image') continue
+      if (source !== 'image' && p.providerType === 'openai-image') continue
       if (Array.isArray(p.models) && p.models.length > 0) {
         profile = p
         break
@@ -684,26 +750,59 @@ async function handleApiRequest(req, res) {
   }
 
   // Apply body converter
-  const bodyConverter = getBodyConverter(source, meta.target)
-  let bodySizeBefore = JSON.stringify(body).length
-  if (bodyConverter) {
-    body = bodyConverter(body)
+  if (source !== 'image') {
+    const bodyConverter = getBodyConverter(source, meta.target)
+    let bodySizeBefore = JSON.stringify(body).length
+    if (bodyConverter) {
+      body = bodyConverter(body)
+    }
+    let bodySizeAfter = JSON.stringify(body).length
+    req._bodySizeBefore = bodySizeBefore
+    req._bodySizeAfter = bodySizeAfter
+  } else {
+    const size = req._rawBuffer ? req._rawBuffer.length : JSON.stringify(body).length
+    req._bodySizeBefore = size
+    req._bodySizeAfter = size
   }
-  let bodySizeAfter = JSON.stringify(body).length
-  req._bodySizeBefore = bodySizeBefore
-  req._bodySizeAfter = bodySizeAfter
 
   // OpenAI Chat-compatible providers expect system instructions inside
   // messages[]. Anthropic Messages-compatible providers require the top-level
   // system field, so leave it untouched for meta.target === 'messages'.
-  if (body.system && meta.target === 'chat_completions' && profile.providerType !== 'newapi' && Array.isArray(body.messages)) {
+  if (source !== 'image' && body.system && meta.target === 'chat_completions' && profile.providerType !== 'newapi' && Array.isArray(body.messages)) {
     body.messages.unshift({ role: 'system', content: body.system })
     delete body.system
   }
 
   const baseUrl = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
-  const upstreamUrl = `${baseUrl}${meta.path}`
+  let upstreamPath
+  if (source === 'image') {
+    upstreamPath = meta.paths[urlPath]
+    if (!upstreamPath) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Not Found' }))
+      return
+    }
+  } else {
+    upstreamPath = meta.path
+  }
+  const upstreamUrl = `${baseUrl}${upstreamPath}`
   req._upstreamUrl = upstreamUrl
+
+  if (source === 'image') {
+    // No SSE, no body conversion — pass through.
+    const rawBuffer = req._rawBuffer  // null for JSON path
+    forwardRequest(req, res, upstreamUrl, profile.apiKey,
+      rawBuffer || body,
+      null,
+      req._onResponseBody || null,
+      null,
+      source,
+      profile.id,
+      rawBuffer ? req._contentType : 'application/json'
+    )
+    return
+  }
+
   const needStream = req.headers.accept?.includes('text/event-stream') || body.stream
   let sseConverter = needStream ? createSSEConverter(source, meta.target) : null
   // Same-format chat_completions: convert reasoning_details / <think> tags
@@ -809,13 +908,38 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ input_tokens: inputTokens }))
       logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-', { method: req.method })
     } else if (PATH_TO_SOURCE[urlPath]) {
-      rawBody = await readBody(req)
-      model = (rawBody && rawBody.model) || '-'
-      req._body = rawBody
+      const ct = req.headers['content-type'] || ''
+      const isMultipart = PATH_TO_SOURCE[urlPath] === 'image' && ct.startsWith('multipart/form-data')
+      if (isMultipart) {
+        try {
+          req._rawBuffer = await readBodyAsBuffer(req, MAX_IMAGE_BODY)
+        } catch (e) {
+          if (e.code === 'PAYLOAD_TOO_LARGE') {
+            const errBody = JSON.stringify({ error: 'Payload Too Large', maxBytes: MAX_IMAGE_BODY })
+            res.writeHead(413, { 'Content-Type': 'application/json' })
+            res.end(errBody)
+            req.resume()  // drain remaining upload bytes; socket closes after res.end flushes
+            logRequest(endpoint, '-', 413, Date.now() - startTime, 'payload_too_large', null, errBody, '-', { method: req.method })
+            return
+          }
+          throw e
+        }
+        req._contentType = ct
+        // model resolved later inside handleApiRequest
+      } else {
+        rawBody = await readBody(req)
+        model = (rawBody && rawBody.model) || '-'
+        req._body = rawBody
+      }
       if (logEnabled) {
-        req._onResponseBody = (body) => { responseBody = body }
+        req._onResponseBody = (body) => {
+          responseBody = (PATH_TO_SOURCE[urlPath] === 'image') ? sanitizeImageResponseBody(body) : body
+        }
       }
       await handleApiRequest(req, res)
+      // multipart 路径 handleApiRequest 会回写以下两个字段供日志使用
+      if (req._loggedRequestBody) rawBody = req._loggedRequestBody
+      if (req._resolvedModel) model = req._resolvedModel
       // handleApiRequest may have mapped the model — use mapped name for log
       if (req._modelMapping) {
         model = req._modelMapping
@@ -852,6 +976,24 @@ const server = http.createServer(async (req, res) => {
     logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra)
   })
 })
+
+function sanitizeImageResponseBody(rawText) {
+  if (!rawText) return rawText
+  try {
+    const obj = JSON.parse(rawText)
+    if (obj && Array.isArray(obj.data)) {
+      obj.data = obj.data.map(item => {
+        if (item && typeof item.b64_json === 'string') {
+          return { ...item, b64_json: `<base64 stripped, length=${item.b64_json.length}>` }
+        }
+        return item
+      })
+    }
+    return JSON.stringify(obj)
+  } catch {
+    return rawText
+  }
+}
 
 // --- IPC: receive config from parent (stdin JSON Lines) ---
 

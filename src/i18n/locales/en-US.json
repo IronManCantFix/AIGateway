@@ -229,6 +229,7 @@
       "openai-chat": "OpenAI Chat Completions",
       "openai-response": "OpenAI Responses",
       "anthropic-message": "Anthropic Messages",
+      "openai-image": "OpenAI Image",
       "newapi": "NEW API"
     }
   },
