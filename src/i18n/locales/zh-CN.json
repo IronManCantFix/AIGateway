@@ -1,0 +1,259 @@
+{
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "ok": "确定",
+    "confirm": "确认",
+    "copy": "复制",
+    "copySuccess": "{label}复制成功",
+    "back": "返回",
+    "delete": "删除",
+    "loading": "加载中…",
+    "empty": "—"
+  },
+  "app": {
+    "bootError": "代理自动启动失败：{msg}",
+    "dismissTip": "点击关闭"
+  },
+  "home": {
+    "status": {
+      "running": "代理运行中",
+      "starting": "正在启动…",
+      "stopping": "正在停止…",
+      "stopped": "代理已停止"
+    },
+    "section": {
+      "providers": "提供商",
+      "models": "可用模型",
+      "mappings": "模型映射"
+    },
+    "tip": {
+      "providers": "支持同时启用多个提供商，请求时按照列表从上到下的顺序匹配模型 ID，匹配到的第一个提供商将处理该请求",
+      "models": "聚合自已启用提供商的可用模型列表，通过 <code>/v1/models</code> 接口返回给客户端",
+      "mappings": "将客户端请求的模型 ID 映射为真实模型 ID。适用于客户端固定模型名称（如 Codex 只能调用 gpt5.5）但你没有该模型的场景"
+    },
+    "button": {
+      "start": "启动",
+      "stop": "停止",
+      "add": "+ 添加",
+      "edit": "编辑",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "addMapping": "+ 添加映射"
+    },
+    "label": {
+      "clickToCopy": "点击复制",
+      "copyAddress": "复制地址",
+      "settings": "设置",
+      "dragToReorder": "拖拽排序",
+      "copyModelId": "复制模型 ID",
+      "copySuffix": "(副本)",
+      "noModels": "未配置模型",
+      "modelCount": "{count} 个模型",
+      "requestModel": "请求模型",
+      "actualModel": "实际模型",
+      "fromPlaceholder": "如 gpt5.5",
+      "selectActualModel": "选择实际模型"
+    },
+    "empty": {
+      "providers": "尚未添加提供商，点击「+ 添加」开始配置",
+      "models": "启用提供商并配置可用模型后，此处自动聚合展示",
+      "mappingsDisabled": "启用后可添加模型映射规则",
+      "mappingsRules": "暂无映射规则，点击下方添加"
+    },
+    "toast": {
+      "urlCopied": "已复制代理地址",
+      "modelCopied": "已复制: {id}",
+      "profileCopied": "已复制「{name}」",
+      "startFailed": "启动失败: {msg}",
+      "portInUse": "启动失败: 端口 {port} 已被占用",
+      "proxyCrashed": "代理异常退出",
+      "reorderFailed": "排序保存失败: {msg}",
+      "mappingsSaveFailed": "模型映射保存失败: {msg}"
+    },
+    "confirm": {
+      "deleteProfile": "确定要删除该提供商吗？"
+    }
+  },
+  "settings": {
+    "title": "设置与统计",
+    "section": {
+      "proxyPort": "代理端口",
+      "httpProxy": "HTTP 代理",
+      "statsOverview": "请求统计",
+      "general": "通用设置"
+    },
+    "language": {
+      "title": "界面语言",
+      "auto": "跟随系统",
+      "zh-CN": "简体中文",
+      "en-US": "English",
+      "changed": "语言已切换",
+      "changeFailed": "语言切换失败，请重试"
+    },
+    "label": {
+      "saved": "已保存",
+      "enableHttpProxy": "启用 HTTP 代理",
+      "proxyAddress": "代理地址",
+      "showAuth": "显示认证信息（可选）",
+      "hideAuth": "隐藏认证信息",
+      "username": "用户名",
+      "password": "密码",
+      "excludeProviders": "不需要代理的提供商",
+      "autoStart": "启动应用时自动开启代理",
+      "logEnabled": "记录请求参数与返回参数",
+      "logHint": "仅在排查报错时开启；开启后会完整记录请求体和响应体，占用更多空间，日志文件会明显变大，立即生效",
+      "statsLoading": "正在加载统计数据…",
+      "totalRequests": "总请求数",
+      "tokensUsed": "Token 消耗",
+      "avgPerDay": "日均请求",
+      "requests30d": "30 天请求",
+      "tokens30d": "30 天 Token",
+      "empty": "暂无数据",
+      "colModel": "模型",
+      "colCount": "调用次数",
+      "colTokens": "Token 量",
+      "requestCount": "{count} 次",
+      "status2xx": "2xx 成功",
+      "status4xx": "4xx 客户端错误",
+      "status5xx": "5xx 服务端错误",
+      "logFileSize": "日志文件 {size}",
+      "viewParams": "查看参数",
+      "request": "请求",
+      "response": "响应",
+      "perPagePrefix": "共 {count} 条，每页",
+      "perPageSuffix": "条",
+      "pageInfo": "第 {page} / {total} 页",
+      "logsLoading": "正在加载日志…",
+      "noFilteredLogs": "没有符合筛选条件的日志",
+      "logsHint": "切换到日志后加载最近记录",
+      "devVersion": "开发版",
+      "latestRelease": "最新正式版: {version}",
+      "updateAvailable": "新版本 {version} 可用",
+      "upToDate": "已是最新版本",
+      "authors": "作者 Claude Code & DeepSeek v4 Pro & mimo-v2.5-pro"
+    },
+    "button": {
+      "refresh": "刷新",
+      "clearStats": "清除统计",
+      "heatmapYear": "全年热力图",
+      "trend30d": "30 天趋势",
+      "heatRequests": "请求数",
+      "tabProvider": "提供商",
+      "tabModel": "模型",
+      "tabLogs": "日志",
+      "clearLogs": "清除日志",
+      "clearBodies": "清空参数",
+      "prevPage": "上一页",
+      "nextPage": "下一页",
+      "checking": "检查中…",
+      "checkUpdate": "检查更新",
+      "download": "前往下载"
+    },
+    "placeholder": {
+      "optional": "可选",
+      "allProviders": "全部提供商",
+      "allModels": "全部模型",
+      "allStatuses": "全部状态",
+      "dateFrom": "开始日期",
+      "dateTo": "结束日期"
+    },
+    "confirm": {
+      "clearLogs": "确定要清除所有请求日志吗？统计计数将保留。",
+      "clearStats": "确定要清除所有统计数据吗？此操作不可恢复。",
+      "clearBodies": "确定要清空所有请求参数和返回参数吗？统计计数将保留。",
+      "downloadUpdate": "发现新版本 {version}，是否前往下载？"
+    },
+    "chart": {
+      "monthsShort": "1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月",
+      "weekdaysShort": "一,三,五,日",
+      "requestCountAxis": "请求数",
+      "heatLevelLow": "少",
+      "heatLevelHigh": "多",
+      "requestCountWithUnit": "{count} 次请求",
+      "tokenCountWithUnit": "{count} tokens",
+      "trendCount": "{count} 次"
+    },
+    "copyLabel": {
+      "requestPayload": "请求参数",
+      "responsePayload": "响应参数"
+    }
+  },
+  "profileEdit": {
+    "title": {
+      "add": "添加提供商",
+      "edit": "编辑提供商"
+    },
+    "section": {
+      "pickerTitle": "选择可用模型"
+    },
+    "label": {
+      "name": "配置名称",
+      "providerType": "提供商类型",
+      "baseUrl": "Base URL",
+      "apiKey": "API Key",
+      "defaultModel": "默认模型",
+      "availableModels": "可用模型",
+      "optional": "(可选)",
+      "availableHint": "(为空则不参与模型路由)",
+      "baseUrlHint": "无需添加 /v1，代理会自动拼接",
+      "added": "已添加",
+      "copied": "已复制"
+    },
+    "button": {
+      "show": "显示",
+      "hide": "隐藏",
+      "fetchModels": "获取模型",
+      "fetching": "获取中…",
+      "saving": "保存中…",
+      "selectAll": "全选",
+      "invertSelection": "反选",
+      "confirmAdd": "确定添加"
+    },
+    "placeholder": {
+      "name": "如：我的 OpenAI",
+      "baseUrl": "如：https://api.openai.com",
+      "apiKey": "sk-...",
+      "defaultModel": "如：gpt-4o",
+      "addModel": "输入模型 ID，回车添加",
+      "searchModels": "搜索模型…"
+    },
+    "message": {
+      "nameRequired": "请输入配置名称",
+      "baseUrlRequired": "请输入 Base URL",
+      "fillRequiredFields": "请先填写提供商类型、Base URL 和 API Key",
+      "emptyModelList": "该提供商返回了空的模型列表",
+      "noMatchingModels": "无匹配结果"
+    },
+    "providerType": {
+      "openai-chat": "OpenAI Chat Completions",
+      "openai-response": "OpenAI Responses",
+      "anthropic-message": "Anthropic Messages",
+      "newapi": "NEW API"
+    }
+  },
+  "errors": {
+    "network": { "requestFailed": "网络请求失败" },
+    "parse": { "jsonFailed": "JSON 解析失败" },
+    "upstream": {
+      "requestFailed": "请求失败",
+      "unauthorized": "API Key 无效或无权限访问 ({status})",
+      "forbidden": "无权限访问该接口 ({status})",
+      "endpointNotFound": "该提供商不支持该端点 ({status})",
+      "rateLimited": "请求过于频繁，请稍后重试 ({status})",
+      "internalError": "上游服务器内部错误 ({status})",
+      "badGateway": "上游网关错误 ({status})",
+      "unavailable": "上游服务暂不可用 ({status})",
+      "unknown": "未知错误 ({status})",
+      "unknownResponseFormat": "未知响应格式"
+    },
+    "http": { "clientFailed": "创建 HTTP 客户端失败" },
+    "update": {
+      "requestFailed": "检查更新失败",
+      "githubError": "GitHub API 返回错误 ({status})",
+      "noVersionTag": "无法获取最新版本号"
+    },
+    "settings": { "saveFailed": "保存设置失败" },
+    "tray": { "setMenuFailed": "重建托盘菜单失败" }
+  }
+}

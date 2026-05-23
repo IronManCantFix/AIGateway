@@ -1,9 +1,14 @@
 <script setup>
 import { ref, onMounted, onUnmounted, inject, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { listen } from '@tauri-apps/api/event'
 import { api } from '../../api.js'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import { translateError } from '../../i18n/errorCodes.js'
+import { setLocale, resolveLocale } from '../../i18n'
 import iconUrl from '../../assets/icon.png'
+
+const { t } = useI18n()
 
 const navigate = inject('navigate')
 let unlistenProxySettings = null
@@ -11,6 +16,7 @@ let unlistenProxySettings = null
 const port = ref(9999)
 const autoStart = ref(false)
 const logEnabled = ref(false)
+const languageSetting = ref('auto')
 const saved = ref(false)
 
 const httpProxyEnabled = ref(false)
@@ -52,6 +58,7 @@ async function loadSettings() {
   port.value = s.port || 9999
   autoStart.value = s.autoStart || false
   logEnabled.value = await api.getLogEnabled()
+  languageSetting.value = s.language || 'auto'
 
   // 加载代理配置
   if (s.httpProxy) {
@@ -88,6 +95,28 @@ async function saveProxySettings() {
   await saveSettings()
 }
 async function toggleLogging() { await api.setLogEnabled(logEnabled.value) }
+
+async function onLanguageChange() {
+  const userChoice = languageSetting.value
+  const resolved = resolveLocale(userChoice)
+  try {
+    // Apply resolved locale: switches UI + rebuilds Rust tray + persists settings.language=resolved
+    await setLocale(resolved, { persist: true })
+    // If user picked "auto", restore settings.language="auto" so future restarts re-detect system locale.
+    if (userChoice === 'auto') {
+      const current = await api.getSettings()
+      await api.setSettings({ ...current, language: 'auto' })
+    }
+    copyMsg.value = t('settings.language.changed')
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
+  } catch (e) {
+    console.error('Failed to change language:', e)
+    copyMsg.value = t('settings.language.changeFailed')
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copyMsg.value = '' }, 2500)
+  }
+}
 async function loadStats() {
   statsLoading.value = true
   try {
@@ -130,15 +159,15 @@ async function loadLogs() {
   }
 }
 async function clearLogs() {
-  if (!await showConfirm('确定要清除所有请求日志吗？统计计数将保留。')) return
+  if (!await showConfirm(t('settings.confirm.clearLogs'))) return
   await api.clearLogs(); logs.value = []; logTotal.value = 0; logPage.value = 1; logsLoaded.value = false; logFileSize.value = 0; await loadStats()
 }
 async function clearAllData() {
-  if (!await showConfirm('确定要清除所有统计数据吗？此操作不可恢复。')) return
+  if (!await showConfirm(t('settings.confirm.clearStats'))) return
   await api.clearAggregatedStats(); stats.value = null; await loadStats()
 }
 async function clearLogsBodyData() {
-  if (!await showConfirm('确定要清空所有请求参数和返回参数吗？统计计数将保留。')) return
+  if (!await showConfirm(t('settings.confirm.clearBodies'))) return
   await api.clearLogsBodies(); await loadLogs()
 }
 function statusLabel(c) {
@@ -208,7 +237,7 @@ const heatmapData = computed(() => {
     columns.push(allDays.slice(i,i+7))
   }
 
-  const months=[]; const mn=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
+  const months=[]; const mn=t('settings.chart.monthsShort').split(',')
   let lm=-1
   for (let c=0;c<columns.length;c++) {
     const m=parseInt(columns[c][0].date.slice(5,7),10)-1
@@ -216,6 +245,8 @@ const heatmapData = computed(() => {
   }
   return {columns,months}
 })
+
+const weekdayLabels = computed(() => t('settings.chart.weekdaysShort').split(','))
 
 const BOTTOM_Y = CHART_H - PAD_B
 function smoothPath(pts) {
@@ -314,7 +345,7 @@ let copyTimer = 0
 const copyMsg = ref('')
 async function copyText(text, label) {
   await api.copyText(text)
-  copyMsg.value = label + '复制成功'
+  copyMsg.value = t('common.copySuccess', { label })
   clearTimeout(copyTimer)
   copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
 }
@@ -357,11 +388,11 @@ async function checkForUpdates() {
     const info = await api.checkForUpdates()
     updateInfo.value = info
     if (!isDev && info.has_update) {
-      const ok = await showConfirm(`发现新版本 ${info.latest_version}，是否前往下载？`)
+      const ok = await showConfirm(t('settings.confirm.downloadUpdate', { version: info.latest_version }))
       if (ok) openUrl(info.download_url).catch(e => console.error('openUrl failed:', e))
     }
   } catch (e) {
-    console.error('检查更新失败:', e)
+    console.error('check_for_updates failed:', translateError(e))
   } finally {
     checkingUpdate.value = false
   }
@@ -421,54 +452,67 @@ onUnmounted(() => {
     <div class="page-header">
       <button class="back-link" @click="navigate('gateway')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-        返回
+        {{ $t('common.back') }}
       </button>
-      <h2>设置与统计</h2>
+      <h2>{{ $t('settings.title') }}</h2>
     </div>
 
-    <!-- 代理端口 -->
+    <!-- 通用设置 -->
     <div class="card">
-      <div class="card-header"><h3>代理端口</h3></div>
+      <div class="card-header"><h3>{{ $t('settings.section.general') }}</h3></div>
       <div class="card-body">
-        <div class="field-row">
-          <input v-model.number="port" type="number" min="1" max="65535" @change="saveSettings" />
-          <span class="saved" v-if="saved">&check; 已保存</span>
+        <!-- 界面语言 -->
+        <div class="setting-row">
+          <div class="setting-label">{{ $t('settings.language.title') }}</div>
+          <div class="setting-control">
+            <select v-model="languageSetting" @change="onLanguageChange" class="lang-select">
+              <option value="auto">{{ $t('settings.language.auto') }}</option>
+              <option value="zh-CN">{{ $t('settings.language.zh-CN') }}</option>
+              <option value="en-US">{{ $t('settings.language.en-US') }}</option>
+            </select>
+          </div>
         </div>
-      </div>
-    </div>
 
-    <!-- HTTP 代理 -->
-    <div class="card">
-      <div class="card-header"><h3>HTTP 代理</h3></div>
-      <div class="card-body">
-        <label class="check-field">
-          <input type="checkbox" v-model="httpProxyEnabled" @change="saveProxySettings" />
-          <span>启用 HTTP 代理</span>
+        <!-- 代理端口 -->
+        <div class="setting-row">
+          <div class="setting-label">{{ $t('settings.section.proxyPort') }}</div>
+          <div class="setting-control">
+            <input class="port-input" v-model.number="port" type="number" min="1" max="65535" @change="saveSettings" />
+            <span class="saved" v-if="saved">&check; {{ $t('settings.label.saved') }}</span>
+          </div>
+        </div>
+
+        <!-- HTTP 代理 -->
+        <label class="setting-row toggle-row" @change="saveProxySettings">
+          <div class="setting-label">{{ $t('settings.section.httpProxy') }}</div>
+          <div class="setting-control">
+            <input type="checkbox" v-model="httpProxyEnabled" />
+          </div>
         </label>
 
-        <div class="proxy-config" v-if="httpProxyEnabled">
+        <div class="setting-nested" v-if="httpProxyEnabled">
           <div class="proxy-field">
-            <label>代理地址</label>
+            <label>{{ $t('settings.label.proxyAddress') }}</label>
             <input v-model="httpProxyUrl" placeholder="http://127.0.0.1:7890" @change="saveProxySettings" />
           </div>
 
           <div class="proxy-auth-toggle" @click="showProxyAuth = !showProxyAuth">
-            {{ showProxyAuth ? '隐藏认证信息' : '显示认证信息（可选）' }}
+            {{ showProxyAuth ? $t('settings.label.hideAuth') : $t('settings.label.showAuth') }}
           </div>
 
           <div class="proxy-auth" v-if="showProxyAuth">
             <div class="proxy-field">
-              <label>用户名</label>
-              <input v-model="httpProxyUsername" placeholder="可选" @change="saveProxySettings" />
+              <label>{{ $t('settings.label.username') }}</label>
+              <input v-model="httpProxyUsername" :placeholder="$t('settings.placeholder.optional')" @change="saveProxySettings" />
             </div>
             <div class="proxy-field">
-              <label>密码</label>
-              <input v-model="httpProxyPassword" type="password" placeholder="可选" @change="saveProxySettings" />
+              <label>{{ $t('settings.label.password') }}</label>
+              <input v-model="httpProxyPassword" type="password" :placeholder="$t('settings.placeholder.optional')" @change="saveProxySettings" />
             </div>
           </div>
 
           <div class="proxy-exclude" v-if="profiles.length > 0">
-            <label>不需要代理的提供商</label>
+            <label>{{ $t('settings.label.excludeProviders') }}</label>
             <div class="exclude-list">
               <label v-for="p in profiles" :key="p.id" class="check-field exclude-item">
                 <input type="checkbox"
@@ -480,63 +524,61 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- 自动启动 -->
-    <div class="card">
-      <div class="card-body">
-        <label class="check-field" @change="saveSettings">
-          <input type="checkbox" v-model="autoStart" />
-          <span>启动应用时自动开启代理</span>
+        <!-- 自动启动 -->
+        <label class="setting-row toggle-row" @change="saveSettings">
+          <div class="setting-label">{{ $t('settings.label.autoStart') }}</div>
+          <div class="setting-control">
+            <input type="checkbox" v-model="autoStart" />
+          </div>
         </label>
-      </div>
-    </div>
 
-    <!-- 日志开关 -->
-    <div class="card">
-      <div class="card-body">
-        <label class="check-field" @change="toggleLogging">
-          <input type="checkbox" v-model="logEnabled" />
-          <span>记录请求参数与返回参数</span>
+        <!-- 日志开关 -->
+        <label class="setting-row toggle-row" @change="toggleLogging">
+          <div class="setting-label">
+            {{ $t('settings.label.logEnabled') }}
+            <p class="field-hint">{{ $t('settings.label.logHint') }}</p>
+          </div>
+          <div class="setting-control">
+            <input type="checkbox" v-model="logEnabled" />
+          </div>
         </label>
-        <p class="field-hint">仅在排查报错时开启；开启后会完整记录请求体和响应体，占用更多空间，日志文件会明显变大，立即生效</p>
       </div>
     </div>
 
     <div class="card" v-if="statsLoading && !stats">
-      <div class="card-body stats-loading">正在加载统计数据...</div>
+      <div class="card-body stats-loading">{{ $t('settings.label.statsLoading') }}</div>
     </div>
 
     <template v-if="stats">
       <!-- 总览 -->
       <div class="card">
         <div class="card-header">
-          <h3>请求统计</h3>
+          <h3>{{ $t('settings.section.statsOverview') }}</h3>
           <div class="header-actions">
-            <button class="refresh-btn" @click="loadStats">刷新</button>
-            <button class="clear-btn danger" @click="clearAllData">清除统计</button>
+            <button class="refresh-btn" @click="loadStats">{{ $t('settings.button.refresh') }}</button>
+            <button class="clear-btn danger" @click="clearAllData">{{ $t('settings.button.clearStats') }}</button>
           </div>
         </div>
         <div class="card-body overview-body">
           <div class="overview-stats">
             <div class="overview-stat">
               <div class="stat-number">{{ stats.totalRequests.toLocaleString() }}</div>
-              <div class="stat-desc">总请求数</div>
+              <div class="stat-desc">{{ $t('settings.label.totalRequests') }}</div>
             </div>
             <div class="overview-divider"></div>
             <div class="overview-stat" v-if="stats.totalTokens">
               <div class="stat-number token">{{ fmtTok(stats.totalTokens) }}</div>
-              <div class="stat-desc">Token 消耗</div>
+              <div class="stat-desc">{{ $t('settings.label.tokensUsed') }}</div>
             </div>
             <div class="overview-stat" v-else>
               <div class="stat-number muted">—</div>
-              <div class="stat-desc">Token 消耗</div>
+              <div class="stat-desc">{{ $t('settings.label.tokensUsed') }}</div>
             </div>
             <div class="overview-divider"></div>
             <div class="overview-stat">
               <div class="stat-number">{{ Math.round(stats.totalRequests / Math.max(stats.trend.length, 1)).toLocaleString() }}</div>
-              <div class="stat-desc">日均请求</div>
+              <div class="stat-desc">{{ $t('settings.label.avgPerDay') }}</div>
             </div>
           </div>
           <div class="token-breakdown" v-if="stats.totalTokens">
@@ -555,12 +597,12 @@ onUnmounted(() => {
       <!-- 趋势 Tab -->
       <div class="card">
         <div class="card-tabs">
-          <button :class="{ active: trendTab === 'year' }" @click="trendTab = 'year'">全年热力图</button>
-          <button :class="{ active: trendTab === 'month' }" @click="trendTab = 'month'">30 天趋势</button>
+          <button :class="{ active: trendTab === 'year' }" @click="trendTab = 'year'">{{ $t('settings.button.heatmapYear') }}</button>
+          <button :class="{ active: trendTab === 'month' }" @click="trendTab = 'month'">{{ $t('settings.button.trend30d') }}</button>
         </div>
         <div class="card-body" v-if="trendTab === 'year'">
           <div class="heat-mode-toggle">
-            <button :class="{ active: heatMode === 'requests' }" @click="heatMode = 'requests'">请求数</button>
+            <button :class="{ active: heatMode === 'requests' }" @click="heatMode = 'requests'">{{ $t('settings.button.heatRequests') }}</button>
             <button :class="{ 'active-tok': heatMode === 'tokens' }" @click="heatMode = 'tokens'">Token</button>
           </div>
           <div class="heatmap-wrap" v-if="heatmapData.columns.length">
@@ -569,13 +611,13 @@ onUnmounted(() => {
             </div>
             <div class="heatmap-body" style="position:relative">
               <div class="heatmap-grid" :style="{ gridTemplateColumns: '20px repeat('+heatmapData.columns.length+', 1fr)' }">
-                <span class="heat-wd" style="grid-row:1">一</span>
+                <span class="heat-wd" style="grid-row:1">{{ weekdayLabels[0] }}</span>
                 <span class="heat-wd" style="grid-row:2"></span>
-                <span class="heat-wd" style="grid-row:3">三</span>
+                <span class="heat-wd" style="grid-row:3">{{ weekdayLabels[1] }}</span>
                 <span class="heat-wd" style="grid-row:4"></span>
-                <span class="heat-wd" style="grid-row:5">五</span>
+                <span class="heat-wd" style="grid-row:5">{{ weekdayLabels[2] }}</span>
                 <span class="heat-wd" style="grid-row:6"></span>
-                <span class="heat-wd" style="grid-row:7">日</span>
+                <span class="heat-wd" style="grid-row:7">{{ weekdayLabels[3] }}</span>
                 <template v-for="col in heatmapData.columns" :key="col[0].date">
                   <span v-for="day in col" :key="day.date"
                     class="heat-cell" :style="{ background: day.color }"
@@ -588,37 +630,37 @@ onUnmounted(() => {
                   <div v-if="heatHover" class="heat-tooltip"
                     :style="{ left: heatHover.left + 'px', top: heatHover.top + 'px' }">
                     <div class="heat-tip-date">{{ heatHover.date }}</div>
-                    <div class="heat-tip-val">{{ heatHover.mode === 'tokens' ? fmtTok(heatHover.count) + ' tokens' : heatHover.count + ' 次请求' }}</div>
+                    <div class="heat-tip-val">{{ heatHover.mode === 'tokens' ? $t('settings.chart.tokenCountWithUnit', { count: fmtTok(heatHover.count) }) : $t('settings.chart.requestCountWithUnit', { count: heatHover.count }) }}</div>
                   </div>
                 </Transition>
               </Teleport>
             </div>
             <div class="heatmap-legend">
-              <span>少</span>
+              <span>{{ $t('settings.chart.heatLevelLow') }}</span>
               <span v-for="c in (heatMode === 'tokens' ? HEAT_COLORS_TOK : HEAT_COLORS_REQ)" :key="c" class="legend-cell" :style="{ background: c }"></span>
-              <span>多</span>
+              <span>{{ $t('settings.chart.heatLevelHigh') }}</span>
             </div>
           </div>
-          <div class="card-empty" v-else>暂无数据</div>
+          <div class="card-empty" v-else>{{ $t('settings.label.empty') }}</div>
         </div>
         <div class="card-body trend-body" v-if="trendTab === 'month'">
           <template v-if="stats.trend.length">
             <div class="trend-header">
               <div class="trend-stat">
                 <span class="trend-val">{{ trendData.total.toLocaleString() }}</span>
-                <span class="trend-lbl">30 天请求</span>
+                <span class="trend-lbl">{{ $t('settings.label.requests30d') }}</span>
               </div>
               <div class="trend-stat">
                 <span class="trend-val token-color">{{ fmtTok(trendData.totalTokens) }}</span>
-                <span class="trend-lbl">30 天 Token</span>
+                <span class="trend-lbl">{{ $t('settings.label.tokens30d') }}</span>
               </div>
               <div class="trend-stat">
                 <span class="trend-val">{{ Math.round(trendData.total / Math.max(stats.trend.length, 1)) }}</span>
-                <span class="trend-lbl">日均请求</span>
+                <span class="trend-lbl">{{ $t('settings.label.avgPerDay') }}</span>
               </div>
             </div>
             <div class="chart-legend">
-              <span class="legend-item"><span class="legend-dot req"></span>请求数</span>
+              <span class="legend-item"><span class="legend-dot req"></span>{{ $t('settings.chart.requestCountAxis') }}</span>
               <span class="legend-item"><span class="legend-dot tok"></span>Token</span>
             </div>
             <div class="chart-wrap">
@@ -679,21 +721,21 @@ onUnmounted(() => {
                   <line :x1="trendHover.x" :y1="PAD_T" :x2="trendHover.x" :y2="CHART_H-PAD_B" stroke="#94a3b8" stroke-width="0.5" stroke-dasharray="3,3"/>
                   <rect :x="Math.min(trendHover.x+8, CHART_W-PAD_R-100)" :y="Math.max(PAD_T, trendHover.y-36)" width="96" height="30" rx="6" fill="#1e293b" opacity="0.92"/>
                   <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-94)" :y="Math.max(PAD_T+10, trendHover.y-24)" fill="#e2e8f0" font-size="10" font-family="SF Mono, monospace">{{ trendHover.date.slice(5) }}</text>
-                  <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-94)" :y="Math.max(PAD_T+22, trendHover.y-12)" fill="#94a3b8" font-size="9" font-family="SF Mono, monospace">{{ trendHover.count }}次 / {{ fmtTok(trendHover.tokens) }}</text>
+                  <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-94)" :y="Math.max(PAD_T+22, trendHover.y-12)" fill="#94a3b8" font-size="9" font-family="SF Mono, monospace">{{ $t('settings.chart.trendCount', { count: trendHover.count }) }} / {{ fmtTok(trendHover.tokens) }}</text>
                 </g>
               </svg>
             </div>
           </template>
-          <div class="card-empty" v-else>暂无数据</div>
+          <div class="card-empty" v-else>{{ $t('settings.label.empty') }}</div>
         </div>
       </div>
 
       <!-- 统计 Tab -->
       <div class="card">
         <div class="card-tabs">
-          <button :class="{ active: statsTab === 'provider' }" @click="statsTab = 'provider'">提供商</button>
-          <button :class="{ active: statsTab === 'model' }" @click="statsTab = 'model'">模型</button>
-          <button :class="{ active: statsTab === 'logs' }" @click="statsTab = 'logs'">日志</button>
+          <button :class="{ active: statsTab === 'provider' }" @click="statsTab = 'provider'">{{ $t('settings.button.tabProvider') }}</button>
+          <button :class="{ active: statsTab === 'model' }" @click="statsTab = 'model'">{{ $t('settings.button.tabModel') }}</button>
+          <button :class="{ active: statsTab === 'logs' }" @click="statsTab = 'logs'">{{ $t('settings.button.tabLogs') }}</button>
         </div>
 
         <div class="card-body" v-if="statsTab === 'provider'">
@@ -703,7 +745,7 @@ onUnmounted(() => {
                 <span class="stat-name">{{ pv.provider }}</span>
                 <div class="stat-vals">
                   <span class="stat-val token-val" v-if="providerTokenMap[pv.provider]">{{ fmtTok(providerTokenMap[pv.provider]) }}</span>
-                  <span class="stat-val">{{ pv.count }}<span class="unit">次</span></span>
+                  <span class="stat-val">{{ $t('settings.label.requestCount', { count: pv.count }) }}</span>
                 </div>
               </div>
               <div class="sub-row" v-for="m in pv.models" :key="m.model">
@@ -712,15 +754,15 @@ onUnmounted(() => {
               </div>
             </div>
           </template>
-          <div class="card-empty" v-else>暂无数据</div>
+          <div class="card-empty" v-else>{{ $t('settings.label.empty') }}</div>
         </div>
 
         <div class="card-body" v-if="statsTab === 'model'">
           <template v-if="stats.byModel && stats.byModel.length">
             <div class="model-table-header">
-              <span class="model-col-name">模型</span>
-              <span class="model-col-count">调用次数</span>
-              <span class="model-col-token">Token 量</span>
+              <span class="model-col-name">{{ $t('settings.label.colModel') }}</span>
+              <span class="model-col-count">{{ $t('settings.label.colCount') }}</span>
+              <span class="model-col-token">{{ $t('settings.label.colTokens') }}</span>
             </div>
             <div class="model-row" v-for="m in stats.byModel" :key="m.model">
               <span class="model-col-name">{{ m.model }}</span>
@@ -729,35 +771,35 @@ onUnmounted(() => {
               <span class="model-col-token" v-else>—</span>
             </div>
           </template>
-          <div class="card-empty" v-else>暂无数据</div>
+          <div class="card-empty" v-else>{{ $t('settings.label.empty') }}</div>
         </div>
 
         <div class="card-body" v-if="statsTab === 'logs'" style="padding:0">
           <div class="log-toolbar" v-if="logs.length || hasActiveLogFilter">
             <div class="log-search-row">
               <select v-model="logSearch.provider" @change="resetLogPage" class="log-filter">
-                <option value="">全部提供商</option>
+                <option value="">{{ $t('settings.placeholder.allProviders') }}</option>
                 <option v-for="p in logProviderOptions" :key="p" :value="p">{{ p }}</option>
               </select>
               <select v-model="logSearch.model" @change="resetLogPage" class="log-filter">
-                <option value="">全部模型</option>
+                <option value="">{{ $t('settings.placeholder.allModels') }}</option>
                 <option v-for="m in logModelOptions" :key="m" :value="m">{{ m }}</option>
               </select>
               <select v-model="logSearch.statusCode" @change="resetLogPage" class="log-filter">
-                <option value="">全部状态</option>
-                <option value="2xx">2xx 成功</option>
-                <option value="4xx">4xx 客户端错误</option>
-                <option value="5xx">5xx 服务端错误</option>
+                <option value="">{{ $t('settings.placeholder.allStatuses') }}</option>
+                <option value="2xx">{{ $t('settings.label.status2xx') }}</option>
+                <option value="4xx">{{ $t('settings.label.status4xx') }}</option>
+                <option value="5xx">{{ $t('settings.label.status5xx') }}</option>
               </select>
-              <input type="date" v-model="logSearch.dateFrom" @change="resetLogPage" class="log-filter" placeholder="开始日期" />
-              <input type="date" v-model="logSearch.dateTo" @change="resetLogPage" class="log-filter" placeholder="结束日期" />
+              <input type="date" v-model="logSearch.dateFrom" @change="resetLogPage" class="log-filter" :placeholder="$t('settings.placeholder.dateFrom')" />
+              <input type="date" v-model="logSearch.dateTo" @change="resetLogPage" class="log-filter" :placeholder="$t('settings.placeholder.dateTo')" />
             </div>
             <div class="log-toolbar-actions">
-              <span class="log-size">日志文件 {{ fmtSize(logFileSize) }}</span>
+              <span class="log-size">{{ $t('settings.label.logFileSize', { size: fmtSize(logFileSize) }) }}</span>
               <div class="log-clear-btns">
-                <button class="refresh-btn" @click="loadLogs()" :disabled="logsLoading">{{ logsLoading ? '加载中...' : '刷新' }}</button>
-                <button class="clear-body-btn" @click="clearLogs">清除日志</button>
-                <button class="clear-body-btn" @click="clearLogsBodyData">清空参数</button>
+                <button class="refresh-btn" @click="loadLogs()" :disabled="logsLoading">{{ logsLoading ? $t('common.loading') : $t('settings.button.refresh') }}</button>
+                <button class="clear-body-btn" @click="clearLogs">{{ $t('settings.button.clearLogs') }}</button>
+                <button class="clear-body-btn" @click="clearLogsBodyData">{{ $t('settings.button.clearBodies') }}</button>
               </div>
             </div>
           </div>
@@ -781,31 +823,31 @@ onUnmounted(() => {
               </div>
               <div class="log-err" v-if="l.error">{{ l.error }}</div>
               <details class="log-detail" v-if="l.requestBody || l.responseBody">
-                <summary>查看参数</summary>
-                <div class="log-body" v-if="l.requestBody"><span class="log-body-label">请求</span><button class="copy-body-btn" @click="copyText(l.requestBody, '请求参数')">复制</button><pre>{{ l.requestBody }}</pre></div>
-                <div class="log-body" v-if="l.responseBody"><span class="log-body-label">响应</span><button class="copy-body-btn" @click="copyText(l.responseBody, '响应参数')">复制</button><pre>{{ l.responseBody }}</pre></div>
+                <summary>{{ $t('settings.label.viewParams') }}</summary>
+                <div class="log-body" v-if="l.requestBody"><span class="log-body-label">{{ $t('settings.label.request') }}</span><button class="copy-body-btn" @click="copyText(l.requestBody, $t('settings.copyLabel.requestPayload'))">{{ $t('common.copy') }}</button><pre>{{ l.requestBody }}</pre></div>
+                <div class="log-body" v-if="l.responseBody"><span class="log-body-label">{{ $t('settings.label.response') }}</span><button class="copy-body-btn" @click="copyText(l.responseBody, $t('settings.copyLabel.responsePayload'))">{{ $t('common.copy') }}</button><pre>{{ l.responseBody }}</pre></div>
               </details>
             </div>
           </div>
           <div class="log-pagination" v-if="logTotal > 0">
             <div class="page-size">
-              <span>共 {{ logTotal }} 条，每页</span>
+              <span>{{ $t('settings.label.perPagePrefix', { count: logTotal }) }}</span>
               <select v-model.number="logPageSize" @change="resetLogPage">
                 <option :value="5">5</option>
                 <option :value="10">10</option>
                 <option :value="20">20</option>
                 <option :value="50">50</option>
               </select>
-              <span>条</span>
+              <span>{{ $t('settings.label.perPageSuffix') }}</span>
             </div>
-            <button :disabled="logPage <= 1 || logsLoading" @click="prevPage">上一页</button>
-            <span class="page-info">第 {{ logPage }} / {{ logTotalPages }} 页</span>
-            <button :disabled="!logHasNextPage || logsLoading" @click="nextPage">下一页</button>
+            <button :disabled="logPage <= 1 || logsLoading" @click="prevPage">{{ $t('settings.button.prevPage') }}</button>
+            <span class="page-info">{{ $t('settings.label.pageInfo', { page: logPage, total: logTotalPages }) }}</span>
+            <button :disabled="!logHasNextPage || logsLoading" @click="nextPage">{{ $t('settings.button.nextPage') }}</button>
           </div>
-          <div class="card-empty" v-if="logsLoading">正在加载日志...</div>
-          <div class="card-empty" v-else-if="logsLoaded && !logs.length && hasActiveLogFilter">没有符合筛选条件的日志</div>
-          <div class="card-empty" v-else-if="logsLoaded && !logs.length">暂无数据</div>
-          <div class="card-empty" v-else-if="!logsLoaded">切换到日志后加载最近记录</div>
+          <div class="card-empty" v-if="logsLoading">{{ $t('settings.label.logsLoading') }}</div>
+          <div class="card-empty" v-else-if="logsLoaded && !logs.length && hasActiveLogFilter">{{ $t('settings.label.noFilteredLogs') }}</div>
+          <div class="card-empty" v-else-if="logsLoaded && !logs.length">{{ $t('settings.label.empty') }}</div>
+          <div class="card-empty" v-else-if="!logsLoaded">{{ $t('settings.label.logsHint') }}</div>
         </div>
       </div>
     </template>
@@ -815,16 +857,16 @@ onUnmounted(() => {
       <img :src="iconUrl" class="about-logo" alt="AIGateway" />
       <p><strong>AIGateway</strong></p>
       <p class="about-version">
-        {{ isDev ? '开发版' : (currentVersion || '...') }}
+        {{ isDev ? $t('settings.label.devVersion') : (currentVersion || '...') }}
         <button class="check-update-btn" @click="checkForUpdates" :disabled="checkingUpdate">
-          {{ checkingUpdate ? '检查中...' : '检查更新' }}
+          {{ checkingUpdate ? $t('settings.button.checking') : $t('settings.button.checkUpdate') }}
         </button>
-        <button class="download-btn" v-if="updateInfo?.has_update && !isDev" @click="openDownloadPage">前往下载</button>
+        <button class="download-btn" v-if="updateInfo?.has_update && !isDev" @click="openDownloadPage">{{ $t('settings.button.download') }}</button>
       </p>
-      <p class="about-update-hint" v-if="isDev && updateInfo">最新正式版: {{ updateInfo.latest_version }}</p>
-      <p class="about-update-hint" v-else-if="updateInfo?.has_update">新版本 {{ updateInfo.latest_version }} 可用</p>
-      <p class="about-update-hint up-to-date" v-else-if="updateInfo">已是最新版本</p>
-      <p>作者 Claude Code &amp; DeepSeek v4 Pro &amp; mimo-v2.5-pro</p>
+      <p class="about-update-hint" v-if="isDev && updateInfo">{{ $t('settings.label.latestRelease', { version: updateInfo.latest_version }) }}</p>
+      <p class="about-update-hint" v-else-if="updateInfo?.has_update">{{ $t('settings.label.updateAvailable', { version: updateInfo.latest_version }) }}</p>
+      <p class="about-update-hint up-to-date" v-else-if="updateInfo">{{ $t('settings.label.upToDate') }}</p>
+      <p>{{ $t('settings.label.authors') }}</p>
       <p><span class="github-link" @click="openGithub"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg> GitHub</span></p>
     </div>
   </div>
@@ -835,8 +877,8 @@ onUnmounted(() => {
       <div class="confirm-dialog">
         <p class="confirm-msg">{{ confirmState.message }}</p>
         <div class="confirm-actions">
-          <button class="confirm-cancel" @click="confirmCancel">取消</button>
-          <button class="confirm-ok" @click="confirmOk">确定</button>
+          <button class="confirm-cancel" @click="confirmCancel">{{ $t('common.cancel') }}</button>
+          <button class="confirm-ok" @click="confirmOk">{{ $t('common.ok') }}</button>
         </div>
       </div>
     </div>
@@ -863,9 +905,26 @@ onUnmounted(() => {
 .field-row input[type=number] { padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 15px; font-weight: 500; font-family: 'SF Mono','Fira Code',monospace; outline: none; width: 130px; transition: all .15s; background: #f8fafc; }
 .field-row input[type=number]:focus { border-color: #a5b4fc; background: #fff; box-shadow: 0 0 0 3px rgba(165,180,252,.15); }
 .saved { font-size: 13px; color: #22c55e; font-weight: 500; }
+.lang-select { padding: 10px 36px 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 14px; color: #334155; background: #f8fafc; outline: none; min-width: 180px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; cursor: pointer; transition: all .15s; }
+.lang-select:focus { border-color: #a5b4fc; background: #fff; box-shadow: 0 0 0 3px rgba(165,180,252,.15); }
 .check-field { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: #334155; }
 .check-field input[type=checkbox] { width: 18px; height: 18px; accent-color: #6366f1; cursor: pointer; }
 .field-hint { font-size: 12px; color: #94a3b8; margin: 6px 0 0; }
+
+/* Unified general-settings card rows */
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid #f1f5f9; }
+.setting-row:last-child { border-bottom: none; padding-bottom: 0; }
+.setting-row:first-child { padding-top: 0; }
+.setting-label { flex: 1; min-width: 0; font-size: 14px; color: #1e293b; font-weight: 500; }
+.setting-label .field-hint { margin: 4px 0 0; font-weight: 400; }
+.setting-control { flex-shrink: 0; display: flex; align-items: center; gap: 10px; }
+.setting-control input[type=checkbox] { width: 18px; height: 18px; accent-color: #6366f1; cursor: pointer; }
+label.toggle-row { cursor: pointer; margin: 0; }
+.setting-nested { padding: 12px 0 14px; border-bottom: 1px solid #f1f5f9; margin-top: -2px; }
+.setting-nested:last-child { border-bottom: none; }
+.port-input { padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-weight: 500; font-family: 'SF Mono','Fira Code',monospace; outline: none; width: 110px; background: #f8fafc; transition: all .15s; }
+.port-input:focus { border-color: #a5b4fc; background: #fff; box-shadow: 0 0 0 3px rgba(165,180,252,.15); }
+.setting-control .lang-select { min-width: 160px; padding-top: 8px; padding-bottom: 8px; }
 
 /* Overview stats */
 .overview-body { padding: 20px 20px 16px; }
@@ -989,7 +1048,6 @@ onUnmounted(() => {
 .log-body pre { margin-top: 4px; padding: 8px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 11px; font-family: 'SF Mono',monospace; color: #475569; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
 
 /* HTTP Proxy */
-.proxy-config { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
 .proxy-field { margin-bottom: 12px; }
 .proxy-field label { display: block; font-size: 13px; font-weight: 600; color: #64748b; margin-bottom: 6px; }
 .proxy-field input { width: 100%; padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 14px; outline: none; transition: all .15s; background: #f8fafc; }

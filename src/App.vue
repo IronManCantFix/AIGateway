@@ -1,10 +1,12 @@
 <script setup>
 import { onMounted, ref, provide } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from './api.js'
 import Home from './pages/Home/index.vue'
 import ProfileEdit from './pages/ProfileEdit/index.vue'
 import Settings from './pages/Settings/index.vue'
 
+const { t } = useI18n()
 const route = ref('')
 const pagePayload = ref(null)
 const bootToast = ref('')
@@ -39,7 +41,7 @@ onMounted(async () => {
     }
   } catch (e) {
     const msg = typeof e === 'string' ? e : (e?.message || JSON.stringify(e))
-    showBootToast('代理自动启动失败：' + msg)
+    showBootToast(t('app.bootError', { msg }))
     console.error('Auto-start failed:', e)
   }
 })
@@ -47,7 +49,7 @@ onMounted(async () => {
 
 <template>
   <Transition name="boot-fade">
-    <div class="boot-toast" v-if="bootToast" @click="dismissBootToast" title="点击关闭">{{ bootToast }}</div>
+    <div class="boot-toast" v-if="bootToast" @click="dismissBootToast" :title="$t('app.dismissTip')">{{ bootToast }}</div>
   </Transition>
   <template v-if="route === 'gateway'">
     <Home />

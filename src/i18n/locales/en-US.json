@@ -1,0 +1,259 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "ok": "OK",
+    "confirm": "Confirm",
+    "copy": "Copy",
+    "copySuccess": "{label} copied",
+    "back": "Back",
+    "delete": "Delete",
+    "loading": "Loading…",
+    "empty": "—"
+  },
+  "app": {
+    "bootError": "Proxy auto-start failed: {msg}",
+    "dismissTip": "Click to dismiss"
+  },
+  "home": {
+    "status": {
+      "running": "Proxy running",
+      "starting": "Starting…",
+      "stopping": "Stopping…",
+      "stopped": "Proxy stopped"
+    },
+    "section": {
+      "providers": "Providers",
+      "models": "Available Models",
+      "mappings": "Model Mappings"
+    },
+    "tip": {
+      "providers": "Multiple providers can be enabled at the same time. Requests match model IDs from top to bottom of the list, and the first matching provider handles the request.",
+      "models": "Aggregated list of models from enabled providers, returned to clients via the <code>/v1/models</code> endpoint.",
+      "mappings": "Map the model ID requested by the client to a real model ID. Useful when the client is locked to a model name (e.g. Codex only calls gpt5.5) but you don't have that model."
+    },
+    "button": {
+      "start": "Start",
+      "stop": "Stop",
+      "add": "+ Add",
+      "edit": "Edit",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "addMapping": "+ Add mapping"
+    },
+    "label": {
+      "clickToCopy": "Click to copy",
+      "copyAddress": "Copy address",
+      "settings": "Settings",
+      "dragToReorder": "Drag to reorder",
+      "copyModelId": "Copy model ID",
+      "copySuffix": "(copy)",
+      "noModels": "No models configured",
+      "modelCount": "{count} models",
+      "requestModel": "Request model",
+      "actualModel": "Actual model",
+      "fromPlaceholder": "e.g. gpt5.5",
+      "selectActualModel": "Select actual model"
+    },
+    "empty": {
+      "providers": "No providers yet. Click \"+ Add\" to configure one.",
+      "models": "Enable providers and configure available models to see them aggregated here.",
+      "mappingsDisabled": "Enable to add model mapping rules.",
+      "mappingsRules": "No mapping rules. Click below to add one."
+    },
+    "toast": {
+      "urlCopied": "Proxy address copied",
+      "modelCopied": "Copied: {id}",
+      "profileCopied": "Copied \"{name}\"",
+      "startFailed": "Start failed: {msg}",
+      "portInUse": "Start failed: port {port} is already in use",
+      "proxyCrashed": "Proxy exited unexpectedly",
+      "reorderFailed": "Failed to save order: {msg}",
+      "mappingsSaveFailed": "Failed to save model mappings: {msg}"
+    },
+    "confirm": {
+      "deleteProfile": "Delete this provider?"
+    }
+  },
+  "settings": {
+    "title": "Settings & Statistics",
+    "section": {
+      "proxyPort": "Proxy Port",
+      "httpProxy": "HTTP Proxy",
+      "statsOverview": "Request Statistics",
+      "general": "General"
+    },
+    "language": {
+      "title": "Language",
+      "auto": "Follow system",
+      "zh-CN": "简体中文",
+      "en-US": "English",
+      "changed": "Language updated",
+      "changeFailed": "Failed to change language. Please try again."
+    },
+    "label": {
+      "saved": "Saved",
+      "enableHttpProxy": "Enable HTTP Proxy",
+      "proxyAddress": "Proxy URL",
+      "showAuth": "Show credentials (optional)",
+      "hideAuth": "Hide credentials",
+      "username": "Username",
+      "password": "Password",
+      "excludeProviders": "Providers that bypass the proxy",
+      "autoStart": "Start proxy automatically on launch",
+      "logEnabled": "Record request and response bodies",
+      "logHint": "Enable only when troubleshooting; the full request and response bodies are logged, which uses more space and noticeably grows the log file. Takes effect immediately.",
+      "statsLoading": "Loading statistics…",
+      "totalRequests": "Total requests",
+      "tokensUsed": "Tokens used",
+      "avgPerDay": "Avg per day",
+      "requests30d": "30-day requests",
+      "tokens30d": "30-day tokens",
+      "empty": "No data",
+      "colModel": "Model",
+      "colCount": "Calls",
+      "colTokens": "Tokens",
+      "requestCount": "{count} requests",
+      "status2xx": "2xx Success",
+      "status4xx": "4xx Client error",
+      "status5xx": "5xx Server error",
+      "logFileSize": "Log file {size}",
+      "viewParams": "View payload",
+      "request": "Request",
+      "response": "Response",
+      "perPagePrefix": "{count} total · show",
+      "perPageSuffix": "per page",
+      "pageInfo": "Page {page} / {total}",
+      "logsLoading": "Loading logs…",
+      "noFilteredLogs": "No logs match the current filters",
+      "logsHint": "Switch to the Logs tab to load recent entries",
+      "devVersion": "Dev build",
+      "latestRelease": "Latest stable: {version}",
+      "updateAvailable": "Version {version} available",
+      "upToDate": "You are on the latest version",
+      "authors": "Made by Claude Code & DeepSeek v4 Pro & mimo-v2.5-pro"
+    },
+    "button": {
+      "refresh": "Refresh",
+      "clearStats": "Clear stats",
+      "heatmapYear": "Year heatmap",
+      "trend30d": "30-day trend",
+      "heatRequests": "Requests",
+      "tabProvider": "Provider",
+      "tabModel": "Model",
+      "tabLogs": "Logs",
+      "clearLogs": "Clear logs",
+      "clearBodies": "Clear payloads",
+      "prevPage": "Previous",
+      "nextPage": "Next",
+      "checking": "Checking…",
+      "checkUpdate": "Check for updates",
+      "download": "Download"
+    },
+    "placeholder": {
+      "optional": "Optional",
+      "allProviders": "All providers",
+      "allModels": "All models",
+      "allStatuses": "All statuses",
+      "dateFrom": "From date",
+      "dateTo": "To date"
+    },
+    "confirm": {
+      "clearLogs": "Clear all request logs? Statistics counters will be preserved.",
+      "clearStats": "Clear all statistics? This cannot be undone.",
+      "clearBodies": "Clear all request and response payloads? Statistics counters will be preserved.",
+      "downloadUpdate": "New version {version} available. Open download page?"
+    },
+    "chart": {
+      "monthsShort": "Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec",
+      "weekdaysShort": "Mon,Wed,Fri,Sun",
+      "requestCountAxis": "Requests",
+      "heatLevelLow": "Less",
+      "heatLevelHigh": "More",
+      "requestCountWithUnit": "{count} requests",
+      "tokenCountWithUnit": "{count} tokens",
+      "trendCount": "{count}"
+    },
+    "copyLabel": {
+      "requestPayload": "request payload",
+      "responsePayload": "response payload"
+    }
+  },
+  "profileEdit": {
+    "title": {
+      "add": "Add Provider",
+      "edit": "Edit Provider"
+    },
+    "section": {
+      "pickerTitle": "Select available models"
+    },
+    "label": {
+      "name": "Profile name",
+      "providerType": "Provider type",
+      "baseUrl": "Base URL",
+      "apiKey": "API Key",
+      "defaultModel": "Default model",
+      "availableModels": "Available models",
+      "optional": "(optional)",
+      "availableHint": "(leave empty to skip model routing)",
+      "baseUrlHint": "Do not append /v1; the proxy adds it automatically.",
+      "added": "Added",
+      "copied": "Copied"
+    },
+    "button": {
+      "show": "Show",
+      "hide": "Hide",
+      "fetchModels": "Fetch models",
+      "fetching": "Fetching…",
+      "saving": "Saving…",
+      "selectAll": "Select all",
+      "invertSelection": "Invert selection",
+      "confirmAdd": "Add selected"
+    },
+    "placeholder": {
+      "name": "e.g. My OpenAI",
+      "baseUrl": "e.g. https://api.openai.com",
+      "apiKey": "sk-...",
+      "defaultModel": "e.g. gpt-4o",
+      "addModel": "Enter model ID and press Enter",
+      "searchModels": "Search models…"
+    },
+    "message": {
+      "nameRequired": "Please enter a profile name",
+      "baseUrlRequired": "Please enter a Base URL",
+      "fillRequiredFields": "Please fill in provider type, Base URL and API Key first",
+      "emptyModelList": "The provider returned an empty model list",
+      "noMatchingModels": "No matching results"
+    },
+    "providerType": {
+      "openai-chat": "OpenAI Chat Completions",
+      "openai-response": "OpenAI Responses",
+      "anthropic-message": "Anthropic Messages",
+      "newapi": "NEW API"
+    }
+  },
+  "errors": {
+    "network": { "requestFailed": "Network request failed" },
+    "parse": { "jsonFailed": "JSON parse failed" },
+    "upstream": {
+      "requestFailed": "Request failed",
+      "unauthorized": "Invalid API key or unauthorized ({status})",
+      "forbidden": "Forbidden ({status})",
+      "endpointNotFound": "This provider does not support the endpoint ({status})",
+      "rateLimited": "Too many requests, try again later ({status})",
+      "internalError": "Upstream server error ({status})",
+      "badGateway": "Upstream bad gateway ({status})",
+      "unavailable": "Upstream unavailable ({status})",
+      "unknown": "Unknown error ({status})",
+      "unknownResponseFormat": "Unknown response format"
+    },
+    "http": { "clientFailed": "Failed to create HTTP client" },
+    "update": {
+      "requestFailed": "Update check failed",
+      "githubError": "GitHub API error ({status})",
+      "noVersionTag": "Could not fetch latest version"
+    },
+    "settings": { "saveFailed": "Failed to save settings" },
+    "tray": { "setMenuFailed": "Failed to rebuild tray menu" }
+  }
+}

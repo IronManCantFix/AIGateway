@@ -249,7 +249,7 @@ pub fn clear_aggregated_stats(state: State<'_, AppState>) -> Result<(), String> 
 // --- Fetch provider models ---
 
 #[tauri::command]
-pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<String>, String> {
+pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<String>, crate::error::AppError> {
     let base_url = profile.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
     let api_key = profile.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -264,27 +264,31 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(|e| format!("请求失败: {}", e))?;
+        .map_err(|e| crate::error::AppError::new("upstream.requestFailed").with_detail(e.to_string()))?;
 
     let status = resp.status();
     if !status.is_success() {
-        let status_messages: std::collections::HashMap<u16, &str> = [
-            (401, "API Key 无效或无权限访问"),
-            (403, "无权限访问该接口"),
-            (404, "该提供商不支持 /v1/models 端点"),
-            (429, "请求过于频繁，请稍后重试"),
-            (500, "上游服务器内部错误"),
-            (502, "上游网关错误"),
-            (503, "上游服务暂不可用"),
-        ].iter().cloned().collect();
-
-        let tip = status_messages.get(&status.as_u16()).unwrap_or(&"未知错误");
+        let status_code = status.as_u16();
+        let code = match status_code {
+            401 => "upstream.unauthorized",
+            403 => "upstream.forbidden",
+            404 => "upstream.endpointNotFound",
+            429 => "upstream.rateLimited",
+            500 => "upstream.internalError",
+            502 => "upstream.badGateway",
+            503 => "upstream.unavailable",
+            _ => "upstream.unknown",
+        };
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("{}\n{}", tip, &body[..body.len().min(200)]));
+        // Body excerpt logged to stderr for developer debugging; NOT sent to frontend
+        // (upstream responses can contain echoed auth headers / partial tokens)
+        let body_excerpt: String = body.chars().take(200).collect();
+        eprintln!("[fetch_provider_models] upstream {} body excerpt: {}", status_code, body_excerpt);
+        return Err(crate::error::AppError::new(code)
+            .with_params(serde_json::json!({ "status": status_code })));
     }
 
-    let body: serde_json::Value = resp.json().await
-        .map_err(|e| format!("JSON解析失败: {}", e))?;
+    let body: serde_json::Value = resp.json().await?;
 
     if let Some(data) = body.get("data").and_then(|d| d.as_array()) {
         let models: Vec<String> = data.iter()
@@ -313,7 +317,9 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
             .collect();
         Ok(models)
     } else {
-        Err(format!("未知响应格式: {}", serde_json::to_string(&body).unwrap_or_default().chars().take(300).collect::<String>()))
+        let body_excerpt: String = serde_json::to_string(&body).unwrap_or_default().chars().take(300).collect();
+        eprintln!("[fetch_provider_models] unknown response format: {}", body_excerpt);
+        Err(crate::error::AppError::new("upstream.unknownResponseFormat"))
     }
 }
 
@@ -330,13 +336,13 @@ fn compare_versions(current: &str, latest: &str) -> bool {
 }
 
 #[tauri::command]
-pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInfo, String> {
+pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInfo, crate::error::AppError> {
     let current_version = app_handle.package_info().version.to_string();
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
+        .map_err(|e| crate::error::AppError::new("http.clientFailed").with_detail(e.to_string()))?;
 
     let resp = client
         .get("https://api.github.com/repos/IronManCantFix/AIGateway/releases/latest")
@@ -344,14 +350,14 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
         .header("Accept", "application/vnd.github.v3+json")
         .send()
         .await
-        .map_err(|e| format!("请求失败: {}", e))?;
+        .map_err(|e| crate::error::AppError::new("update.requestFailed").with_detail(e.to_string()))?;
 
     if !resp.status().is_success() {
-        return Err(format!("GitHub API 返回错误: {}", resp.status()));
+        return Err(crate::error::AppError::new("update.githubError")
+            .with_params(serde_json::json!({ "status": resp.status().as_u16() })));
     }
 
-    let body: serde_json::Value = resp.json().await
-        .map_err(|e| format!("JSON解析失败: {}", e))?;
+    let body: serde_json::Value = resp.json().await?;
 
     let latest_version = body.get("tag_name")
         .and_then(|v| v.as_str())
@@ -365,7 +371,7 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
         .to_string();
 
     if latest_version.is_empty() {
-        return Err("无法获取最新版本号".to_string());
+        return Err(crate::error::AppError::new("update.noVersionTag"));
     }
 
     let has_update = compare_versions(&current_version, &latest_version);
@@ -381,4 +387,28 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
 #[tauri::command]
 pub fn get_app_version(app_handle: tauri::AppHandle) -> String {
     app_handle.package_info().version.to_string()
+}
+
+/// Update the user's language preference, persist it, and rebuild the tray menu.
+///
+/// No proxy reload needed: language is UI-only and doesn't affect proxy behavior.
+#[tauri::command]
+pub async fn set_language(
+    app: tauri::AppHandle,
+    lang: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), crate::error::AppError> {
+    // Persist new language to settings
+    let mut settings = state.config.get_settings();
+    settings.language = lang;
+    state.config.set_settings(&settings)
+        .map_err(|e| crate::error::AppError::new("settings.saveFailed").with_detail(e))?;
+
+    // Rebuild tray menu with the new language
+    let menu = crate::tray::build_tray_menu(&app, &state.config, &state.proxy);
+    if let Some(tray) = app.tray_by_id("main") {
+        tray.set_menu(Some(menu))
+            .map_err(|e| crate::error::AppError::new("tray.setMenuFailed").with_detail(e.to_string()))?;
+    }
+    Ok(())
 }
