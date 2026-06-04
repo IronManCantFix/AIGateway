@@ -18,6 +18,8 @@ const autoStart = ref(false)
 const logEnabled = ref(false)
 const languageSetting = ref('auto')
 const saved = ref(false)
+const portChecking = ref(false)
+const portConflict = ref(null) // { pid, processName } or null
 
 const httpProxyEnabled = ref(false)
 const httpProxyUrl = ref('')
@@ -95,6 +97,52 @@ async function saveProxySettings() {
   await saveSettings()
 }
 async function toggleLogging() { await api.setLogEnabled(logEnabled.value) }
+
+async function checkPortConflict() {
+  const n = parseInt(port.value, 10)
+  if (isNaN(n) || n < 1 || n > 65535) return
+  portChecking.value = true
+  try {
+    const result = await api.checkPort(n)
+    if (!result.available) {
+      portConflict.value = { pid: result.pid, processName: result.process_name }
+    } else {
+      portConflict.value = null
+    }
+  } catch {
+    portConflict.value = null
+  } finally {
+    portChecking.value = false
+  }
+}
+
+async function killPortProcess() {
+  if (!portConflict.value?.pid) {
+    portConflict.value = null
+    return
+  }
+  try {
+    await api.killProcess(portConflict.value.pid)
+    // Verify port is now free
+    const n = parseInt(port.value, 10)
+    const result = await api.checkPort(n)
+    if (result.available) {
+      portConflict.value = null
+      copyMsg.value = t('settings.toast.portFreed', { port: n })
+    } else {
+      portConflict.value = null
+    }
+  } catch (e) {
+    copyMsg.value = t('settings.toast.processKillFailed', { msg: String(e) })
+    portConflict.value = null
+  }
+  clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => { copyMsg.value = '' }, 2500)
+}
+
+function dismissPortConflict() {
+  portConflict.value = null
+}
 
 async function onLanguageChange() {
   const userChoice = languageSetting.value
@@ -478,8 +526,23 @@ onUnmounted(() => {
           <div class="setting-label">{{ $t('settings.section.proxyPort') }}</div>
           <div class="setting-control">
             <input class="port-input" v-model.number="port" type="number" min="1" max="65535" @change="saveSettings" />
+            <button class="port-check-btn" @click="checkPortConflict" :disabled="portChecking">
+              {{ portChecking ? '...' : '🔍' }}
+            </button>
             <span class="saved" v-if="saved">&check; {{ $t('settings.label.saved') }}</span>
           </div>
+        </div>
+        <!-- 端口冲突提示 -->
+        <div class="port-conflict-bar" v-if="portConflict">
+          <span class="port-conflict-icon">⚠</span>
+          <span class="port-conflict-text">
+            {{ portConflict.processName
+              ? $t('settings.confirm.portConflict', { port: port, process: portConflict.processName, pid: portConflict.pid })
+              : $t('settings.confirm.portConflictUnknown', { port: port })
+            }}
+          </span>
+          <button class="port-conflict-btn kill" @click="killPortProcess">{{ $t('common.ok') }}</button>
+          <button class="port-conflict-btn cancel" @click="dismissPortConflict">{{ $t('common.cancel') }}</button>
         </div>
 
         <!-- HTTP 代理 -->
@@ -924,6 +987,17 @@ label.toggle-row { cursor: pointer; margin: 0; }
 .setting-nested:last-child { border-bottom: none; }
 .port-input { padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; font-weight: 500; font-family: 'SF Mono','Fira Code',monospace; outline: none; width: 110px; background: #f8fafc; transition: all .15s; }
 .port-input:focus { border-color: #a5b4fc; background: #fff; box-shadow: 0 0 0 3px rgba(165,180,252,.15); }
+.port-check-btn { padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; font-size: 13px; cursor: pointer; transition: all .15s; line-height: 1; }
+.port-check-btn:hover:not(:disabled) { background: #f1f5f9; border-color: #cbd5e1; }
+.port-check-btn:disabled { opacity: .5; cursor: default; }
+.port-conflict-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; margin-top: -2px; background: #fef9c3; border-bottom: 1px solid #f1f5f9; border-radius: 0; font-size: 13px; }
+.port-conflict-icon { font-size: 14px; color: #ca8a04; flex-shrink: 0; }
+.port-conflict-text { flex: 1; min-width: 0; color: #92400e; font-size: 12px; }
+.port-conflict-btn { padding: 4px 12px; border: none; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all .15s; }
+.port-conflict-btn.kill { background: #ef4444; color: #fff; }
+.port-conflict-btn.kill:hover { background: #dc2626; }
+.port-conflict-btn.cancel { background: #fff; color: #64748b; border: 1px solid #e2e8f0; }
+.port-conflict-btn.cancel:hover { background: #f1f5f9; }
 .setting-control .lang-select { min-width: 160px; padding-top: 8px; padding-bottom: 8px; }
 
 /* Overview stats */

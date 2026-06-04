@@ -57,6 +57,10 @@ export const api = {
   // --- i18n / Tray ---
   setLanguage: (lang) => invoke('set_language', { lang }),
 
+  // --- Port check ---
+  checkPort: (port) => invoke('check_port', { port }),
+  killProcess: (pid) => invoke('kill_process', { pid }),
+
   // --- Events ---
   onStatusChange: (fn) => {
     return listen('proxy-status-changed', (event) => fn(event.payload))

@@ -162,7 +162,15 @@
       "clearLogs": "确定要清除所有请求日志吗？统计计数将保留。",
       "clearStats": "确定要清除所有统计数据吗？此操作不可恢复。",
       "clearBodies": "确定要清空所有请求参数和返回参数吗？统计计数将保留。",
-      "downloadUpdate": "发现新版本 {version}，是否前往下载？"
+      "downloadUpdate": "发现新版本 {version}，是否前往下载？",
+      "portConflict": "端口 {port} 已被占用（{process}，PID: {pid}），是否关闭该进程？",
+      "portConflictUnknown": "端口 {port} 已被占用，是否尝试关闭占用进程？"
+    },
+    "toast": {
+      "portCheckFailed": "端口检测失败",
+      "processKilled": "已关闭进程 {pid}",
+      "processKillFailed": "关闭进程失败：{msg}",
+      "portFreed": "端口 {port} 已释放"
     },
     "chart": {
       "monthsShort": "1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月",

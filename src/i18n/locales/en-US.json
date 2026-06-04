@@ -162,7 +162,15 @@
       "clearLogs": "Clear all request logs? Statistics counters will be preserved.",
       "clearStats": "Clear all statistics? This cannot be undone.",
       "clearBodies": "Clear all request and response payloads? Statistics counters will be preserved.",
-      "downloadUpdate": "New version {version} available. Open download page?"
+      "downloadUpdate": "New version {version} available. Open download page?",
+      "portConflict": "Port {port} is in use ({process}, PID: {pid}). Kill the process?",
+      "portConflictUnknown": "Port {port} is in use. Try to kill the occupying process?"
+    },
+    "toast": {
+      "portCheckFailed": "Port check failed",
+      "processKilled": "Process {pid} killed",
+      "processKillFailed": "Failed to kill process: {msg}",
+      "portFreed": "Port {port} freed"
     },
     "chart": {
       "monthsShort": "Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec",

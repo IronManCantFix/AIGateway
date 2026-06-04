@@ -224,6 +224,8 @@ fn main() {
             commands::check_for_updates,
             commands::get_app_version,
             commands::set_language,
+            commands::check_port,
+            commands::kill_process,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

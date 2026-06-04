@@ -4,6 +4,13 @@ use tauri::{Emitter, State};
 use crate::config::{ConfigStore, ModelMappings, Profile, Settings};
 use crate::proxy::{ProxyManager, ProxyStatus};
 
+#[derive(serde::Serialize)]
+pub struct PortCheckResult {
+    pub available: bool,
+    pub pid: Option<u32>,
+    pub process_name: Option<String>,
+}
+
 pub struct AppState {
     pub config: Arc<ConfigStore>,
     pub proxy: ProxyManager,
@@ -387,6 +394,111 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
 #[tauri::command]
 pub fn get_app_version(app_handle: tauri::AppHandle) -> String {
     app_handle.package_info().version.to_string()
+}
+
+// --- Port check commands ---
+
+#[tauri::command]
+pub fn check_port(port: u16) -> Result<PortCheckResult, String> {
+    // Try to bind the port — if it fails, something is using it
+    match std::net::TcpListener::bind(("127.0.0.1", port)) {
+        Ok(_) => Ok(PortCheckResult { available: true, pid: None, process_name: None }),
+        Err(_) => {
+            // Port is in use, find out who owns it
+            let (pid, name) = find_process_on_port(port);
+            Ok(PortCheckResult { available: false, pid, process_name: name })
+        }
+    }
+}
+
+#[cfg(unix)]
+fn find_process_on_port(port: u16) -> (Option<u32>, Option<String>) {
+    let output = std::process::Command::new("lsof")
+        .args(["-i", &format!("TCP:{}", port), "-sTCP:LISTEN", "-n", "-P"])
+        .output();
+    let stdout = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => return (None, None),
+    };
+    for line in stdout.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            if let Ok(pid) = parts[1].parse::<u32>() {
+                return (Some(pid), parts.first().map(|s| s.to_string()));
+            }
+        }
+    }
+    (None, None)
+}
+
+#[cfg(windows)]
+fn find_process_on_port(port: u16) -> (Option<u32>, Option<String>) {
+    let output = std::process::Command::new("netstat")
+        .args(["-ano", "-p", "TCP"])
+        .output();
+    let stdout = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => return (None, None),
+    };
+    let port_suffix = format!(":{}", port);
+    for line in stdout.lines() {
+        if line.contains("LISTENING") && line.contains(&port_suffix) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if let Some(pid_str) = parts.last() {
+                if let Ok(pid) = pid_str.parse::<u32>() {
+                    // Try to get process name via tasklist
+                    let name = get_windows_process_name(pid);
+                    return (Some(pid), name);
+                }
+            }
+        }
+    }
+    (None, None)
+}
+
+#[cfg(windows)]
+fn get_windows_process_name(pid: u32) -> Option<String> {
+    let output = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {}", pid), "/NH", "/FO", "CSV"])
+        .output();
+    let stdout = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => return None,
+    };
+    for line in stdout.lines() {
+        if let Some(name) = line.split(',').next() {
+            let name = name.trim_matches('"');
+            if !name.is_empty() && !name.contains("No tasks") {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+pub fn kill_process(pid: u32) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        // SAFETY: pid comes from lsof output, user confirmed the action
+        let result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(format!("Failed to send SIGTERM to PID {}", pid))
+        }
+    }
+    #[cfg(windows)]
+    {
+        let result = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .output();
+        match result {
+            Ok(o) if o.status.success() => Ok(()),
+            Ok(o) => Err(String::from_utf8_lossy(&o.stderr).to_string()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
 }
 
 /// Update the user's language preference, persist it, and rebuild the tray menu.
