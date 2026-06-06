@@ -46,10 +46,13 @@ pub struct Settings {
     pub http_proxy: Option<HttpProxyConfig>,
     #[serde(default = "default_language")]
     pub language: String,
+    #[serde(default = "default_theme")]
+    pub theme: String,
 }
 
 fn default_port() -> u16 { 9999 }
 fn default_language() -> String { "auto".to_string() }
+fn default_theme() -> String { "auto".to_string() }
 
 impl Default for Settings {
     fn default() -> Self {
@@ -59,6 +62,7 @@ impl Default for Settings {
             log_enabled: false,
             http_proxy: None,
             language: "auto".to_string(),
+            theme: "auto".to_string(),
         }
     }
 }

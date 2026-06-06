@@ -5,6 +5,7 @@ import { api } from './api.js'
 import Home from './pages/Home/index.vue'
 import ProfileEdit from './pages/ProfileEdit/index.vue'
 import Settings from './pages/Settings/index.vue'
+import { theme, themeSetting, setThemeSetting, cycleTheme } from './theme.js'
 
 const { t } = useI18n()
 const route = ref('')
@@ -19,6 +20,10 @@ function navigate(page, payload) {
 
 provide('navigate', navigate)
 provide('pagePayload', pagePayload)
+provide('theme', theme)
+provide('themeSetting', themeSetting)
+provide('setThemeSetting', setThemeSetting)
+provide('cycleTheme', cycleTheme)
 
 function showBootToast(msg) {
   bootToast.value = msg
@@ -69,22 +74,24 @@ onMounted(async () => {
   left: 50%;
   transform: translateX(-50%);
   padding: 10px 22px;
-  background: #fef2f2;
-  color: #b91c1c;
+  background: var(--danger-soft);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--danger);
   font-size: 13px;
   font-weight: 500;
-  border-radius: 10px;
-  border: 1px solid #fecaca;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(248, 113, 113, 0.2);
   white-space: pre-line;
   text-align: center;
   max-width: 420px;
   z-index: 9999;
-  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  box-shadow: var(--shadow-md);
   cursor: pointer;
   user-select: none;
 }
-.boot-fade-enter-active { transition: all .2s ease-out; }
-.boot-fade-leave-active { transition: all .25s ease-in; }
+.boot-fade-enter-active { transition: all .25s cubic-bezier(.4,0,.2,1); }
+.boot-fade-leave-active { transition: all .2s cubic-bezier(.4,0,.2,1); }
 .boot-fade-enter-from,
-.boot-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+.boot-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
 </style>
