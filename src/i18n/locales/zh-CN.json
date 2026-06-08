@@ -15,6 +15,14 @@
     "bootError": "代理自动启动失败：{msg}",
     "dismissTip": "点击关闭"
   },
+  "nav": {
+    "gateway": "网关",
+    "settings": "设置"
+  },
+  "theme": {
+    "dark": "深色",
+    "light": "浅色"
+  },
   "home": {
     "status": {
       "running": "代理运行中",

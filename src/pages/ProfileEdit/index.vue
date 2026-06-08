@@ -196,10 +196,6 @@ onMounted(() => {
 <template>
   <div class="editor">
     <div class="page-header">
-      <button class="back-link" @click="navigate('gateway')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-        {{ $t('common.back') }}
-      </button>
       <h2>{{ title }}</h2>
     </div>
 
@@ -336,39 +332,13 @@ onMounted(() => {
   margin: 0;
 }
 
-.back-link {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--accent-soft);
-  font-size: 13px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all .15s;
-}
-.back-link:hover { background: var(--accent-soft); color: var(--text-primary); }
-
 .card {
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-card);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  position: relative;
-  overflow: hidden;
-}
-.card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--glass-shine);
-  pointer-events: none;
 }
 
-.card-body { padding: 20px; position: relative; z-index: 1; }
+.card-body { padding: 20px; }
 
 .fields {
   display: flex;
@@ -395,7 +365,7 @@ onMounted(() => {
 .field input,
 .field select {
   padding: 10px 12px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   font-size: 14px;
   outline: none;
@@ -406,7 +376,7 @@ onMounted(() => {
 .field input:focus,
 .field select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .field select {
   appearance: none;
@@ -426,7 +396,7 @@ onMounted(() => {
 
 .toggle-key {
   padding: 10px 14px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: transparent;
   font-size: 13px;
@@ -435,7 +405,7 @@ onMounted(() => {
   white-space: nowrap;
   transition: all .15s;
 }
-.toggle-key:hover { background: var(--accent-soft); border-color: var(--glass-border-hover); }
+.toggle-key:hover { background: var(--accent-soft); border-color: var(--border-hover); }
 .toggle-key:disabled { opacity: .4; cursor: not-allowed; }
 
 .model-row {
@@ -446,7 +416,7 @@ onMounted(() => {
 
 .btn-fetch {
   padding: 10px 14px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: transparent;
   font-size: 13px;
@@ -462,11 +432,9 @@ onMounted(() => {
 .model-dropdown {
   max-height: 200px;
   overflow-y: auto;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-card);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   margin-top: 2px;
 }
 
@@ -478,7 +446,7 @@ onMounted(() => {
   transition: background .1s;
 }
 .model-option:hover { background: var(--accent-soft); color: var(--text-primary); }
-.model-option + .model-option { border-top: 1px solid var(--glass-border); }
+.model-option + .model-option { border-top: 1px solid var(--border); }
 
 .error {
   color: var(--danger);
@@ -495,7 +463,7 @@ onMounted(() => {
 
 .btn-cancel {
   padding: 10px 20px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: transparent;
   font-size: 14px;
@@ -504,7 +472,7 @@ onMounted(() => {
   cursor: pointer;
   transition: all .15s;
 }
-.btn-cancel:hover { background: var(--accent-soft); border-color: var(--glass-border-hover); }
+.btn-cancel:hover { background: var(--accent-soft); border-color: var(--border-hover); }
 
 .btn-save {
   padding: 10px 24px;
@@ -517,7 +485,7 @@ onMounted(() => {
   cursor: pointer;
   transition: all .2s;
 }
-.btn-save:hover { background: var(--accent-hover); box-shadow: var(--shadow-glow); }
+.btn-save:hover { background: var(--accent-hover); box-shadow: var(--shadow-sm); }
 .btn-save:disabled { opacity: .5; cursor: not-allowed; }
 
 .avail-chips {
@@ -537,7 +505,7 @@ onMounted(() => {
   font-size: 12.5px;
   font-family: 'SF Mono', 'Fira Code', monospace;
   color: var(--text-secondary);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
 }
 
 .chip-x {
@@ -579,37 +547,25 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 .modal-card {
   width: calc(100% - 48px);
   max-width: 400px;
   max-height: 70vh;
   background: var(--bg-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  position: relative;
-}
-.modal-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: var(--glass-shine);
-  pointer-events: none;
 }
 .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--border);
   position: relative;
   z-index: 1;
 }
@@ -638,7 +594,7 @@ onMounted(() => {
 .search-input {
   width: 100%;
   padding: 8px 12px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 13px;
   outline: none;
@@ -648,7 +604,7 @@ onMounted(() => {
 }
 .search-input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .modal-actions {
   display: flex; gap: 12px; margin-bottom: 4px;
@@ -662,7 +618,7 @@ onMounted(() => {
   gap: 10px;
   padding: 10px 0;
   cursor: pointer;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--border);
 }
 .modal-row.disabled { cursor: not-allowed; opacity: .5; }
 .modal-row input[type="checkbox"] {
@@ -679,7 +635,7 @@ onMounted(() => {
 }
 .modal-footer {
   display: flex; gap: 8px; justify-content: flex-end;
-  padding: 14px 20px; border-top: 1px solid var(--glass-border);
+  padding: 14px 20px; border-top: 1px solid var(--border);
   position: relative; z-index: 1;
 }
 .modal-footer .btn-save {
@@ -689,14 +645,14 @@ onMounted(() => {
   font-size: 13px; font-weight: 600; cursor: pointer;
   transition: all .2s;
 }
-.modal-footer .btn-save:hover { background: var(--accent-hover); box-shadow: var(--shadow-glow); }
+.modal-footer .btn-save:hover { background: var(--accent-hover); box-shadow: var(--shadow-sm); }
 .modal-footer .act-btn {
   padding: 8px 18px;
-  border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: transparent; color: var(--text-secondary);
   font-size: 13px; cursor: pointer; transition: all .15s;
 }
-.modal-footer .act-btn:hover { background: var(--accent-soft); border-color: var(--glass-border-hover); }
+.modal-footer .act-btn:hover { background: var(--accent-soft); border-color: var(--border-hover); }
 
 .modal-enter-active,
 .modal-leave-active { transition: all .25s cubic-bezier(.4,0,.2,1); }

@@ -15,6 +15,14 @@
     "bootError": "Proxy auto-start failed: {msg}",
     "dismissTip": "Click to dismiss"
   },
+  "nav": {
+    "gateway": "Gateway",
+    "settings": "Settings"
+  },
+  "theme": {
+    "dark": "Dark",
+    "light": "Light"
+  },
   "home": {
     "status": {
       "running": "Proxy running",

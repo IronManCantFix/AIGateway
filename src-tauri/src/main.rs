@@ -184,10 +184,12 @@ fn main() {
                 if let Err(e) = state.proxy.start() {
                     eprintln!("Auto-start proxy failed: {}", e);
                 }
-                // Enable autostart plugin
+                // Enable autostart plugin (only if not already enabled, to avoid macOS "background item added" notification)
                 use tauri_plugin_autostart::ManagerExt;
                 let autostart_manager = app.autolaunch();
-                autostart_manager.enable().ok();
+                if !autostart_manager.is_enabled().unwrap_or(false) {
+                    autostart_manager.enable().ok();
+                }
             }
 
             Ok(())
