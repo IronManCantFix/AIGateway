@@ -184,10 +184,12 @@ fn main() {
                 if let Err(e) = state.proxy.start() {
                     eprintln!("Auto-start proxy failed: {}", e);
                 }
-                // Enable autostart plugin
+                // Enable autostart plugin (only if not already enabled, to avoid macOS "background item added" notification)
                 use tauri_plugin_autostart::ManagerExt;
                 let autostart_manager = app.autolaunch();
-                autostart_manager.enable().ok();
+                if !autostart_manager.is_enabled().unwrap_or(false) {
+                    autostart_manager.enable().ok();
+                }
             }
 
             Ok(())
@@ -211,6 +213,10 @@ fn main() {
             commands::remove_model,
             commands::get_model_mappings,
             commands::set_model_mappings,
+            commands::get_lb_groups,
+            commands::add_lb_group,
+            commands::update_lb_group,
+            commands::delete_lb_group,
             commands::get_log_enabled,
             commands::set_log_enabled,
             commands::get_stats,
@@ -224,6 +230,8 @@ fn main() {
             commands::check_for_updates,
             commands::get_app_version,
             commands::set_language,
+            commands::check_port,
+            commands::kill_process,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

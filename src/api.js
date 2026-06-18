@@ -33,6 +33,12 @@ export const api = {
   getModelMappings: () => invoke('get_model_mappings'),
   setModelMappings: (mappings) => invoke('set_model_mappings', { mappings }),
 
+  // --- Load Balancer ---
+  getLBGroups: () => invoke('get_lb_groups'),
+  addLBGroup: (group) => invoke('add_lb_group', { group }),
+  updateLBGroup: (id, updates) => invoke('update_lb_group', { id, updates }),
+  deleteLBGroup: (id) => invoke('delete_lb_group', { id }),
+
   // --- Stats & Logs ---
   getStats: () => invoke('get_stats'),
   getLogs: (limit, offset = 0, filter = null) => invoke('get_logs', { limit, offset, filter }),
@@ -56,6 +62,10 @@ export const api = {
 
   // --- i18n / Tray ---
   setLanguage: (lang) => invoke('set_language', { lang }),
+
+  // --- Port check ---
+  checkPort: (port) => invoke('check_port', { port }),
+  killProcess: (pid) => invoke('kill_process', { pid }),
 
   // --- Events ---
   onStatusChange: (fn) => {

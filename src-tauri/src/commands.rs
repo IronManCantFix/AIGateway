@@ -1,8 +1,15 @@
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
-use crate::config::{ConfigStore, ModelMappings, Profile, Settings};
+use crate::config::{ConfigStore, LoadBalancerGroup, ModelMappings, Profile, Settings};
 use crate::proxy::{ProxyManager, ProxyStatus};
+
+#[derive(serde::Serialize)]
+pub struct PortCheckResult {
+    pub available: bool,
+    pub pid: Option<u32>,
+    pub process_name: Option<String>,
+}
 
 pub struct AppState {
     pub config: Arc<ConfigStore>,
@@ -186,6 +193,44 @@ pub fn set_model_mappings(state: State<'_, AppState>, mappings: serde_json::Valu
     Ok(m)
 }
 
+// --- Load Balancer commands ---
+
+#[tauri::command]
+pub fn get_lb_groups(state: State<'_, AppState>) -> Vec<LoadBalancerGroup> {
+    state.config.get_lb_groups()
+}
+
+#[tauri::command]
+pub fn add_lb_group(app_handle: tauri::AppHandle, state: State<'_, AppState>, group: serde_json::Value) -> Result<LoadBalancerGroup, String> {
+    let g: LoadBalancerGroup = serde_json::from_value(group).map_err(|e| e.to_string())?;
+    let saved = state.config.add_lb_group(g)?;
+    if state.proxy.get_status().status == "running" {
+        state.proxy.reload()?;
+    }
+    app_handle.emit("tray-menu-update", ()).ok();
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn update_lb_group(app_handle: tauri::AppHandle, state: State<'_, AppState>, id: String, updates: serde_json::Value) -> Result<LoadBalancerGroup, String> {
+    let saved = state.config.update_lb_group(&id, updates)?;
+    if state.proxy.get_status().status == "running" {
+        state.proxy.reload()?;
+    }
+    app_handle.emit("tray-menu-update", ()).ok();
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn delete_lb_group(app_handle: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.config.delete_lb_group(&id)?;
+    if state.proxy.get_status().status == "running" {
+        state.proxy.reload()?;
+    }
+    app_handle.emit("tray-menu-update", ()).ok();
+    Ok(())
+}
+
 // --- Log commands ---
 
 #[tauri::command]
@@ -252,16 +297,30 @@ pub fn clear_aggregated_stats(state: State<'_, AppState>) -> Result<(), String> 
 pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<String>, crate::error::AppError> {
     let base_url = profile.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
     let api_key = profile.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
+    let provider_type = profile.get("providerType").and_then(|v| v.as_str()).unwrap_or("");
 
     let base_url = base_url.trim_end_matches('/').trim_end_matches("/v1");
-    let url = format!("{}/v1/models", base_url);
+    let is_gemini = provider_type == "google-gemini";
+
+    let url = if is_gemini {
+        format!("{}/v1beta/models", base_url)
+    } else {
+        format!("{}/v1/models", base_url)
+    };
 
     let client = reqwest::Client::new();
-    let resp = client
+    let req_builder = client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
         .header("Accept", "application/json")
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(10));
+
+    let req_builder = if is_gemini {
+        req_builder.header("x-goog-api-key", api_key)
+    } else {
+        req_builder.header("Authorization", format!("Bearer {}", api_key))
+    };
+
+    let resp = req_builder
         .send()
         .await
         .map_err(|e| crate::error::AppError::new("upstream.requestFailed").with_detail(e.to_string()))?;
@@ -306,7 +365,10 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
     } else if let Some(models) = body.get("models").and_then(|d| d.as_array()) {
         let models: Vec<String> = models.iter()
             .filter_map(|m| {
-                if let Some(id) = m.get("id").and_then(|v| v.as_str()) {
+                // Gemini native format: { "name": "models/gemini-pro", ... }
+                if let Some(name) = m.get("name").and_then(|v| v.as_str()) {
+                    Some(name.strip_prefix("models/").unwrap_or(name).to_string())
+                } else if let Some(id) = m.get("id").and_then(|v| v.as_str()) {
                     Some(id.to_string())
                 } else if m.is_string() {
                     m.as_str().map(|s| s.to_string())
@@ -387,6 +449,111 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
 #[tauri::command]
 pub fn get_app_version(app_handle: tauri::AppHandle) -> String {
     app_handle.package_info().version.to_string()
+}
+
+// --- Port check commands ---
+
+#[tauri::command]
+pub fn check_port(port: u16) -> Result<PortCheckResult, String> {
+    // Try to bind the port — if it fails, something is using it
+    match std::net::TcpListener::bind(("127.0.0.1", port)) {
+        Ok(_) => Ok(PortCheckResult { available: true, pid: None, process_name: None }),
+        Err(_) => {
+            // Port is in use, find out who owns it
+            let (pid, name) = find_process_on_port(port);
+            Ok(PortCheckResult { available: false, pid, process_name: name })
+        }
+    }
+}
+
+#[cfg(unix)]
+fn find_process_on_port(port: u16) -> (Option<u32>, Option<String>) {
+    let output = std::process::Command::new("lsof")
+        .args(["-i", &format!("TCP:{}", port), "-sTCP:LISTEN", "-n", "-P"])
+        .output();
+    let stdout = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => return (None, None),
+    };
+    for line in stdout.lines().skip(1) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 {
+            if let Ok(pid) = parts[1].parse::<u32>() {
+                return (Some(pid), parts.first().map(|s| s.to_string()));
+            }
+        }
+    }
+    (None, None)
+}
+
+#[cfg(windows)]
+fn find_process_on_port(port: u16) -> (Option<u32>, Option<String>) {
+    let output = std::process::Command::new("netstat")
+        .args(["-ano", "-p", "TCP"])
+        .output();
+    let stdout = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => return (None, None),
+    };
+    let port_suffix = format!(":{}", port);
+    for line in stdout.lines() {
+        if line.contains("LISTENING") && line.contains(&port_suffix) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if let Some(pid_str) = parts.last() {
+                if let Ok(pid) = pid_str.parse::<u32>() {
+                    // Try to get process name via tasklist
+                    let name = get_windows_process_name(pid);
+                    return (Some(pid), name);
+                }
+            }
+        }
+    }
+    (None, None)
+}
+
+#[cfg(windows)]
+fn get_windows_process_name(pid: u32) -> Option<String> {
+    let output = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {}", pid), "/NH", "/FO", "CSV"])
+        .output();
+    let stdout = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => return None,
+    };
+    for line in stdout.lines() {
+        if let Some(name) = line.split(',').next() {
+            let name = name.trim_matches('"');
+            if !name.is_empty() && !name.contains("No tasks") {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+pub fn kill_process(pid: u32) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        // SAFETY: pid comes from lsof output, user confirmed the action
+        let result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(format!("Failed to send SIGTERM to PID {}", pid))
+        }
+    }
+    #[cfg(windows)]
+    {
+        let result = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .output();
+        match result {
+            Ok(o) if o.status.success() => Ok(()),
+            Ok(o) => Err(String::from_utf8_lossy(&o.stderr).to_string()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
 }
 
 /// Update the user's language preference, persist it, and rebuild the tray menu.

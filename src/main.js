@@ -4,6 +4,7 @@ import './main.css'
 import App from './App.vue'
 import { i18n, applyLocaleFromSetting, resolveLocale } from './i18n'
 import { api } from './api.js'
+import { initTheme } from './theme.js'
 
 async function bootstrap() {
   let resolved = 'en-US'
@@ -12,12 +13,12 @@ async function bootstrap() {
     const settings = await invoke('get_settings')
     setting = settings?.language ?? 'auto'
     resolved = await applyLocaleFromSetting(setting)
+    initTheme(settings?.theme || 'auto')
   } catch (e) {
     console.error('i18n boot failed, falling back:', e)
     resolved = await applyLocaleFromSetting('auto')
+    initTheme('auto')
   }
-  // When user setting is "auto", Rust uses $LANG which is unreliable on Windows.
-  // Sync the navigator-resolved locale to Rust so the tray matches the UI.
   if (setting === 'auto') {
     try {
       await api.setLanguage(resolved)

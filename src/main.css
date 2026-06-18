@@ -2,16 +2,154 @@
 *::before,
 *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ===== Dark Theme (Slate) ===== */
+[data-theme="dark"] {
+  --bg-base: #0f1117;
+  --bg-elevated: #181b24;
+  --bg-card: #1c1f2a;
+  --bg-card-hover: #22263a;
+  --bg-input: #161922;
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+
+  --border: #2a2e3d;
+  --border-subtle: #232738;
+  --border-hover: #3a3f54;
+
+  --text-primary: #e8eaf0;
+  --text-secondary: #9498aa;
+  --text-muted: #5c6078;
+  --text-accent: #6b9eff;
+
+  --accent: #5b8def;
+  --accent-hover: #78a3ff;
+  --accent-soft: rgba(91, 141, 239, 0.1);
+  --accent-text: #fff;
+
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.1);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.1);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.1);
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.25);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.3);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.35);
+
+  --tab-active-bg: #252938;
+  --tab-hover-bg: #1f2230;
+
+  --chart-grid: rgba(91, 141, 239, 0.08);
+  --chart-tooltip-bg: #1c1f2a;
+  --chart-tooltip-text: #e8eaf0;
+  --chart-tooltip-muted: rgba(148, 152, 170, 0.6);
+
+  --heat-req-0: rgba(91,141,239,.05);
+  --heat-req-1: rgba(91,141,239,.15);
+  --heat-req-2: rgba(91,141,239,.3);
+  --heat-req-3: rgba(91,141,239,.5);
+  --heat-req-4: rgba(91,141,239,.8);
+  --heat-tok-0: rgba(91,141,239,.05);
+  --heat-tok-1: rgba(91,141,239,.15);
+  --heat-tok-2: rgba(91,141,239,.3);
+  --heat-tok-3: rgba(91,141,239,.5);
+  --heat-tok-4: rgba(91,141,239,.8);
+
+  --scrollbar-thumb: rgba(255, 255, 255, 0.1);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.18);
+  --selection-bg: rgba(91, 141, 239, 0.25);
+  --selection-color: #fff;
+}
+
+/* ===== Light Theme (Warm Ivory) ===== */
+[data-theme="light"] {
+  --bg-base: #f8f6f3;
+  --bg-elevated: #fefcf9;
+  --bg-card: #fefcf9;
+  --bg-card-hover: #f4f1ec;
+  --bg-input: #f4f1ec;
+  --bg-overlay: rgba(30, 25, 18, 0.18);
+
+  --border: #e8e3db;
+  --border-subtle: #f0ece6;
+  --border-hover: #d6cfc4;
+
+  --text-primary: #1c1917;
+  --text-secondary: #57534e;
+  --text-muted: #a8a29e;
+  --text-accent: #b45309;
+
+  --accent: #d97706;
+  --accent-hover: #b45309;
+  --accent-soft: rgba(217, 119, 6, 0.06);
+  --accent-text: #fff;
+
+  --success: #16a34a;
+  --success-soft: rgba(22, 163, 74, 0.06);
+  --warning: #ca8a04;
+  --warning-soft: rgba(202, 138, 4, 0.06);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.05);
+
+  --shadow-sm: 0 1px 3px rgba(28,25,23,0.05), 0 1px 2px rgba(28,25,23,0.03);
+  --shadow-md: 0 4px 14px rgba(28,25,23,0.06), 0 1px 4px rgba(28,25,23,0.03);
+  --shadow-lg: 0 10px 28px rgba(28,25,23,0.08), 0 2px 8px rgba(28,25,23,0.03);
+
+  --tab-active-bg: #fefcf9;
+  --tab-hover-bg: #f4f1ec;
+
+  --chart-grid: rgba(217, 119, 6, 0.06);
+  --chart-tooltip-bg: #fefcf9;
+  --chart-tooltip-text: #1c1917;
+  --chart-tooltip-muted: rgba(87, 83, 78, 0.6);
+
+  --heat-req-0: rgba(217,119,6,.03);
+  --heat-req-1: rgba(217,119,6,.1);
+  --heat-req-2: rgba(217,119,6,.22);
+  --heat-req-3: rgba(217,119,6,.4);
+  --heat-req-4: rgba(217,119,6,.7);
+  --heat-tok-0: rgba(217,119,6,.03);
+  --heat-tok-1: rgba(217,119,6,.1);
+  --heat-tok-2: rgba(217,119,6,.22);
+  --heat-tok-3: rgba(217,119,6,.4);
+  --heat-tok-4: rgba(217,119,6,.7);
+
+  --scrollbar-thumb: rgba(28, 25, 23, 0.1);
+  --scrollbar-thumb-hover: rgba(28, 25, 23, 0.18);
+  --selection-bg: rgba(217, 119, 6, 0.12);
+  --selection-color: #1c1917;
+}
+
+/* Radius (shared) */
+:root {
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-  font-size: 14px;
-  color: #1e293b;
-  background: #fff;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-base);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 #app { min-height: 100vh; }
 
 button { font-family: inherit; }
-input, select { font-family: inherit; }
+input, select, textarea { font-family: inherit; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+/* Selection */
+::selection { background: var(--selection-bg); color: var(--selection-color); }

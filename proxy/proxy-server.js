@@ -4,6 +4,7 @@
 
 import http from 'http'
 import https from 'https'
+import zlib from 'zlib'
 import { URL } from 'url'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
@@ -29,6 +30,7 @@ let currentConfig = null // { profile: {...}, models: [...] }
 let logEnabled = false
 let initialized = false
 let startupKeepAlive = null
+const rrCounters = {} // groupId → counter (round-robin load balancing)
 const reasoningCache = new Map() // call_id → reasoning_content, for re-injection when clients strip non-standard fields
 const REASONING_CACHE_MAX = 500
 setReasoningCache(reasoningCache)
@@ -64,12 +66,13 @@ const PATH_TO_SOURCE = {
 const PROVIDER_META = {
   'openai-chat':        { target: 'chat_completions', path: '/v1/chat/completions' },
   'openai-response':    { target: 'responses',        path: '/v1/responses' },
-  'anthropic-message':  { target: 'messages',         path: '/v1/messages' },
+  'anthropic-message':  { target: 'messages',         path: '/v1/messages', authType: 'x-api-key' },
   'newapi':             { target: 'chat_completions', path: '/v1/chat/completions' },
   'openai-image':       { target: 'image',            paths: {
                             '/v1/images/generations': '/v1/images/generations',
                             '/v1/images/edits':       '/v1/images/edits'
-                          } }
+                          } },
+  'google-gemini':      { target: 'chat_completions', path: '/v1beta/openai/chat/completions' }
 }
 
 // --- Read request body ---
@@ -188,7 +191,7 @@ function createProxyAgent(proxyConfig, isHttps, profileId) {
   }
 }
 
-function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId, contentType) {
+function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId, contentType, onUpstreamResponse, authType) {
   const parsed = new URL(upstreamUrl)
   const isHttps = parsed.protocol === 'https:'
   const transport = isHttps ? https : http
@@ -207,15 +210,45 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     path: parsed.pathname + parsed.search,
     method: clientReq.method,
     agent,
-    headers: {
-      'Content-Type': effectiveContentType,
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Length': bodyBuf.length
-    }
+    headers: (() => {
+      // 透传客户端所有请求头，然后用代理自己的值覆盖需要控制的头
+      const h = {}
+      const skip = new Set(['host', 'connection', 'content-length', 'content-type', 'authorization', 'x-api-key', 'x-goog-api-key'])
+      for (const [k, v] of Object.entries(clientReq.headers)) {
+        if (!skip.has(k.toLowerCase())) h[k] = v
+      }
+      h['Content-Type'] = effectiveContentType
+      h['Content-Length'] = bodyBuf.length
+      // 认证头最后设置，确保不被客户端透传覆盖
+      if (authType === 'x-goog-api-key') h['x-goog-api-key'] = apiKey
+      else if (authType === 'x-api-key') h['x-api-key'] = apiKey
+      else h['Authorization'] = `Bearer ${apiKey}`
+      return h
+    })()
   }
 
   const upstreamReq = transport.request(options, (upstreamRes) => {
     const isStreaming = upstreamRes.headers['content-type']?.includes('text/event-stream')
+
+    // Failover callback: if it returns false, don't write to client (allow retry)
+    if (onUpstreamResponse) {
+      const shouldContinue = onUpstreamResponse(upstreamRes)
+      if (!shouldContinue) return
+    }
+
+    // Decompress upstream response if content-encoded (gzip/deflate/br)
+    const encoding = upstreamRes.headers['content-encoding']
+    const decompressor = encoding === 'gzip' ? zlib.createGunzip()
+      : encoding === 'deflate' ? zlib.createInflate()
+      : encoding === 'br' ? zlib.createBrotliDecompress()
+      : null
+    if (decompressor) {
+      upstreamRes.pipe(decompressor)
+      upstreamRes.on('error', (e) => decompressor.destroy(e))
+      decompressor.headers = upstreamRes.headers
+      decompressor.statusCode = upstreamRes.statusCode
+      upstreamRes = decompressor
+    }
 
     if (isStreaming && sseConverter) {
       // SSE streaming with conversion
@@ -243,17 +276,17 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
       upstreamRes.on('error', cleanup)
 
-      let buffer = ''
-      let rawBuffer = ''
+      let buffer = Buffer.alloc(0)
+      let rawBuffer = Buffer.alloc(0)
       let lineCount = 0
       let convertedCount = 0
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        const chunkStr = chunk.toString()
-        rawBuffer += chunkStr
-        buffer += chunkStr
-        const lines = buffer.split(/\r?\n/)
-        buffer = lines.pop() || ''
+        rawBuffer = Buffer.concat([rawBuffer, chunk])
+        buffer = Buffer.concat([buffer, chunk])
+        const str = buffer.toString('utf8')
+        const lines = str.split(/\r?\n/)
+        buffer = Buffer.from(lines.pop() || '', 'utf8')
 
         for (const line of lines) {
           lineCount++
@@ -269,9 +302,12 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         if (closed) return
         closed = true
         clearInterval(keepAlive)
-        if (buffer.trim()) {
-          const result = sseConverter(buffer)
-          if (result) clientRes.write(result)
+        if (buffer.length > 0) {
+          const str = buffer.toString('utf8')
+          if (str.trim()) {
+            const result = sseConverter(str)
+            if (result) clientRes.write(result)
+          }
         }
         // 上游连接断开但未发送 [DONE] 时，补发 response.completed 等收尾事件
         if (sseConverter.flush) {
@@ -280,7 +316,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         }
         // Stream ended
         clientRes.end()
-        if (onResponseBody) onResponseBody(rawBuffer || null)
+        if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
       })
     } else if (isStreaming) {
       // SSE streaming without conversion — pipe through immediately
@@ -308,17 +344,17 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
       upstreamRes.on('error', cleanup)
 
-      let rawBuffer = ''
+      let rawBuffer = Buffer.alloc(0)
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        rawBuffer += chunk.toString()
+        rawBuffer = Buffer.concat([rawBuffer, chunk])
         clientRes.write(chunk)
       })
       upstreamRes.on('end', () => {
         if (closed) return
         closed = true
         clearInterval(keepAlive)
-        if (onResponseBody) onResponseBody(rawBuffer || null)
+        if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
         clientRes.end()
       })
     } else if (sseConverter) {
@@ -608,6 +644,31 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
   upstreamReq.end()
 }
 
+// --- Load Balancer helpers ---
+
+function findLBGroupForModel(requestedModel, source) {
+  if (!requestedModel || !currentConfig?.loadBalancerGroups) return null
+  for (const group of currentConfig.loadBalancerGroups) {
+    if (!group.profileIds || group.profileIds.length === 0) continue
+    for (const pid of group.profileIds) {
+      const p = currentConfig.profiles.find(pr => pr.id === pid)
+      if (!p) continue
+      if (source === 'image' && p.providerType !== 'openai-image') continue
+      if (source !== 'image' && p.providerType === 'openai-image') continue
+      if (Array.isArray(p.models) && p.models.includes(requestedModel)) {
+        return group
+      }
+    }
+  }
+  return null
+}
+
+function selectRoundRobin(group) {
+  const idx = (rrCounters[group.id] || 0) % group.profileIds.length
+  rrCounters[group.id] = idx + 1
+  return group.profileIds[idx]
+}
+
 // --- Route: /v1/models ---
 
 function handleModels(_, res) {
@@ -703,14 +764,40 @@ async function handleApiRequest(req, res) {
   // Route by model: find the first profile whose models include body.model
   const requestedModel = body.model
   let profile = null
+  let lbGroup = null
 
   if (requestedModel) {
-    for (const p of currentConfig.profiles) {
-      if (source === 'image' && p.providerType !== 'openai-image') continue
-      if (source !== 'image' && p.providerType === 'openai-image') continue
-      if (Array.isArray(p.models) && p.models.length > 0 && p.models.includes(requestedModel)) {
+    // Check load balancer groups first
+    lbGroup = findLBGroupForModel(requestedModel, source)
+    if (lbGroup && lbGroup.strategy === 'round-robin') {
+      const selectedId = selectRoundRobin(lbGroup)
+      profile = currentConfig.profiles.find(p => p.id === selectedId)
+    } else if (lbGroup && lbGroup.strategy === 'failover') {
+      // Failover: try each profile in order until one succeeds
+      for (const pid of lbGroup.profileIds) {
+        const p = currentConfig.profiles.find(pr => pr.id === pid)
+        if (!p) continue
+        if (source === 'image' && p.providerType !== 'openai-image') continue
+        if (source !== 'image' && p.providerType === 'openai-image') continue
+        if (!Array.isArray(p.models) || !p.models.includes(requestedModel)) continue
         profile = p
         break
+      }
+      if (!profile) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: `AI 网关负载均衡组内无匹配模型: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
+        return
+      }
+    }
+    // Fallback: no LB group or LB didn't select a profile
+    if (!profile) {
+      for (const p of currentConfig.profiles) {
+        if (source === 'image' && p.providerType !== 'openai-image') continue
+        if (source !== 'image' && p.providerType === 'openai-image') continue
+        if (Array.isArray(p.models) && p.models.length > 0 && p.models.includes(requestedModel)) {
+          profile = p
+          break
+        }
       }
     }
     if (!profile) {
@@ -817,12 +904,94 @@ async function handleApiRequest(req, res) {
   }
   const responseBodyConverter = getResponseBodyConverter(source, meta.target)
 
+  // Failover: try providers in order, retry on HTTP error before data is sent
+  if (lbGroup && lbGroup.strategy === 'failover') {
+    const triedIds = new Set()
+    let currentProfile = profile
+    let lastError = null
 
+    for (let attempt = 0; attempt < lbGroup.profileIds.length; attempt++) {
+      const pid = currentProfile.id
+      triedIds.add(pid)
+
+      const curMeta = PROVIDER_META[currentProfile.providerType]
+      if (!curMeta) break
+
+      let curBody = { ...body }
+      if (!curBody.model && currentProfile.defaultModel) {
+        curBody.model = currentProfile.defaultModel
+      }
+      if (source !== 'image') {
+        const bc = getBodyConverter(source, curMeta.target)
+        if (bc) curBody = bc(curBody)
+        if (curBody.system && curMeta.target === 'chat_completions' && currentProfile.providerType !== 'newapi' && Array.isArray(curBody.messages)) {
+          curBody.messages.unshift({ role: 'system', content: curBody.system })
+          delete curBody.system
+        }
+      }
+
+      const curBaseUrl = currentProfile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
+      const curUpstreamPath = curMeta.path
+      const curUpstreamUrl = `${curBaseUrl}${curUpstreamPath}`
+      req._upstreamUrl = curUpstreamUrl
+      req._providerName = currentProfile.name
+
+      const curSseConverter = needStream ? createSSEConverter(source, curMeta.target) : null
+      const curResponseBodyConverter = getResponseBodyConverter(source, curMeta.target)
+
+      let failed = false
+      forwardRequest(req, res, curUpstreamUrl, currentProfile.apiKey, curBody,
+        curSseConverter, req._onResponseBody || null, curResponseBodyConverter,
+        source, currentProfile.id, null,
+        (upstreamRes) => {
+          if (upstreamRes.statusCode >= 400 && !res.headersSent) {
+            // HTTP error before any data written — try next provider
+            failed = true
+            lastError = upstreamRes.statusCode
+            // Drain the error response body
+            upstreamRes.resume()
+            return false // don't continue processing
+          }
+          return true // continue normally
+        },
+        curMeta.authType
+      )
+
+      if (!failed) return
+
+      // Find next profile in the group that we haven't tried
+      let nextProfile = null
+      for (const nextPid of lbGroup.profileIds) {
+        if (triedIds.has(nextPid)) continue
+        const np = currentConfig.profiles.find(p => p.id === nextPid)
+        if (!np) continue
+        if (source === 'image' && np.providerType !== 'openai-image') continue
+        if (source !== 'image' && np.providerType === 'openai-image') continue
+        if (!Array.isArray(np.models) || !np.models.includes(requestedModel)) continue
+        nextProfile = np
+        break
+      }
+      if (!nextProfile) break
+      currentProfile = nextProfile
+    }
+
+    // All providers failed
+    if (!res.headersSent) {
+      res.writeHead(lastError || 502, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Bad Gateway', message: 'All upstream providers in load balancer group failed' }))
+    }
+    return
+  }
+
+  // Normal forwarding (non-failover)
   forwardRequest(req, res, upstreamUrl, profile.apiKey, body, sseConverter,
     req._onResponseBody || null,
     responseBodyConverter,
     source,
-    profile.id
+    profile.id,
+    null,
+    null,
+    meta.authType
   )
 }
 

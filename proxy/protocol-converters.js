@@ -561,6 +561,8 @@ function convertResponsesToMessages(body) {
   return result
 }
 
+
+
 // Register body converters
 converters['responses->responses']          = { body: convertResponsesToResponses }
 converters['chat_completions->messages']   = { body: convertChatToMessages }
@@ -1479,6 +1481,8 @@ function responsesToMessagesSSEFactory() {
   return convert
 }
 
+
+
 // Register SSE converters
 converters['chat_completions->messages'].sseFactory   = chatToMessagesSSEFactory
 converters['chat_completions->responses'].sseFactory   = chatToResponsesSSEFactory
@@ -1912,6 +1916,8 @@ function convertResponsesResponseToChat(data) {
     }
   }
 }
+
+
 
 // Register response body converters
 converters['chat_completions->messages'].responseBody   = convertChatResponseToMessages
