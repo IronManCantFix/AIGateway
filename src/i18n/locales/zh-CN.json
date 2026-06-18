@@ -33,12 +33,14 @@
     "section": {
       "providers": "提供商",
       "models": "可用模型",
-      "mappings": "模型映射"
+      "mappings": "模型映射",
+      "lb": "负载均衡"
     },
     "tip": {
       "providers": "支持同时启用多个提供商，请求时按照列表从上到下的顺序匹配模型 ID，匹配到的第一个提供商将处理该请求",
       "models": "聚合自已启用提供商的可用模型列表，通过 <code>/v1/models</code> 接口返回给客户端",
-      "mappings": "将客户端请求的模型 ID 映射为真实模型 ID。适用于客户端固定模型名称（如 Codex 只能调用 gpt5.5）但你没有该模型的场景"
+      "mappings": "将客户端请求的模型 ID 映射为真实模型 ID。适用于客户端固定模型名称（如 Codex 只能调用 gpt5.5）但你没有该模型的场景",
+      "lb": "当多个提供商提供相同模型时，可配置负载均衡策略：轮询（请求轮流分配）或故障转移（按顺序尝试，失败自动切换）"
     },
     "button": {
       "start": "启动",
@@ -47,7 +49,9 @@
       "edit": "编辑",
       "enabled": "已启用",
       "disabled": "已禁用",
-      "addMapping": "+ 添加映射"
+      "addMapping": "+ 添加映射",
+      "expand": "展开",
+      "collapse": "收起"
     },
     "label": {
       "clickToCopy": "点击复制",
@@ -67,7 +71,8 @@
       "providers": "尚未添加提供商，点击「+ 添加」开始配置",
       "models": "启用提供商并配置可用模型后，此处自动聚合展示",
       "mappingsDisabled": "启用后可添加模型映射规则",
-      "mappingsRules": "暂无映射规则，点击下方添加"
+      "mappingsRules": "暂无映射规则，点击下方添加",
+      "lb": "暂无负载均衡组，点击下方创建"
     },
     "toast": {
       "urlCopied": "已复制代理地址",
@@ -81,6 +86,20 @@
     },
     "confirm": {
       "deleteProfile": "确定要删除该提供商吗？"
+    },
+    "lb": {
+      "roundRobin": "轮询",
+      "failover": "故障转移",
+      "create": "+ 创建负载均衡组",
+      "createGroup": "创建负载均衡组",
+      "editGroup": "编辑负载均衡组",
+      "name": "名称",
+      "namePlaceholder": "如：GPT-4o 双线",
+      "strategy": "策略",
+      "selectProfiles": "选择参与的提供商",
+      "nameRequired": "请输入名称",
+      "minProfiles": "至少需要选择 2 个提供商",
+      "confirmDelete": "确定要删除该负载均衡组吗？"
     }
   },
   "settings": {
@@ -246,12 +265,17 @@
       "openai-response": "OpenAI Responses",
       "anthropic-message": "Anthropic Messages",
       "openai-image": "OpenAI 图像",
-      "newapi": "NEW API"
+      "newapi": "NEW API",
+      "google-gemini": "Google Gemini"
     }
   },
   "errors": {
-    "network": { "requestFailed": "网络请求失败" },
-    "parse": { "jsonFailed": "JSON 解析失败" },
+    "network": {
+      "requestFailed": "网络请求失败"
+    },
+    "parse": {
+      "jsonFailed": "JSON 解析失败"
+    },
     "upstream": {
       "requestFailed": "请求失败",
       "unauthorized": "API Key 无效或无权限访问 ({status})",
@@ -264,13 +288,19 @@
       "unknown": "未知错误 ({status})",
       "unknownResponseFormat": "未知响应格式"
     },
-    "http": { "clientFailed": "创建 HTTP 客户端失败" },
+    "http": {
+      "clientFailed": "创建 HTTP 客户端失败"
+    },
     "update": {
       "requestFailed": "检查更新失败",
       "githubError": "GitHub API 返回错误 ({status})",
       "noVersionTag": "无法获取最新版本号"
     },
-    "settings": { "saveFailed": "保存设置失败" },
-    "tray": { "setMenuFailed": "重建托盘菜单失败" }
+    "settings": {
+      "saveFailed": "保存设置失败"
+    },
+    "tray": {
+      "setMenuFailed": "重建托盘菜单失败"
+    }
   }
 }

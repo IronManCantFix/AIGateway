@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
-use crate::config::{ConfigStore, ModelMappings, Profile, Settings};
+use crate::config::{ConfigStore, LoadBalancerGroup, ModelMappings, Profile, Settings};
 use crate::proxy::{ProxyManager, ProxyStatus};
 
 #[derive(serde::Serialize)]
@@ -193,6 +193,44 @@ pub fn set_model_mappings(state: State<'_, AppState>, mappings: serde_json::Valu
     Ok(m)
 }
 
+// --- Load Balancer commands ---
+
+#[tauri::command]
+pub fn get_lb_groups(state: State<'_, AppState>) -> Vec<LoadBalancerGroup> {
+    state.config.get_lb_groups()
+}
+
+#[tauri::command]
+pub fn add_lb_group(app_handle: tauri::AppHandle, state: State<'_, AppState>, group: serde_json::Value) -> Result<LoadBalancerGroup, String> {
+    let g: LoadBalancerGroup = serde_json::from_value(group).map_err(|e| e.to_string())?;
+    let saved = state.config.add_lb_group(g)?;
+    if state.proxy.get_status().status == "running" {
+        state.proxy.reload()?;
+    }
+    app_handle.emit("tray-menu-update", ()).ok();
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn update_lb_group(app_handle: tauri::AppHandle, state: State<'_, AppState>, id: String, updates: serde_json::Value) -> Result<LoadBalancerGroup, String> {
+    let saved = state.config.update_lb_group(&id, updates)?;
+    if state.proxy.get_status().status == "running" {
+        state.proxy.reload()?;
+    }
+    app_handle.emit("tray-menu-update", ()).ok();
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn delete_lb_group(app_handle: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.config.delete_lb_group(&id)?;
+    if state.proxy.get_status().status == "running" {
+        state.proxy.reload()?;
+    }
+    app_handle.emit("tray-menu-update", ()).ok();
+    Ok(())
+}
+
 // --- Log commands ---
 
 #[tauri::command]
@@ -259,16 +297,30 @@ pub fn clear_aggregated_stats(state: State<'_, AppState>) -> Result<(), String> 
 pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<String>, crate::error::AppError> {
     let base_url = profile.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
     let api_key = profile.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
+    let provider_type = profile.get("providerType").and_then(|v| v.as_str()).unwrap_or("");
 
     let base_url = base_url.trim_end_matches('/').trim_end_matches("/v1");
-    let url = format!("{}/v1/models", base_url);
+    let is_gemini = provider_type == "google-gemini";
+
+    let url = if is_gemini {
+        format!("{}/v1beta/openai/models", base_url)
+    } else {
+        format!("{}/v1/models", base_url)
+    };
 
     let client = reqwest::Client::new();
-    let resp = client
+    let req_builder = client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
         .header("Accept", "application/json")
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(10));
+
+    let req_builder = if is_gemini {
+        req_builder.header("x-goog-api-key", api_key)
+    } else {
+        req_builder.header("Authorization", format!("Bearer {}", api_key))
+    };
+
+    let resp = req_builder
         .send()
         .await
         .map_err(|e| crate::error::AppError::new("upstream.requestFailed").with_detail(e.to_string()))?;

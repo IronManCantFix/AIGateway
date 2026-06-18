@@ -33,12 +33,14 @@
     "section": {
       "providers": "Providers",
       "models": "Available Models",
-      "mappings": "Model Mappings"
+      "mappings": "Model Mappings",
+      "lb": "Load Balancer"
     },
     "tip": {
       "providers": "Multiple providers can be enabled at the same time. Requests match model IDs from top to bottom of the list, and the first matching provider handles the request.",
       "models": "Aggregated list of models from enabled providers, returned to clients via the <code>/v1/models</code> endpoint.",
-      "mappings": "Map the model ID requested by the client to a real model ID. Useful when the client is locked to a model name (e.g. Codex only calls gpt5.5) but you don't have that model."
+      "mappings": "Map the model ID requested by the client to a real model ID. Useful when the client is locked to a model name (e.g. Codex only calls gpt5.5) but you don't have that model.",
+      "lb": "When multiple providers offer the same model, configure load balancing: Round Robin (distribute requests) or Failover (try in order, auto-switch on failure)"
     },
     "button": {
       "start": "Start",
@@ -47,7 +49,9 @@
       "edit": "Edit",
       "enabled": "Enabled",
       "disabled": "Disabled",
-      "addMapping": "+ Add mapping"
+      "addMapping": "+ Add mapping",
+      "expand": "Expand",
+      "collapse": "Collapse"
     },
     "label": {
       "clickToCopy": "Click to copy",
@@ -67,7 +71,8 @@
       "providers": "No providers yet. Click \"+ Add\" to configure one.",
       "models": "Enable providers and configure available models to see them aggregated here.",
       "mappingsDisabled": "Enable to add model mapping rules.",
-      "mappingsRules": "No mapping rules. Click below to add one."
+      "mappingsRules": "No mapping rules. Click below to add one.",
+      "lb": "No load balancer groups. Click below to create one."
     },
     "toast": {
       "urlCopied": "Proxy address copied",
@@ -81,6 +86,20 @@
     },
     "confirm": {
       "deleteProfile": "Delete this provider?"
+    },
+    "lb": {
+      "roundRobin": "Round Robin",
+      "failover": "Failover",
+      "create": "+ Create Load Balancer Group",
+      "createGroup": "Create Load Balancer Group",
+      "editGroup": "Edit Load Balancer Group",
+      "name": "Name",
+      "namePlaceholder": "e.g. GPT-4o Dual Line",
+      "strategy": "Strategy",
+      "selectProfiles": "Select participating providers",
+      "nameRequired": "Please enter a name",
+      "minProfiles": "At least 2 providers are required",
+      "confirmDelete": "Delete this load balancer group?"
     }
   },
   "settings": {
@@ -246,12 +265,17 @@
       "openai-response": "OpenAI Responses",
       "anthropic-message": "Anthropic Messages",
       "openai-image": "OpenAI Image",
-      "newapi": "NEW API"
+      "newapi": "NEW API",
+      "google-gemini": "Google Gemini"
     }
   },
   "errors": {
-    "network": { "requestFailed": "Network request failed" },
-    "parse": { "jsonFailed": "JSON parse failed" },
+    "network": {
+      "requestFailed": "Network request failed"
+    },
+    "parse": {
+      "jsonFailed": "JSON parse failed"
+    },
     "upstream": {
       "requestFailed": "Request failed",
       "unauthorized": "Invalid API key or unauthorized ({status})",
@@ -264,13 +288,19 @@
       "unknown": "Unknown error ({status})",
       "unknownResponseFormat": "Unknown response format"
     },
-    "http": { "clientFailed": "Failed to create HTTP client" },
+    "http": {
+      "clientFailed": "Failed to create HTTP client"
+    },
     "update": {
       "requestFailed": "Update check failed",
       "githubError": "GitHub API error ({status})",
       "noVersionTag": "Could not fetch latest version"
     },
-    "settings": { "saveFailed": "Failed to save settings" },
-    "tray": { "setMenuFailed": "Failed to rebuild tray menu" }
+    "settings": {
+      "saveFailed": "Failed to save settings"
+    },
+    "tray": {
+      "setMenuFailed": "Failed to rebuild tray menu"
+    }
   }
 }

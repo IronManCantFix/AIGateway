@@ -29,6 +29,7 @@ let currentConfig = null // { profile: {...}, models: [...] }
 let logEnabled = false
 let initialized = false
 let startupKeepAlive = null
+const rrCounters = {} // groupId → counter (round-robin load balancing)
 const reasoningCache = new Map() // call_id → reasoning_content, for re-injection when clients strip non-standard fields
 const REASONING_CACHE_MAX = 500
 setReasoningCache(reasoningCache)
@@ -64,12 +65,13 @@ const PATH_TO_SOURCE = {
 const PROVIDER_META = {
   'openai-chat':        { target: 'chat_completions', path: '/v1/chat/completions' },
   'openai-response':    { target: 'responses',        path: '/v1/responses' },
-  'anthropic-message':  { target: 'messages',         path: '/v1/messages' },
+  'anthropic-message':  { target: 'messages',         path: '/v1/messages', authType: 'x-api-key' },
   'newapi':             { target: 'chat_completions', path: '/v1/chat/completions' },
   'openai-image':       { target: 'image',            paths: {
                             '/v1/images/generations': '/v1/images/generations',
                             '/v1/images/edits':       '/v1/images/edits'
-                          } }
+                          } },
+  'google-gemini':      { target: 'chat_completions', path: '/v1beta/openai/chat/completions', authType: 'x-goog-api-key' }
 }
 
 // --- Read request body ---
@@ -188,7 +190,7 @@ function createProxyAgent(proxyConfig, isHttps, profileId) {
   }
 }
 
-function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId, contentType) {
+function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId, contentType, onUpstreamResponse, authType) {
   const parsed = new URL(upstreamUrl)
   const isHttps = parsed.protocol === 'https:'
   const transport = isHttps ? https : http
@@ -207,15 +209,39 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     path: parsed.pathname + parsed.search,
     method: clientReq.method,
     agent,
-    headers: {
-      'Content-Type': effectiveContentType,
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Length': bodyBuf.length
-    }
+    headers: (() => {
+      // 透传客户端所有请求头，然后用代理自己的值覆盖需要控制的头
+      const h = {}
+      const skip = new Set(['host', 'connection', 'content-length', 'content-type', 'authorization', 'x-api-key', 'x-goog-api-key'])
+      for (const [k, v] of Object.entries(clientReq.headers)) {
+        if (!skip.has(k.toLowerCase())) h[k] = v
+      }
+      h['Content-Type'] = effectiveContentType
+      h['Content-Length'] = bodyBuf.length
+      // 认证头最后设置，确保不被客户端透传覆盖
+      if (authType === 'x-goog-api-key') { h['x-goog-api-key'] = apiKey; h['Api-Revision'] = '2026-05-20' }
+      else if (authType === 'x-api-key') h['x-api-key'] = apiKey
+      else h['Authorization'] = `Bearer ${apiKey}`
+      return h
+    })()
+  }
+
+  // DEBUG: 打印实际发给上游的请求头
+  if (logEnabled) {
+    const safeHeaders = { ...options.headers }
+    if (safeHeaders['x-api-key']) safeHeaders['x-api-key'] = safeHeaders['x-api-key'].slice(0, 10) + '...'
+    if (safeHeaders['Authorization']) safeHeaders['Authorization'] = safeHeaders['Authorization'].slice(0, 20) + '...'
+    console.error('[DEBUG] upstream headers:', JSON.stringify(safeHeaders))
   }
 
   const upstreamReq = transport.request(options, (upstreamRes) => {
     const isStreaming = upstreamRes.headers['content-type']?.includes('text/event-stream')
+
+    // Failover callback: if it returns false, don't write to client (allow retry)
+    if (onUpstreamResponse) {
+      const shouldContinue = onUpstreamResponse(upstreamRes)
+      if (!shouldContinue) return
+    }
 
     if (isStreaming && sseConverter) {
       // SSE streaming with conversion
@@ -608,6 +634,31 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
   upstreamReq.end()
 }
 
+// --- Load Balancer helpers ---
+
+function findLBGroupForModel(requestedModel, source) {
+  if (!requestedModel || !currentConfig?.loadBalancerGroups) return null
+  for (const group of currentConfig.loadBalancerGroups) {
+    if (!group.profileIds || group.profileIds.length === 0) continue
+    for (const pid of group.profileIds) {
+      const p = currentConfig.profiles.find(pr => pr.id === pid)
+      if (!p) continue
+      if (source === 'image' && p.providerType !== 'openai-image') continue
+      if (source !== 'image' && p.providerType === 'openai-image') continue
+      if (Array.isArray(p.models) && p.models.includes(requestedModel)) {
+        return group
+      }
+    }
+  }
+  return null
+}
+
+function selectRoundRobin(group) {
+  const idx = (rrCounters[group.id] || 0) % group.profileIds.length
+  rrCounters[group.id] = idx + 1
+  return group.profileIds[idx]
+}
+
 // --- Route: /v1/models ---
 
 function handleModels(_, res) {
@@ -703,14 +754,40 @@ async function handleApiRequest(req, res) {
   // Route by model: find the first profile whose models include body.model
   const requestedModel = body.model
   let profile = null
+  let lbGroup = null
 
   if (requestedModel) {
-    for (const p of currentConfig.profiles) {
-      if (source === 'image' && p.providerType !== 'openai-image') continue
-      if (source !== 'image' && p.providerType === 'openai-image') continue
-      if (Array.isArray(p.models) && p.models.length > 0 && p.models.includes(requestedModel)) {
+    // Check load balancer groups first
+    lbGroup = findLBGroupForModel(requestedModel, source)
+    if (lbGroup && lbGroup.strategy === 'round-robin') {
+      const selectedId = selectRoundRobin(lbGroup)
+      profile = currentConfig.profiles.find(p => p.id === selectedId)
+    } else if (lbGroup && lbGroup.strategy === 'failover') {
+      // Failover: try each profile in order until one succeeds
+      for (const pid of lbGroup.profileIds) {
+        const p = currentConfig.profiles.find(pr => pr.id === pid)
+        if (!p) continue
+        if (source === 'image' && p.providerType !== 'openai-image') continue
+        if (source !== 'image' && p.providerType === 'openai-image') continue
+        if (!Array.isArray(p.models) || !p.models.includes(requestedModel)) continue
         profile = p
         break
+      }
+      if (!profile) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: `AI 网关负载均衡组内无匹配模型: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
+        return
+      }
+    }
+    // Fallback: no LB group or LB didn't select a profile
+    if (!profile) {
+      for (const p of currentConfig.profiles) {
+        if (source === 'image' && p.providerType !== 'openai-image') continue
+        if (source !== 'image' && p.providerType === 'openai-image') continue
+        if (Array.isArray(p.models) && p.models.length > 0 && p.models.includes(requestedModel)) {
+          profile = p
+          break
+        }
       }
     }
     if (!profile) {
@@ -817,12 +894,94 @@ async function handleApiRequest(req, res) {
   }
   const responseBodyConverter = getResponseBodyConverter(source, meta.target)
 
+  // Failover: try providers in order, retry on HTTP error before data is sent
+  if (lbGroup && lbGroup.strategy === 'failover') {
+    const triedIds = new Set()
+    let currentProfile = profile
+    let lastError = null
 
+    for (let attempt = 0; attempt < lbGroup.profileIds.length; attempt++) {
+      const pid = currentProfile.id
+      triedIds.add(pid)
+
+      const curMeta = PROVIDER_META[currentProfile.providerType]
+      if (!curMeta) break
+
+      let curBody = { ...body }
+      if (!curBody.model && currentProfile.defaultModel) {
+        curBody.model = currentProfile.defaultModel
+      }
+      if (source !== 'image') {
+        const bc = getBodyConverter(source, curMeta.target)
+        if (bc) curBody = bc(curBody)
+        if (curBody.system && curMeta.target === 'chat_completions' && currentProfile.providerType !== 'newapi' && Array.isArray(curBody.messages)) {
+          curBody.messages.unshift({ role: 'system', content: curBody.system })
+          delete curBody.system
+        }
+      }
+
+      const curBaseUrl = currentProfile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
+      const curUpstreamPath = curMeta.path
+      const curUpstreamUrl = `${curBaseUrl}${curUpstreamPath}`
+      req._upstreamUrl = curUpstreamUrl
+      req._providerName = currentProfile.name
+
+      const curSseConverter = needStream ? createSSEConverter(source, curMeta.target) : null
+      const curResponseBodyConverter = getResponseBodyConverter(source, curMeta.target)
+
+      let failed = false
+      forwardRequest(req, res, curUpstreamUrl, currentProfile.apiKey, curBody,
+        curSseConverter, req._onResponseBody || null, curResponseBodyConverter,
+        source, currentProfile.id, null,
+        (upstreamRes) => {
+          if (upstreamRes.statusCode >= 400 && !res.headersSent) {
+            // HTTP error before any data written — try next provider
+            failed = true
+            lastError = upstreamRes.statusCode
+            // Drain the error response body
+            upstreamRes.resume()
+            return false // don't continue processing
+          }
+          return true // continue normally
+        },
+        curMeta.authType
+      )
+
+      if (!failed) return
+
+      // Find next profile in the group that we haven't tried
+      let nextProfile = null
+      for (const nextPid of lbGroup.profileIds) {
+        if (triedIds.has(nextPid)) continue
+        const np = currentConfig.profiles.find(p => p.id === nextPid)
+        if (!np) continue
+        if (source === 'image' && np.providerType !== 'openai-image') continue
+        if (source !== 'image' && np.providerType === 'openai-image') continue
+        if (!Array.isArray(np.models) || !np.models.includes(requestedModel)) continue
+        nextProfile = np
+        break
+      }
+      if (!nextProfile) break
+      currentProfile = nextProfile
+    }
+
+    // All providers failed
+    if (!res.headersSent) {
+      res.writeHead(lastError || 502, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Bad Gateway', message: 'All upstream providers in load balancer group failed' }))
+    }
+    return
+  }
+
+  // Normal forwarding (non-failover)
   forwardRequest(req, res, upstreamUrl, profile.apiKey, body, sseConverter,
     req._onResponseBody || null,
     responseBodyConverter,
     source,
-    profile.id
+    profile.id,
+    null,
+    null,
+    meta.authType
   )
 }
 
