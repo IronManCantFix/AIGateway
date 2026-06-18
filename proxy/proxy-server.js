@@ -71,7 +71,7 @@ const PROVIDER_META = {
                             '/v1/images/generations': '/v1/images/generations',
                             '/v1/images/edits':       '/v1/images/edits'
                           } },
-  'google-gemini':      { target: 'chat_completions', path: '/v1beta/openai/chat/completions', authType: 'x-goog-api-key' }
+  'google-gemini':      { target: 'chat_completions', path: '/v1beta/openai/chat/completions' }
 }
 
 // --- Read request body ---
@@ -219,7 +219,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
       h['Content-Type'] = effectiveContentType
       h['Content-Length'] = bodyBuf.length
       // 认证头最后设置，确保不被客户端透传覆盖
-      if (authType === 'x-goog-api-key') { h['x-goog-api-key'] = apiKey; h['Api-Revision'] = '2026-05-20' }
+      if (authType === 'x-goog-api-key') h['x-goog-api-key'] = apiKey
       else if (authType === 'x-api-key') h['x-api-key'] = apiKey
       else h['Authorization'] = `Bearer ${apiKey}`
       return h

@@ -303,7 +303,7 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
     let is_gemini = provider_type == "google-gemini";
 
     let url = if is_gemini {
-        format!("{}/v1beta/openai/models", base_url)
+        format!("{}/v1beta/models", base_url)
     } else {
         format!("{}/v1/models", base_url)
     };
@@ -365,7 +365,10 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
     } else if let Some(models) = body.get("models").and_then(|d| d.as_array()) {
         let models: Vec<String> = models.iter()
             .filter_map(|m| {
-                if let Some(id) = m.get("id").and_then(|v| v.as_str()) {
+                // Gemini native format: { "name": "models/gemini-pro", ... }
+                if let Some(name) = m.get("name").and_then(|v| v.as_str()) {
+                    Some(name.strip_prefix("models/").unwrap_or(name).to_string())
+                } else if let Some(id) = m.get("id").and_then(|v| v.as_str()) {
                     Some(id.to_string())
                 } else if m.is_string() {
                     m.as_str().map(|s| s.to_string())
