@@ -197,6 +197,7 @@ wire_api = "responses"
 | `openai-chat` | `/v1/chat/completions` | OpenAI、中转站、大多数兼容 API |
 | `openai-response` | `/v1/responses` | OpenAI Responses API |
 | `anthropic-message` | `/v1/messages` | Anthropic Claude API |
+| `google-gemini` | `/v1beta/openai/chat/completions` | Google Gemini API（OpenAI 兼容模式） |
 
 ## 🔧 协议转换矩阵
 
@@ -222,6 +223,7 @@ SSE 流式响应也会实时转换。
 | DeepSeek | DeepSeek V4 Pro, DeepSeek V4 Flash | `openai-chat` | ✅ |
 | GPT | gpt-5.4, gpt-5.4-mini, gpt-5.5 | `openai-chat` | ✅ |
 | Claude | claude-opus-4-7, claude-sonnet-4-6, claude-opus-4-6 | `anthropic-message` | ✅ |
+| Gemini | gemini-3.1-flash, gemini-3.1-flash-lite, gemini-3.1-pro | `google-gemini` | ✅ |
 
 > 以上模型均通过代理的协议转换测试（如 OpenAI 格式客户端调用 Anthropic 格式提供商等）。
 
@@ -240,11 +242,13 @@ SSE 流式响应也会实时转换。
 | Cherry Studio | GLM       | `openai-chat、Anthropic` | ✅ |
 | Cherry Studio | GPT       | `openai-chat、Anthropic` | ✅ |
 | Cherry Studio | Claude    | `openai-chat、Anthropic` | ✅ |
+| Cherry Studio | Gemini    | `openai-chat、Anthropic` | ✅ |
 | Claude App    | GLM       | `Anthropic` | ✅ |
 | Claude App    | MiMo      | `Anthropic` | ✅ |
 | Claude App    | DeepSeek  | `Anthropic` | ✅ |
 | Claude App    | MiniMax   | `Anthropic` | ✅ |
 | Claude App    | GPT       | `Anthropic` | ✅ |
+| Claude App    | Gemini    | `Anthropic` | ✅ |
 
 目前基本上都是使用流式请求进行测试，有bug可以反馈。
 

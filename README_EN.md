@@ -197,6 +197,7 @@ Requests through the proxy show a blue `PROXY` badge in logs, making it easy to 
 | `openai-chat` | `/v1/chat/completions` | OpenAI, relays, most compatible APIs |
 | `openai-response` | `/v1/responses` | OpenAI Responses API |
 | `anthropic-message` | `/v1/messages` | Anthropic Claude API |
+| `google-gemini` | `/v1beta/openai/chat/completions` | Google Gemini API (OpenAI-compatible mode) |
 
 ## 🔧 Protocol Conversion Matrix
 
@@ -222,6 +223,7 @@ SSE streaming responses are also converted in real-time.
 | DeepSeek | DeepSeek V4 Pro, DeepSeek V4 Flash | `openai-chat` | ✅ |
 | GPT | gpt-5.4, gpt-5.4-mini, gpt-5.5 | `openai-chat` | ✅ |
 | Claude | claude-opus-4-7, claude-sonnet-4-6, claude-opus-4-6 | `anthropic-message` | ✅ |
+| Gemini | gemini-3.1-flash, gemini-3.1-flash-lite, gemini-3.1-pro | `google-gemini` | ✅ |
 
 > All models above have been tested with cross-protocol conversion (e.g., OpenAI-format clients calling Anthropic-format providers).
 
@@ -240,11 +242,13 @@ SSE streaming responses are also converted in real-time.
 | Cherry Studio | GLM | `openai-chat, Anthropic` | ✅ |
 | Cherry Studio | GPT | `openai-chat, Anthropic` | ✅ |
 | Cherry Studio | Claude | `openai-chat, Anthropic` | ✅ |
+| Cherry Studio | Gemini | `openai-chat, Anthropic` | ✅ |
 | Claude App | GLM | `Anthropic` | ✅ |
 | Claude App | MiMo | `Anthropic` | ✅ |
 | Claude App | DeepSeek | `Anthropic` | ✅ |
 | Claude App | MiniMax | `Anthropic` | ✅ |
 | Claude App | GPT | `Anthropic` | ✅ |
+| Claude App | Gemini | `Anthropic` | ✅ |
 
 Streaming requests are the primary testing focus. Feel free to report bugs.
 
