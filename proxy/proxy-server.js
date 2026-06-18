@@ -4,6 +4,7 @@
 
 import http from 'http'
 import https from 'https'
+import zlib from 'zlib'
 import { URL } from 'url'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
@@ -226,14 +227,6 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     })()
   }
 
-  // DEBUG: 打印实际发给上游的请求头
-  if (logEnabled) {
-    const safeHeaders = { ...options.headers }
-    if (safeHeaders['x-api-key']) safeHeaders['x-api-key'] = safeHeaders['x-api-key'].slice(0, 10) + '...'
-    if (safeHeaders['Authorization']) safeHeaders['Authorization'] = safeHeaders['Authorization'].slice(0, 20) + '...'
-    console.error('[DEBUG] upstream headers:', JSON.stringify(safeHeaders))
-  }
-
   const upstreamReq = transport.request(options, (upstreamRes) => {
     const isStreaming = upstreamRes.headers['content-type']?.includes('text/event-stream')
 
@@ -241,6 +234,20 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     if (onUpstreamResponse) {
       const shouldContinue = onUpstreamResponse(upstreamRes)
       if (!shouldContinue) return
+    }
+
+    // Decompress upstream response if content-encoded (gzip/deflate/br)
+    const encoding = upstreamRes.headers['content-encoding']
+    const decompressor = encoding === 'gzip' ? zlib.createGunzip()
+      : encoding === 'deflate' ? zlib.createInflate()
+      : encoding === 'br' ? zlib.createBrotliDecompress()
+      : null
+    if (decompressor) {
+      upstreamRes.pipe(decompressor)
+      upstreamRes.on('error', (e) => decompressor.destroy(e))
+      decompressor.headers = upstreamRes.headers
+      decompressor.statusCode = upstreamRes.statusCode
+      upstreamRes = decompressor
     }
 
     if (isStreaming && sseConverter) {
@@ -269,17 +276,17 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
       upstreamRes.on('error', cleanup)
 
-      let buffer = ''
-      let rawBuffer = ''
+      let buffer = Buffer.alloc(0)
+      let rawBuffer = Buffer.alloc(0)
       let lineCount = 0
       let convertedCount = 0
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        const chunkStr = chunk.toString()
-        rawBuffer += chunkStr
-        buffer += chunkStr
-        const lines = buffer.split(/\r?\n/)
-        buffer = lines.pop() || ''
+        rawBuffer = Buffer.concat([rawBuffer, chunk])
+        buffer = Buffer.concat([buffer, chunk])
+        const str = buffer.toString('utf8')
+        const lines = str.split(/\r?\n/)
+        buffer = Buffer.from(lines.pop() || '', 'utf8')
 
         for (const line of lines) {
           lineCount++
@@ -295,9 +302,12 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         if (closed) return
         closed = true
         clearInterval(keepAlive)
-        if (buffer.trim()) {
-          const result = sseConverter(buffer)
-          if (result) clientRes.write(result)
+        if (buffer.length > 0) {
+          const str = buffer.toString('utf8')
+          if (str.trim()) {
+            const result = sseConverter(str)
+            if (result) clientRes.write(result)
+          }
         }
         // 上游连接断开但未发送 [DONE] 时，补发 response.completed 等收尾事件
         if (sseConverter.flush) {
@@ -306,7 +316,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         }
         // Stream ended
         clientRes.end()
-        if (onResponseBody) onResponseBody(rawBuffer || null)
+        if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
       })
     } else if (isStreaming) {
       // SSE streaming without conversion — pipe through immediately
@@ -334,17 +344,17 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
       upstreamRes.on('error', cleanup)
 
-      let rawBuffer = ''
+      let rawBuffer = Buffer.alloc(0)
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        rawBuffer += chunk.toString()
+        rawBuffer = Buffer.concat([rawBuffer, chunk])
         clientRes.write(chunk)
       })
       upstreamRes.on('end', () => {
         if (closed) return
         closed = true
         clearInterval(keepAlive)
-        if (onResponseBody) onResponseBody(rawBuffer || null)
+        if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
         clientRes.end()
       })
     } else if (sseConverter) {

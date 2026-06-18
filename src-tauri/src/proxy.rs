@@ -13,7 +13,7 @@ use tauri::tray::TrayIcon;
 use crate::config::{ConfigStore, LogEntry};
 
 fn set_tray_icon(tray: &TrayIcon, running: bool) {
-    let bytes = if running {
+    let bytes: &[u8] = if running {
         include_bytes!("../icons/icon-running.png")
     } else {
         include_bytes!("../icons/icon-stopped.png")

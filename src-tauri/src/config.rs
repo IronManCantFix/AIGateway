@@ -87,6 +87,27 @@ impl Default for ModelMappings {
     }
 }
 
+// --- Load Balancer ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadBalancerGroup {
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    #[serde(default = "default_lb_strategy")]
+    pub strategy: String,
+    #[serde(rename = "profileIds", default)]
+    pub profile_ids: Vec<String>,
+}
+
+fn default_lb_strategy() -> String { "round-robin".to_string() }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LoadBalancerConfig {
+    #[serde(default)]
+    pub groups: Vec<LoadBalancerGroup>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     pub timestamp: u64,
@@ -380,6 +401,50 @@ impl ConfigStore {
         self.write_json("model-mappings.json", mappings)
     }
 
+    // --- Load Balancer Groups ---
+
+    pub fn get_lb_groups(&self) -> Vec<LoadBalancerGroup> {
+        let config: LoadBalancerConfig = self.read_json("load-balancer.json");
+        config.groups
+    }
+
+    fn save_lb_groups(&self, groups: &[LoadBalancerGroup]) -> Result<(), String> {
+        let config = LoadBalancerConfig { groups: groups.to_vec() };
+        self.write_json("load-balancer.json", &config)
+    }
+
+    pub fn add_lb_group(&self, mut group: LoadBalancerGroup) -> Result<LoadBalancerGroup, String> {
+        if group.id.is_empty() {
+            group.id = uuid::Uuid::new_v4().to_string();
+        }
+        let mut groups = self.get_lb_groups();
+        groups.push(group.clone());
+        self.save_lb_groups(&groups)?;
+        Ok(group)
+    }
+
+    pub fn update_lb_group(&self, id: &str, updates: serde_json::Value) -> Result<LoadBalancerGroup, String> {
+        let mut groups = self.get_lb_groups();
+        let idx = groups.iter().position(|g| g.id == id)
+            .ok_or_else(|| "Load balancer group not found".to_string())?;
+        let mut group_json = serde_json::to_value(&groups[idx]).map_err(|e| e.to_string())?;
+        if let (Some(obj), Some(upd)) = (group_json.as_object_mut(), updates.as_object()) {
+            for (k, v) in upd {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+        let updated: LoadBalancerGroup = serde_json::from_value(group_json).map_err(|e| e.to_string())?;
+        groups[idx] = updated.clone();
+        self.save_lb_groups(&groups)?;
+        Ok(updated)
+    }
+
+    pub fn delete_lb_group(&self, id: &str) -> Result<(), String> {
+        let mut groups = self.get_lb_groups();
+        groups.retain(|g| g.id != id);
+        self.save_lb_groups(&groups)
+    }
+
     // --- Log Enabled ---
 
     pub fn get_log_enabled(&self) -> bool {
@@ -638,6 +703,7 @@ impl ConfigStore {
         let models = self.get_models();
         let model_mappings = self.get_model_mappings();
         let log_enabled = self.get_log_enabled();
+        let lb_groups = self.get_lb_groups();
 
         serde_json::json!({
             "profiles": active_profiles,
@@ -648,6 +714,7 @@ impl ConfigStore {
             },
             "models": models,
             "modelMappings": model_mappings,
+            "loadBalancerGroups": lb_groups,
         })
     }
 }
