@@ -5,6 +5,7 @@
 import http from 'http'
 import https from 'https'
 import zlib from 'zlib'
+import { StringDecoder } from 'string_decoder'
 import { URL } from 'url'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
@@ -161,6 +162,27 @@ function flattenBodyMessages(body) {
   return { ...body, messages: flattened }
 }
 
+// --- Gemini thought_signature injection ---
+// Gemini 3.x requires thought_signature on functionCall parts in conversation
+// history. When acting as a protocol gateway the original signatures are lost,
+// so we inject the official dummy value that bypasses validation.
+
+const GEMINI_DUMMY_THOUGHT_SIG = 'skip_thought_signature_validator'
+
+function injectGeminiThoughtSignatures(messages) {
+  if (!Array.isArray(messages)) return
+  for (const msg of messages) {
+    if (msg.role !== 'assistant' || !Array.isArray(msg.tool_calls)) continue
+    for (const tc of msg.tool_calls) {
+      // Only inject if no thought_signature already present
+      if (tc.extra_content?.google?.thought_signature) continue
+      if (!tc.extra_content) tc.extra_content = {}
+      if (!tc.extra_content.google) tc.extra_content.google = {}
+      tc.extra_content.google.thought_signature = GEMINI_DUMMY_THOUGHT_SIG
+    }
+  }
+}
+
 // --- Forward request to upstream ---
 
 function createProxyAgent(proxyConfig, isHttps, profileId) {
@@ -276,17 +298,19 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
       upstreamRes.on('error', cleanup)
 
-      let buffer = Buffer.alloc(0)
+      const decoder = new StringDecoder('utf8')
+      let lineBuffer = ''
       let rawBuffer = Buffer.alloc(0)
       let lineCount = 0
       let convertedCount = 0
       upstreamRes.on('data', (chunk) => {
         if (closed) return
         rawBuffer = Buffer.concat([rawBuffer, chunk])
-        buffer = Buffer.concat([buffer, chunk])
-        const str = buffer.toString('utf8')
-        const lines = str.split(/\r?\n/)
-        buffer = Buffer.from(lines.pop() || '', 'utf8')
+        // StringDecoder 会正确处理多字节 UTF-8 字符在 chunk 边界被截断的情况，
+        // 不完整的字节会被缓存到下一个 chunk 一起解码，避免中文乱码。
+        lineBuffer += decoder.write(chunk)
+        const lines = lineBuffer.split(/\r?\n/)
+        lineBuffer = lines.pop() || ''
 
         for (const line of lines) {
           lineCount++
@@ -302,12 +326,11 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         if (closed) return
         closed = true
         clearInterval(keepAlive)
-        if (buffer.length > 0) {
-          const str = buffer.toString('utf8')
-          if (str.trim()) {
-            const result = sseConverter(str)
-            if (result) clientRes.write(result)
-          }
+        // 刷出 StringDecoder 中可能缓存的最后几个字节
+        const remaining = lineBuffer + decoder.end()
+        if (remaining.trim()) {
+          const result = sseConverter(remaining)
+          if (result) clientRes.write(result)
         }
         // 上游连接断开但未发送 [DONE] 时，补发 response.completed 等收尾事件
         if (sseConverter.flush) {
@@ -860,6 +883,15 @@ async function handleApiRequest(req, res) {
     delete body.system
   }
 
+  // Gemini 3.x models require thought_signature on functionCall parts in
+  // conversation history. When protocol conversion strips these (e.g.
+  // Anthropic Messages → Chat Completions), we inject the official dummy
+  // value "skip_thought_signature_validator" so the request is accepted.
+  // See: https://ai.google.dev/gemini-api/docs/thought-signatures
+  if (profile.providerType === 'google-gemini' && Array.isArray(body.messages)) {
+    injectGeminiThoughtSignatures(body.messages)
+  }
+
   const baseUrl = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
   let upstreamPath
   if (source === 'image') {
@@ -927,6 +959,10 @@ async function handleApiRequest(req, res) {
         if (curBody.system && curMeta.target === 'chat_completions' && currentProfile.providerType !== 'newapi' && Array.isArray(curBody.messages)) {
           curBody.messages.unshift({ role: 'system', content: curBody.system })
           delete curBody.system
+        }
+        // Inject Gemini thought_signature in failover path too
+        if (currentProfile.providerType === 'google-gemini' && Array.isArray(curBody.messages)) {
+          injectGeminiThoughtSignatures(curBody.messages)
         }
       }
 

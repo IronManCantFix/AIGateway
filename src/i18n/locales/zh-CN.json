@@ -17,7 +17,9 @@
   },
   "nav": {
     "gateway": "网关",
-    "settings": "设置"
+    "settings": "设置",
+    "stats": "统计",
+    "logs": "日志"
   },
   "theme": {
     "dark": "深色",

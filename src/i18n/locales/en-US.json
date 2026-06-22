@@ -17,7 +17,9 @@
   },
   "nav": {
     "gateway": "Gateway",
-    "settings": "Settings"
+    "settings": "Settings",
+    "stats": "Statistics",
+    "logs": "Logs"
   },
   "theme": {
     "dark": "Dark",

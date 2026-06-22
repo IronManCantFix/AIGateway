@@ -5,6 +5,8 @@ import { api } from './api.js'
 import Home from './pages/Home/index.vue'
 import ProfileEdit from './pages/ProfileEdit/index.vue'
 import Settings from './pages/Settings/index.vue'
+import Stats from './pages/Stats/index.vue'
+import Logs from './pages/Logs/index.vue'
 import { theme, themeSetting, setThemeSetting, cycleTheme } from './theme.js'
 import iconUrl from './assets/icon.png'
 
@@ -79,6 +81,16 @@ onMounted(async () => {
         :class="{ active: route === 'gw-set' }"
         @click="navigate('gw-set')"
       >{{ $t('nav.settings') }}</button>
+      <button
+        class="topbar-tab"
+        :class="{ active: route === 'gw-stats' }"
+        @click="navigate('gw-stats')"
+      >{{ $t('nav.stats') }}</button>
+      <button
+        class="topbar-tab"
+        :class="{ active: route === 'gw-logs' }"
+        @click="navigate('gw-logs')"
+      >{{ $t('nav.logs') }}</button>
     </div>
     <div class="topbar-right">
       <button class="topbar-icon-btn" @click="cycleTheme" :title="theme === 'dark' ? $t('theme.light') : $t('theme.dark')">
@@ -91,6 +103,8 @@ onMounted(async () => {
   <!-- Page Content (same structure as before, with top padding for fixed topbar) -->
   <Home v-if="route === 'gateway'" />
   <ProfileEdit v-else-if="route === 'gw-add'" />
+  <Stats v-else-if="route === 'gw-stats'" />
+  <Logs v-else-if="route === 'gw-logs'" />
   <Settings v-else-if="route === 'gw-set'" />
 
   <!-- Boot Toast -->
