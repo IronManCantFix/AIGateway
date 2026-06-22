@@ -21,7 +21,7 @@ const logEnabled = ref(false)
 const languageSetting = ref('auto')
 const saved = ref(false)
 const portChecking = ref(false)
-const portConflict = ref(null) // { pid, processName } or null
+const portConflict = ref(null)
 
 const httpProxyEnabled = ref(false)
 const httpProxyUrl = ref('')
@@ -30,24 +30,11 @@ const httpProxyPassword = ref('')
 const httpProxyExcludeProfiles = ref([])
 const showProxyAuth = ref(false)
 
-// 提供商列表
 const profiles = ref([])
 
-const stats = ref(null)
-const logs = ref([])
-const statsLoading = ref(false)
-const logsLoading = ref(false)
-const logsLoaded = ref(false)
-const logFileSize = ref(0)
-const trendTab = ref('year')
-const statsTab = ref('provider')
-const heatMode = ref('requests')  // 'requests' | 'tokens'
-const logSearch = ref({ provider: '', model: '', statusCode: '', dateFrom: '', dateTo: '' })
-const logPage = ref(1)
-const logPageSize = ref(5)
-const trendHover = ref(null) // { x, y, date, count, tokens }
+let copyTimer = 0
+const copyMsg = ref('')
 
-// Custom confirm dialog (window.confirm doesn't work reliably in Tauri WebView)
 const confirmState = ref({ visible: false, message: '', resolve: null })
 function showConfirm(message) {
   return new Promise(resolve => {
@@ -64,7 +51,6 @@ async function loadSettings() {
   logEnabled.value = await api.getLogEnabled()
   languageSetting.value = s.language || 'auto'
 
-  // 加载代理配置
   if (s.httpProxy) {
     httpProxyEnabled.value = s.httpProxy.enabled || false
     httpProxyUrl.value = s.httpProxy.url || ''
@@ -73,6 +59,7 @@ async function loadSettings() {
     httpProxyExcludeProfiles.value = s.httpProxy.excludeProfiles || []
   }
 }
+
 async function loadProfiles() {
   profiles.value = await api.getProfiles()
 }
@@ -98,7 +85,10 @@ async function saveSettings() {
 async function saveProxySettings() {
   await saveSettings()
 }
-async function toggleLogging() { await api.setLogEnabled(logEnabled.value) }
+
+async function toggleLogging() {
+  await api.setLogEnabled(logEnabled.value)
+}
 
 async function checkPortConflict() {
   const n = parseInt(port.value, 10)
@@ -125,7 +115,6 @@ async function killPortProcess() {
   }
   try {
     await api.killProcess(portConflict.value.pid)
-    // Verify port is now free
     const n = parseInt(port.value, 10)
     const result = await api.checkPort(n)
     if (result.available) {
@@ -160,9 +149,7 @@ async function onLanguageChange() {
   const userChoice = languageSetting.value
   const resolved = resolveLocale(userChoice)
   try {
-    // Apply resolved locale: switches UI + rebuilds Rust tray + persists settings.language=resolved
     await setLocale(resolved, { persist: true })
-    // If user picked "auto", restore settings.language="auto" so future restarts re-detect system locale.
     if (userChoice === 'auto') {
       const current = await api.getSettings()
       await api.setSettings({ ...current, language: 'auto' })
@@ -177,271 +164,6 @@ async function onLanguageChange() {
     copyTimer = setTimeout(() => { copyMsg.value = '' }, 2500)
   }
 }
-async function loadStats() {
-  statsLoading.value = true
-  try {
-    const nextStats = await api.getStats()
-    stats.value = nextStats
-  } finally {
-    statsLoading.value = false
-  }
-}
-const logTotal = ref(0)
-
-function buildLogFilter() {
-  const s = logSearch.value
-  const filter = {}
-  if (s.provider) filter.provider = s.provider
-  if (s.model) filter.model = s.model
-  if (s.statusCode) filter.statusClass = s.statusCode
-  if (s.dateFrom) filter.dateFrom = new Date(s.dateFrom).getTime()
-  if (s.dateTo) filter.dateTo = new Date(s.dateTo).getTime() + 86400000
-  return Object.keys(filter).length ? filter : null
-}
-
-async function loadLogs() {
-  logsLoading.value = true
-  try {
-    const limit = logPageSize.value
-    const offset = (logPage.value - 1) * limit
-    const [page, size] = await Promise.all([
-      api.getLogs(limit, offset, buildLogFilter()),
-      api.getLogFileSize()
-    ])
-    const list = page?.logs || []
-    list.forEach((l, i) => { if (!l._id) l._id = l.timestamp + '_' + i })
-    logs.value = list
-    logTotal.value = page?.total || 0
-    logFileSize.value = size || 0
-    logsLoaded.value = true
-  } finally {
-    logsLoading.value = false
-  }
-}
-async function clearLogs() {
-  if (!await showConfirm(t('settings.confirm.clearLogs'))) return
-  await api.clearLogs(); logs.value = []; logTotal.value = 0; logPage.value = 1; logsLoaded.value = false; logFileSize.value = 0; await loadStats()
-}
-async function clearAllData() {
-  if (!await showConfirm(t('settings.confirm.clearStats'))) return
-  await api.clearAggregatedStats(); stats.value = null; await loadStats()
-}
-async function clearLogsBodyData() {
-  if (!await showConfirm(t('settings.confirm.clearBodies'))) return
-  await api.clearLogsBodies(); await loadLogs()
-}
-function statusLabel(c) {
-  if (c >= 200 && c < 300) return 'success'
-  if (c >= 400 && c < 500) return 'warn'
-  return 'error'
-}
-function endpointLabel(ep) {
-  const m = { '/v1/chat/completions':'Chat','/v1/responses':'Responses','/v1/messages':'Messages','/v1/models':'Models' }
-  return m[ep] || ep
-}
-function shortUrl(url) {
-  if (!url) return ''
-  try {
-    const u = new URL(url)
-    return u.hostname + u.pathname
-  } catch { return url }
-}
-function fmtTime(ts) {
-  const d = new Date(ts)
-  const hh = String(d.getHours()).padStart(2, '0')
-  const mm = String(d.getMinutes()).padStart(2, '0')
-  const ss = String(d.getSeconds()).padStart(2, '0')
-  const MM = String(d.getMonth() + 1).padStart(2, '0')
-  const DD = String(d.getDate()).padStart(2, '0')
-  return `${MM}-${DD} ${hh}:${mm}:${ss}`
-}
-function fmtTok(n) {
-  if (n == null) return '—'
-  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'K'
-  return String(n)
-}
-
-const CHART_W=400; const CHART_H=200; const PAD_L=36; const PAD_R=32; const PAD_T=16; const PAD_B=36
-function fmtLocal(ts) {
-  const d = new Date(ts)
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
-}
-const DAY_MS=86400000
-// Heatmap colors now use CSS variables for theme support
-function getHeatColors(mode) {
-  const style = getComputedStyle(document.documentElement)
-  if (mode === 'tokens') {
-    return [style.getPropertyValue('--heat-tok-0'), style.getPropertyValue('--heat-tok-1'), style.getPropertyValue('--heat-tok-2'), style.getPropertyValue('--heat-tok-3'), style.getPropertyValue('--heat-tok-4')]
-  }
-  return [style.getPropertyValue('--heat-req-0'), style.getPropertyValue('--heat-req-1'), style.getPropertyValue('--heat-req-2'), style.getPropertyValue('--heat-req-3'), style.getPropertyValue('--heat-req-4')]
-}
-const heatHover = ref(null) // { date, count, mode, left, top }
-
-const heatmapData = computed(() => {
-  if (!stats.value||!stats.value.yearMap) return { columns:[], months:[] }
-  const isToken = heatMode.value === 'tokens'
-  const ym = isToken ? (stats.value.yearMapTokens || {}) : stats.value.yearMap
-  const now=new Date()
-  const today=new Date(now.getFullYear(),now.getMonth(),now.getDate())
-  const start=new Date(today.getTime()-365*DAY_MS)
-  const startDow=start.getDay()||7
-  start.setDate(start.getDate()-(startDow-1))
-  const end=new Date(today.getTime())
-
-  const maxCount=Math.max(1,...Object.values(ym))
-  const colors=getHeatColors(isToken?'tokens':'requests')
-  const allDays=[]
-  for (let d=new Date(start);d<=end;d.setDate(d.getDate()+1)) {
-    const ds=fmtLocal(d.getTime()); const cnt=ym[ds]||0
-    const lv=cnt===0?0:Math.min(4,Math.ceil((cnt/maxCount)*4))
-    allDays.push({date:ds,count:cnt,color:colors[lv],level:lv})
-  }
-
-  const columns=[]
-  for (let i=0;i<allDays.length;i+=7) {
-    columns.push(allDays.slice(i,i+7))
-  }
-
-  const months=[]; const mn=t('settings.chart.monthsShort').split(',')
-  let lm=-1
-  for (let c=0;c<columns.length;c++) {
-    const m=parseInt(columns[c][0].date.slice(5,7),10)-1
-    if (m!==lm){ months.push({col:c,label:mn[m]}); lm=m }
-  }
-  return {columns,months}
-})
-
-const weekdayLabels = computed(() => t('settings.chart.weekdaysShort').split(','))
-
-const BOTTOM_Y = CHART_H - PAD_B
-function smoothPath(pts) {
-  if (pts.length < 2) { const p=pts[0]||{x:0,y:0}; return `M${p.x},${p.y}` }
-  const clampY = y => Math.min(Math.max(y, PAD_T), BOTTOM_Y)
-  let d=''
-  for (let i=0; i<pts.length-1; i++) {
-    const p0=pts[i===0?0:i-1], p1=pts[i], p2=pts[i+1], p3=pts[i+2]||p2
-    const cp1x=p1.x+(p2.x-p0.x)/6, cp1y=clampY(p1.y+(p2.y-p0.y)/6)
-    const cp2x=p2.x-(p3.x-p1.x)/6, cp2y=clampY(p2.y-(p3.y-p1.y)/6)
-    d+= i===0?`M${p1.x},${p1.y} C${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`:`S${cp2x},${cp2y} ${p2.x},${p2.y}`
-  }
-  return d
-}
-
-function niceMax(v) {
-  if (v <= 0) return 1
-  const mag = Math.pow(10, Math.floor(Math.log10(v)))
-  const norm = v / mag
-  if (norm <= 1) return mag
-  if (norm <= 2) return 2 * mag
-  if (norm <= 5) return 5 * mag
-  return 10 * mag
-}
-
-const trendData = computed(() => {
-  if (!stats.value||!stats.value.trend.length) return {reqPath:'',reqFill:'',tokPath:'',tokFill:'',circles:[],tokCircles:[],maxCount:1,maxTokens:1,total:0,totalTokens:0,yTicks:[],yTicksTok:[]}
-  const d=stats.value.trend
-  const rawMc=Math.max(...d.map(x=>x.count),1)
-  const rawMt=Math.max(...d.map(x=>x.tokens),1)
-  const mc=niceMax(rawMc)
-  const mt=niceMax(rawMt)
-  const w=CHART_W-PAD_L-PAD_R; const h=CHART_H-PAD_T-PAD_B
-  const total=d.reduce((s,x)=>s+x.count,0)
-  const totalTokens=d.reduce((s,x)=>s+x.tokens,0)
-
-  // 请求次数线
-  const reqPts=d.map((x,i)=>({
-    x:PAD_L+(i/Math.max(d.length-1,1))*w,
-    y:PAD_T+h-(x.count/mc)*h,
-    count:x.count,tokens:x.tokens,date:x.date
-  }))
-  const reqPath=smoothPath(reqPts)
-  const reqFill=reqPath+` L${reqPts[reqPts.length-1].x},${CHART_H-PAD_B} L${reqPts[0].x},${CHART_H-PAD_B} Z`
-
-  // Token 线
-  const tokPts=d.map((x,i)=>({
-    x:PAD_L+(i/Math.max(d.length-1,1))*w,
-    y:PAD_T+h-(x.tokens/mt)*h,
-    count:x.count,tokens:x.tokens,date:x.date
-  }))
-  const tokPath=smoothPath(tokPts)
-  const tokFill=tokPath+` L${tokPts[tokPts.length-1].x},${CHART_H-PAD_B} L${tokPts[0].x},${CHART_H-PAD_B} Z`
-
-  const yTicks=[0,Math.round(mc/2),mc]
-  const yTicksTok=[0,Math.round(mt/2),mt]
-  return {reqPath,reqFill,tokPath,tokFill,circles:reqPts,tokCircles:tokPts,maxCount:mc,maxTokens:mt,total,totalTokens,yTicks,yTicksTok}
-})
-
-const logTotalPages = computed(() => {
-  const size = logPageSize.value || 5
-  return Math.max(1, Math.ceil(logTotal.value / size))
-})
-
-const hasActiveLogFilter = computed(() => {
-  const s = logSearch.value
-  return !!(s.provider || s.model || s.statusCode || s.dateFrom || s.dateTo)
-})
-
-const logHasNextPage = computed(() => logPage.value < logTotalPages.value)
-
-const logProviderOptions = computed(() => [...new Set(profiles.value.map(p => p.name).filter(Boolean))])
-const logModelOptions = computed(() => {
-  const selectedProvider = logSearch.value.provider
-  const source = selectedProvider
-    ? profiles.value.filter(p => p.name === selectedProvider)
-    : profiles.value
-  return [...new Set(source.flatMap(p => p.models || []).filter(Boolean))]
-})
-
-// 切换提供商时，若当前选中的模型已不在新的可选范围内，清空它
-watch(() => logSearch.value.provider, () => {
-  if (logSearch.value.model && !logModelOptions.value.includes(logSearch.value.model)) {
-    logSearch.value.model = ''
-  }
-})
-
-const providerTokenMap = computed(() => {
-  if (!stats.value || !stats.value.byProviderTokens) return {}
-  const m = {}
-  for (const t of stats.value.byProviderTokens) m[t.provider] = t.total
-  return m
-})
-
-let copyTimer = 0
-const copyMsg = ref('')
-async function copyText(text, label) {
-  await api.copyText(text)
-  copyMsg.value = t('common.copySuccess', { label })
-  clearTimeout(copyTimer)
-  copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
-}
-
-function resetLogPage() {
-  logPage.value = 1
-  loadLogs().catch(e => console.error('Load logs failed:', e))
-}
-function prevPage() {
-  if (logPage.value > 1) {
-    logPage.value -= 1
-    loadLogs().catch(e => console.error('Load logs failed:', e))
-  }
-}
-function nextPage() {
-  if (logHasNextPage.value) {
-    logPage.value += 1
-    loadLogs().catch(e => console.error('Load logs failed:', e))
-  }
-}
-
-watch(statsTab, (tab) => {
-  if (tab === 'logs' && !logsLoaded.value && !logsLoading.value) {
-    loadLogs().catch(e => console.error('Load logs failed:', e))
-  } else if (tab === 'logs') {
-    api.getLogFileSize()
-      .then(size => { logFileSize.value = size || 0 })
-      .catch(e => console.error('Load log file size failed:', e))
-  }
-})
 
 const updateInfo = ref(null)
 const checkingUpdate = ref(false)
@@ -469,20 +191,9 @@ function openDownloadPage() {
     openUrl(updateInfo.value.download_url).catch(e => console.error('openUrl failed:', e))
   }
 }
+
 function openGithub() {
   openUrl('https://github.com/IronManCantFix/AIGateway').catch(e => console.error('openUrl failed:', e))
-}
-
-function fmtSize(bytes) {
-  if (!bytes) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let n = bytes
-  let i = 0
-  while (n >= 1024 && i < units.length - 1) {
-    n /= 1024
-    i++
-  }
-  return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${units[i]}`
 }
 
 onMounted(async () => {
@@ -493,13 +204,6 @@ onMounted(async () => {
   ])
   currentVersion.value = version
 
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      loadStats().catch(e => console.error('Load stats failed:', e))
-    }, 80)
-  })
-
-  // 监听托盘菜单的代理设置变化
   unlistenProxySettings = await listen('proxy-settings-changed', async () => {
     await loadSettings()
   })
@@ -605,7 +309,7 @@ onUnmounted(() => {
             <div class="exclude-list">
               <label v-for="p in profiles" :key="p.id" class="check-field exclude-item">
                 <input type="checkbox"
-                  :value="p.id"
+                  :value="p.name"
                   v-model="httpProxyExcludeProfiles"
                   @change="saveProxySettings" />
                 <span>{{ p.name }}</span>
@@ -634,312 +338,6 @@ onUnmounted(() => {
         </label>
       </div>
     </div>
-
-    <div class="card" v-if="statsLoading && !stats">
-      <div class="card-body stats-loading">{{ $t('settings.label.statsLoading') }}</div>
-    </div>
-
-    <template v-if="stats">
-      <!-- 总览 -->
-      <div class="card">
-        <div class="card-header">
-          <h3>{{ $t('settings.section.statsOverview') }}</h3>
-          <div class="header-actions">
-            <button class="refresh-btn" @click="loadStats">{{ $t('settings.button.refresh') }}</button>
-            <button class="clear-btn danger" @click="clearAllData">{{ $t('settings.button.clearStats') }}</button>
-          </div>
-        </div>
-        <div class="card-body overview-body">
-          <div class="overview-stats">
-            <div class="overview-stat">
-              <div class="stat-number">{{ stats.totalRequests.toLocaleString() }}</div>
-              <div class="stat-desc">{{ $t('settings.label.totalRequests') }}</div>
-            </div>
-            <div class="overview-divider"></div>
-            <div class="overview-stat" v-if="stats.totalTokens">
-              <div class="stat-number token">{{ fmtTok(stats.totalTokens) }}</div>
-              <div class="stat-desc">{{ $t('settings.label.tokensUsed') }}</div>
-            </div>
-            <div class="overview-stat" v-else>
-              <div class="stat-number muted">—</div>
-              <div class="stat-desc">{{ $t('settings.label.tokensUsed') }}</div>
-            </div>
-            <div class="overview-divider"></div>
-            <div class="overview-stat">
-              <div class="stat-number">{{ Math.round(stats.totalRequests / Math.max(stats.trend.length, 1)).toLocaleString() }}</div>
-              <div class="stat-desc">{{ $t('settings.label.avgPerDay') }}</div>
-            </div>
-          </div>
-          <div class="token-breakdown" v-if="stats.totalTokens">
-            <div class="token-item">
-              <span class="token-label">Prompt</span>
-              <span class="token-value">{{ fmtTok(stats.totalPromptTokens) }}</span>
-            </div>
-            <div class="token-item">
-              <span class="token-label">Completion</span>
-              <span class="token-value">{{ fmtTok(stats.totalCompletionTokens) }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 趋势 Tab -->
-      <div class="card">
-        <div class="card-tabs">
-          <button :class="{ active: trendTab === 'year' }" @click="trendTab = 'year'">{{ $t('settings.button.heatmapYear') }}</button>
-          <button :class="{ active: trendTab === 'month' }" @click="trendTab = 'month'">{{ $t('settings.button.trend30d') }}</button>
-        </div>
-        <div class="card-body" v-if="trendTab === 'year'">
-          <div class="heat-mode-toggle">
-            <button :class="{ active: heatMode === 'requests' }" @click="heatMode = 'requests'">{{ $t('settings.button.heatRequests') }}</button>
-            <button :class="{ 'active-tok': heatMode === 'tokens' }" @click="heatMode = 'tokens'">Token</button>
-          </div>
-          <div class="heatmap-wrap" v-if="heatmapData.columns.length">
-            <div class="heatmap-months" :style="{ gridTemplateColumns: 'repeat('+heatmapData.columns.length+', 1fr)' }">
-              <span v-for="m in heatmapData.months" :key="m.col" :style="{ gridColumnStart: m.col + 1 }">{{ m.label }}</span>
-            </div>
-            <div class="heatmap-body" style="position:relative">
-              <div class="heatmap-grid" :style="{ gridTemplateColumns: '20px repeat('+heatmapData.columns.length+', 1fr)' }">
-                <span class="heat-wd" style="grid-row:1">{{ weekdayLabels[0] }}</span>
-                <span class="heat-wd" style="grid-row:2"></span>
-                <span class="heat-wd" style="grid-row:3">{{ weekdayLabels[1] }}</span>
-                <span class="heat-wd" style="grid-row:4"></span>
-                <span class="heat-wd" style="grid-row:5">{{ weekdayLabels[2] }}</span>
-                <span class="heat-wd" style="grid-row:6"></span>
-                <span class="heat-wd" style="grid-row:7">{{ weekdayLabels[3] }}</span>
-                <template v-for="col in heatmapData.columns" :key="col[0].date">
-                  <span v-for="day in col" :key="day.date"
-                    class="heat-cell" :style="{ background: day.color }"
-                    @mouseenter="heatHover = (() => { const r = $event.target.getBoundingClientRect(); return { date: day.date, count: day.count, mode: heatMode, left: r.left + r.width / 2, top: r.top } })()"
-                    @mouseleave="heatHover = null"></span>
-                </template>
-              </div>
-              <Teleport to="body">
-                <Transition name="fade">
-                  <div v-if="heatHover" class="heat-tooltip"
-                    :style="{ left: heatHover.left + 'px', top: heatHover.top + 'px' }">
-                    <div class="heat-tip-date">{{ heatHover.date }}</div>
-                    <div class="heat-tip-val">{{ heatHover.mode === 'tokens' ? $t('settings.chart.tokenCountWithUnit', { count: fmtTok(heatHover.count) }) : $t('settings.chart.requestCountWithUnit', { count: heatHover.count }) }}</div>
-                  </div>
-                </Transition>
-              </Teleport>
-            </div>
-            <div class="heatmap-legend">
-              <span>{{ $t('settings.chart.heatLevelLow') }}</span>
-              <span v-for="(c, i) in getHeatColors(heatMode)" :key="i" class="legend-cell" :style="{ background: c }"></span>
-              <span>{{ $t('settings.chart.heatLevelHigh') }}</span>
-            </div>
-          </div>
-          <div class="card-empty" v-else>{{ $t('settings.label.empty') }}</div>
-        </div>
-        <div class="card-body trend-body" v-if="trendTab === 'month'">
-          <template v-if="stats.trend.length">
-            <div class="trend-header">
-              <div class="trend-stat">
-                <span class="trend-val">{{ trendData.total.toLocaleString() }}</span>
-                <span class="trend-lbl">{{ $t('settings.label.requests30d') }}</span>
-              </div>
-              <div class="trend-stat">
-                <span class="trend-val token-color">{{ fmtTok(trendData.totalTokens) }}</span>
-                <span class="trend-lbl">{{ $t('settings.label.tokens30d') }}</span>
-              </div>
-              <div class="trend-stat">
-                <span class="trend-val">{{ Math.round(trendData.total / Math.max(stats.trend.length, 1)) }}</span>
-                <span class="trend-lbl">{{ $t('settings.label.avgPerDay') }}</span>
-              </div>
-            </div>
-            <div class="chart-legend">
-              <span class="legend-item"><span class="legend-dot req"></span>{{ $t('settings.chart.requestCountAxis') }}</span>
-              <span class="legend-item"><span class="legend-dot tok"></span>Token</span>
-            </div>
-            <div class="chart-wrap">
-              <svg :viewBox="'0 0 '+CHART_W+' '+CHART_H" class="trend-svg" preserveAspectRatio="xMidYMid meet">
-                <defs>
-                  <linearGradient id="reqAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="#6366f1" stop-opacity="0.2"/>
-                    <stop offset="100%" stop-color="#6366f1" stop-opacity="0.01"/>
-                  </linearGradient>
-                  <linearGradient id="tokAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.2"/>
-                    <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.01"/>
-                  </linearGradient>
-                  <linearGradient id="reqLineGrad" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stop-color="#6366f1"/>
-                    <stop offset="100%" stop-color="#8b5cf6"/>
-                  </linearGradient>
-                  <linearGradient id="tokLineGrad" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stop-color="#f59e0b"/>
-                    <stop offset="100%" stop-color="#f97316"/>
-                  </linearGradient>
-                </defs>
-                <!-- Grid lines -->
-                <line v-for="t in trendData.yTicks" :key="'g'+t"
-                  :x1="PAD_L" :y1="PAD_T+(CHART_H-PAD_T-PAD_B)-(t/trendData.maxCount)*(CHART_H-PAD_T-PAD_B)"
-                  :x2="CHART_W-PAD_R" :y2="PAD_T+(CHART_H-PAD_T-PAD_B)-(t/trendData.maxCount)*(CHART_H-PAD_T-PAD_B)"
-                  stroke="var(--chart-grid)" stroke-width="1" stroke-dasharray="4,4"/>
-                <!-- Left Y axis labels (requests) -->
-                <text v-for="t in trendData.yTicks" :key="'yr'+t"
-                  :x="PAD_L-8" :y="PAD_T+(CHART_H-PAD_T-PAD_B)-(t/trendData.maxCount)*(CHART_H-PAD_T-PAD_B)+4"
-                  text-anchor="end" fill="var(--accent)" font-size="9" font-family="SF Mono, monospace">{{ t }}</text>
-                <!-- Right Y axis labels (tokens) -->
-                <text v-for="t in trendData.yTicksTok" :key="'yt'+t"
-                  :x="CHART_W-PAD_R+8" :y="PAD_T+(CHART_H-PAD_T-PAD_B)-(t/trendData.maxTokens)*(CHART_H-PAD_T-PAD_B)+4"
-                  text-anchor="start" fill="#f59e0b" font-size="9" font-family="SF Mono, monospace">{{ fmtTok(t) }}</text>
-                <!-- Token area + line -->
-                <path :d="trendData.tokFill" fill="url(#tokAreaGrad)"/>
-                <path :d="trendData.tokPath" fill="none" stroke="url(#tokLineGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                <!-- Request area + line -->
-                <path :d="trendData.reqFill" fill="url(#reqAreaGrad)"/>
-                <path :d="trendData.reqPath" fill="none" stroke="url(#reqLineGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                <!-- X axis -->
-                <line :x1="PAD_L" :y1="CHART_H-PAD_B" :x2="CHART_W-PAD_R" :y2="CHART_H-PAD_B" stroke="var(--chart-grid)" stroke-width="1"/>
-                <!-- Token data points -->
-                <circle v-for="(c,idx) in trendData.tokCircles" :key="'t'+idx" :cx="c.x" :cy="c.y" r="8" fill="transparent" stroke="none"
-                  @mouseenter="trendHover = c" @mouseleave="trendHover = null"/>
-                <circle v-for="(c,idx) in trendData.tokCircles" :key="'td'+idx" :cx="c.x" :cy="c.y" r="2.5" :fill="trendHover&&trendHover.date===c.date?'#f59e0b':'#fff'" :stroke="'#f59e0b'" stroke-width="1.5" style="pointer-events:none"/>
-                <!-- Request data points and X labels -->
-                <g v-for="(c,idx) in trendData.circles" :key="'r'+c.date">
-                  <circle :cx="c.x" :cy="c.y" r="8" fill="transparent" stroke="none"
-                    @mouseenter="trendHover = c" @mouseleave="trendHover = null"/>
-                  <circle :cx="c.x" :cy="c.y" r="2.5" :fill="trendHover&&trendHover.date===c.date?'#6366f1':'#fff'" :stroke="'#6366f1'" stroke-width="1.5" style="pointer-events:none"/>
-                  <text :x="c.x" :y="CHART_H-PAD_B+16" text-anchor="middle" fill="var(--chart-tooltip-muted)" font-size="9" font-family="SF Mono, monospace"
-                    v-if="idx%Math.ceil(trendData.circles.length/7)===0||idx===trendData.circles.length-1">{{ c.date.slice(5) }}</text>
-                </g>
-                <!-- Hover tooltip -->
-                <g v-if="trendHover">
-                  <line :x1="trendHover.x" :y1="PAD_T" :x2="trendHover.x" :y2="CHART_H-PAD_B" stroke="var(--chart-grid)" stroke-width="0.5" stroke-dasharray="3,3"/>
-                  <rect :x="Math.min(trendHover.x+8, CHART_W-PAD_R-100)" :y="Math.max(PAD_T, trendHover.y-36)" width="96" height="30" rx="6" fill="var(--chart-tooltip-bg)"/>
-                  <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-94)" :y="Math.max(PAD_T+10, trendHover.y-24)" fill="var(--chart-tooltip-text)" font-size="10" font-family="SF Mono, monospace">{{ trendHover.date.slice(5) }}</text>
-                  <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-94)" :y="Math.max(PAD_T+22, trendHover.y-12)" fill="var(--chart-tooltip-muted)" font-size="9" font-family="SF Mono, monospace">{{ $t('settings.chart.trendCount', { count: trendHover.count }) }} / {{ fmtTok(trendHover.tokens) }}</text>
-                </g>
-              </svg>
-            </div>
-          </template>
-          <div class="card-empty" v-else>{{ $t('settings.label.empty') }}</div>
-        </div>
-      </div>
-
-      <!-- 统计 Tab -->
-      <div class="card">
-        <div class="card-tabs">
-          <button :class="{ active: statsTab === 'provider' }" @click="statsTab = 'provider'">{{ $t('settings.button.tabProvider') }}</button>
-          <button :class="{ active: statsTab === 'model' }" @click="statsTab = 'model'">{{ $t('settings.button.tabModel') }}</button>
-          <button :class="{ active: statsTab === 'logs' }" @click="statsTab = 'logs'">{{ $t('settings.button.tabLogs') }}</button>
-        </div>
-
-        <div class="card-body" v-if="statsTab === 'provider'">
-          <template v-if="stats.byProviderModel && stats.byProviderModel.length">
-            <div v-for="pv in stats.byProviderModel" :key="pv.provider" class="provider-group">
-              <div class="stat-row main">
-                <span class="stat-name">{{ pv.provider }}</span>
-                <div class="stat-vals">
-                  <span class="stat-val token-val" v-if="providerTokenMap[pv.provider]">{{ fmtTok(providerTokenMap[pv.provider]) }}</span>
-                  <span class="stat-val">{{ $t('settings.label.requestCount', { count: pv.count }) }}</span>
-                </div>
-              </div>
-              <div class="sub-row" v-for="m in pv.models" :key="m.model">
-                <span class="sub-name">{{ m.model }}</span>
-                <span class="sub-val">{{ m.count }}</span>
-              </div>
-            </div>
-          </template>
-          <div class="card-empty" v-else>{{ $t('settings.label.empty') }}</div>
-        </div>
-
-        <div class="card-body" v-if="statsTab === 'model'">
-          <template v-if="stats.byModel && stats.byModel.length">
-            <div class="model-table-header">
-              <span class="model-col-name">{{ $t('settings.label.colModel') }}</span>
-              <span class="model-col-count">{{ $t('settings.label.colCount') }}</span>
-              <span class="model-col-token">{{ $t('settings.label.colTokens') }}</span>
-            </div>
-            <div class="model-row" v-for="m in stats.byModel" :key="m.model">
-              <span class="model-col-name">{{ m.model }}</span>
-              <span class="model-col-count">{{ m.count }}</span>
-              <span class="model-col-token" v-if="m.tokens">{{ fmtTok(m.tokens.total) }}</span>
-              <span class="model-col-token" v-else>—</span>
-            </div>
-          </template>
-          <div class="card-empty" v-else>{{ $t('settings.label.empty') }}</div>
-        </div>
-
-        <div class="card-body" v-if="statsTab === 'logs'" style="padding:0">
-          <div class="log-toolbar" v-if="logs.length || hasActiveLogFilter">
-            <div class="log-search-row">
-              <select v-model="logSearch.provider" @change="resetLogPage" class="log-filter">
-                <option value="">{{ $t('settings.placeholder.allProviders') }}</option>
-                <option v-for="p in logProviderOptions" :key="p" :value="p">{{ p }}</option>
-              </select>
-              <select v-model="logSearch.model" @change="resetLogPage" class="log-filter">
-                <option value="">{{ $t('settings.placeholder.allModels') }}</option>
-                <option v-for="m in logModelOptions" :key="m" :value="m">{{ m }}</option>
-              </select>
-              <select v-model="logSearch.statusCode" @change="resetLogPage" class="log-filter">
-                <option value="">{{ $t('settings.placeholder.allStatuses') }}</option>
-                <option value="2xx">{{ $t('settings.label.status2xx') }}</option>
-                <option value="4xx">{{ $t('settings.label.status4xx') }}</option>
-                <option value="5xx">{{ $t('settings.label.status5xx') }}</option>
-              </select>
-              <input type="date" v-model="logSearch.dateFrom" @change="resetLogPage" class="log-filter" :placeholder="$t('settings.placeholder.dateFrom')" />
-              <input type="date" v-model="logSearch.dateTo" @change="resetLogPage" class="log-filter" :placeholder="$t('settings.placeholder.dateTo')" />
-            </div>
-            <div class="log-toolbar-actions">
-              <span class="log-size">{{ $t('settings.label.logFileSize', { size: fmtSize(logFileSize) }) }}</span>
-              <div class="log-clear-btns">
-                <button class="refresh-btn" @click="loadLogs()" :disabled="logsLoading">{{ logsLoading ? $t('common.loading') : $t('settings.button.refresh') }}</button>
-                <button class="clear-body-btn" @click="clearLogs">{{ $t('settings.button.clearLogs') }}</button>
-                <button class="clear-body-btn" @click="clearLogsBodyData">{{ $t('settings.button.clearBodies') }}</button>
-              </div>
-            </div>
-          </div>
-          <div class="log-list" v-if="logs.length">
-            <div class="log-item" v-for="(l, idx) in logs" :key="l._id || idx">
-              <div class="log-top">
-                <span class="log-badge" :class="statusLabel(l.statusCode)">{{ l.statusCode }}</span>
-                <span class="log-badge log-method" v-if="l.method">{{ l.method }}</span>
-                <span class="log-badge log-proxy" v-if="l.proxy">PROXY</span>
-                <span class="log-ep">{{ endpointLabel(l.endpoint) }}</span>
-                <span class="log-upstream" v-if="l.upstreamUrl" :title="l.upstreamUrl">{{ shortUrl(l.upstreamUrl) }}</span>
-                <span class="log-time">{{ fmtTime(l.timestamp) }}</span>
-              </div>
-              <div class="log-meta">
-                <span>{{ l.provider || '-' }}</span>
-                <span v-if="l.originalModel && l.originalModel !== l.model" class="log-mapping">{{ l.originalModel }} → {{ l.model }}</span>
-                <span v-else>{{ l.model }}</span>
-                <span class="log-dur">{{ l.duration }}ms</span>
-                <span class="log-tokens" v-if="l.totalTokens">P {{ fmtTok(l.promptTokens) }} / C {{ fmtTok(l.completionTokens) }} / T {{ fmtTok(l.totalTokens) }}</span>
-                <span class="log-body-size" v-if="l.bodySizeBefore">Body {{ fmtSize(l.bodySizeBefore) }} → {{ fmtSize(l.bodySizeAfter) }}</span>
-              </div>
-              <div class="log-err" v-if="l.error">{{ l.error }}</div>
-              <details class="log-detail" v-if="l.requestBody || l.responseBody">
-                <summary>{{ $t('settings.label.viewParams') }}</summary>
-                <div class="log-body" v-if="l.requestBody"><span class="log-body-label">{{ $t('settings.label.request') }}</span><button class="copy-body-btn" @click="copyText(l.requestBody, $t('settings.copyLabel.requestPayload'))">{{ $t('common.copy') }}</button><pre>{{ l.requestBody }}</pre></div>
-                <div class="log-body" v-if="l.responseBody"><span class="log-body-label">{{ $t('settings.label.response') }}</span><button class="copy-body-btn" @click="copyText(l.responseBody, $t('settings.copyLabel.responsePayload'))">{{ $t('common.copy') }}</button><pre>{{ l.responseBody }}</pre></div>
-              </details>
-            </div>
-          </div>
-          <div class="log-pagination" v-if="logTotal > 0">
-            <div class="page-size">
-              <span>{{ $t('settings.label.perPagePrefix', { count: logTotal }) }}</span>
-              <select v-model.number="logPageSize" @change="resetLogPage">
-                <option :value="5">5</option>
-                <option :value="10">10</option>
-                <option :value="20">20</option>
-                <option :value="50">50</option>
-              </select>
-              <span>{{ $t('settings.label.perPageSuffix') }}</span>
-            </div>
-            <button :disabled="logPage <= 1 || logsLoading" @click="prevPage">{{ $t('settings.button.prevPage') }}</button>
-            <span class="page-info">{{ $t('settings.label.pageInfo', { page: logPage, total: logTotalPages }) }}</span>
-            <button :disabled="!logHasNextPage || logsLoading" @click="nextPage">{{ $t('settings.button.nextPage') }}</button>
-          </div>
-          <div class="card-empty" v-if="logsLoading">{{ $t('settings.label.logsLoading') }}</div>
-          <div class="card-empty" v-else-if="logsLoaded && !logs.length && hasActiveLogFilter">{{ $t('settings.label.noFilteredLogs') }}</div>
-          <div class="card-empty" v-else-if="logsLoaded && !logs.length">{{ $t('settings.label.empty') }}</div>
-          <div class="card-empty" v-else-if="!logsLoaded">{{ $t('settings.label.logsHint') }}</div>
-        </div>
-      </div>
-    </template>
 
     <!-- 关于 -->
     <div class="about">
@@ -982,12 +380,6 @@ onUnmounted(() => {
 .card-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px 0; position: relative; z-index: 1; }
 .card-header h3 { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .8px; }
 .card-body { padding: 12px 16px 16px; position: relative; z-index: 1; }
-.card-empty { padding: 20px 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
-.stats-loading { color: var(--text-muted); font-size: 13px; text-align: center; }
-.card-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--accent-soft); position: relative; z-index: 1; }
-.card-tabs button { padding: 10px 16px; border: none; background: transparent; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; margin-bottom: -1px; }
-.card-tabs button:hover { color: var(--text-secondary); }
-.card-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
 .field-row { display: flex; align-items: center; gap: 12px; }
 .field-row input[type=number] { padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 15px; font-weight: 500; font-family: 'SF Mono','Fira Code',monospace; outline: none; width: 130px; transition: all .2s; background: var(--bg-input); color: var(--text-primary); }
 .field-row input[type=number]:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
@@ -998,7 +390,6 @@ onUnmounted(() => {
 .check-field input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 .field-hint { font-size: 12px; color: var(--text-muted); margin: 6px 0 0; }
 
-/* Unified general-settings card rows */
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--border-subtle); }
 .setting-row:last-child { border-bottom: none; padding-bottom: 0; }
 .setting-row:first-child { padding-top: 0; }
@@ -1023,127 +414,6 @@ label.toggle-row { cursor: pointer; margin: 0; }
 .port-conflict-btn.cancel { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
 .port-conflict-btn.cancel:hover { background: var(--accent-soft); }
 .setting-control .lang-select { min-width: 160px; padding-top: 8px; padding-bottom: 8px; }
-
-/* Overview stats */
-.overview-body { padding: 20px 20px 16px; }
-.overview-stats { display: flex; align-items: center; justify-content: center; gap: 0; margin-bottom: 16px; }
-.overview-stat { text-align: center; padding: 0 24px; }
-.overview-divider { width: 1px; height: 40px; background: var(--border); }
-.stat-number { font-size: 28px; font-weight: 800; color: var(--text-primary); line-height: 1; font-family: 'SF Mono','Fira Code',monospace; }
-.stat-number.token { background: linear-gradient(135deg, var(--accent), #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-.stat-number.muted { color: var(--text-muted); }
-.stat-desc { font-size: 11px; color: var(--text-muted); margin-top: 4px; text-transform: uppercase; letter-spacing: .5px; }
-.token-breakdown { display: flex; justify-content: center; gap: 20px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
-.token-item { display: flex; align-items: center; gap: 6px; }
-.token-label { font-size: 11px; color: var(--text-muted); }
-.token-value { font-size: 12px; font-weight: 600; color: var(--accent); font-family: 'SF Mono',monospace; }
-
-/* Trend chart */
-.trend-body { padding: 16px 20px 20px; }
-.trend-header { display: flex; justify-content: center; gap: 32px; margin-bottom: 16px; }
-.trend-stat { text-align: center; }
-.trend-val { font-size: 20px; font-weight: 700; color: var(--text-primary); font-family: 'SF Mono',monospace; }
-.trend-val.token-color { background: linear-gradient(135deg, #f59e0b, #f97316); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-.trend-lbl { font-size: 11px; color: var(--text-muted); display: block; margin-top: 2px; }
-.chart-legend { display: flex; justify-content: center; gap: 20px; margin-bottom: 12px; }
-.legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
-.legend-dot { width: 10px; height: 3px; border-radius: 2px; }
-.legend-dot.req { background: linear-gradient(90deg, var(--accent), #8b5cf6); }
-.legend-dot.tok { background: linear-gradient(90deg, #f59e0b, #f97316); }
-.chart-wrap { background: var(--bg-input); border-radius: var(--radius-md); padding: 16px 12px 8px; border: 1px solid var(--border-subtle); }
-.trend-svg { width: 100%; overflow: visible; }
-.heat-mode-toggle { display: flex; gap: 4px; margin-bottom: 12px; }
-.heat-mode-toggle button { padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font-size: 12px; color: var(--text-secondary); cursor: pointer; transition: all .15s; }
-.heat-mode-toggle button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-.heat-mode-toggle button.active-tok { background: #f59e0b; color: #fff; border-color: #f59e0b; }
-.heat-tooltip { position: fixed; transform: translate(-50%, -110%); background: var(--bg-card); color: var(--text-primary); padding: 6px 10px; border-radius: 6px; font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 99999; box-shadow: var(--shadow-md); border: 1px solid var(--border); }
-.heat-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 4px solid transparent; border-top-color: rgba(22,31,56,.92); }
-.heat-tip-date { color: var(--text-muted); font-size: 10px; margin-bottom: 2px; }
-.heat-tip-val { font-weight: 600; font-family: 'SF Mono',monospace; }
-
-.stat-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
-.stat-row + .stat-row { border-top: 1px solid var(--border-subtle); }
-.stat-row.main { padding: 10px 0; }
-.stat-name { font-size: 13px; color: var(--text-secondary); font-weight: 600; }
-.stat-vals { display: flex; align-items: center; gap: 12px; }
-.stat-val { font-size: 14px; font-weight: 700; color: var(--accent); font-family: 'SF Mono',monospace; }
-.token-val { font-size: 12px; color: #f59e0b; }
-.provider-group + .provider-group { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--accent-soft); }
-.sub-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0 4px 16px; }
-.sub-name { font-size: 12px; color: var(--text-secondary); font-family: 'SF Mono',monospace; }
-.sub-val { font-size: 12px; color: var(--text-muted); font-family: 'SF Mono',monospace; }
-.unit { font-size: 10px; font-weight: 400; color: var(--text-muted); margin-left: 2px; }
-.model-table-header { display: flex; align-items: center; padding: 0 0 8px; border-bottom: 1px solid var(--accent-soft); margin-bottom: 4px; }
-.model-table-header span { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .3px; }
-.model-row { display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
-.model-col-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-secondary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-col-count { width: 80px; text-align: right; font-size: 14px; font-weight: 700; color: var(--accent); font-family: 'SF Mono',monospace; }
-.model-col-token { width: 80px; text-align: right; font-size: 13px; font-weight: 600; color: #f59e0b; font-family: 'SF Mono',monospace; }
-.header-actions { display: flex; gap: 6px; }
-.refresh-btn { padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font-size: 12px; color: var(--text-secondary); cursor: pointer; transition: all .15s; }
-.refresh-btn:hover { background: var(--accent-soft); border-color: var(--border-hover); }
-.clear-btn { padding: 3px 8px; border: 1px solid rgba(248,113,113,.2); border-radius: 6px; background: transparent; font-size: 12px; color: var(--danger); cursor: pointer; transition: all .15s; }
-.clear-btn:hover { background: var(--danger-soft); }
-.clear-btn.danger { border-color: rgba(248,113,113,.3); color: #fca5a5; }
-.clear-btn.danger:hover { background: var(--danger-soft); }
-.heatmap-wrap { width: 100%; }
-.heatmap-months { display: grid; gap: 1px; margin-bottom: 4px; padding-left: 21px; font-size: 10px; color: var(--text-muted); width: calc(100% - 21px); }
-.heatmap-months span { grid-row: 1; }
-.heatmap-body { }
-.heatmap-grid { display: grid; grid-template-rows: repeat(7, 1fr); grid-auto-flow: column; gap: 1px; aspect-ratio: 8/1; width: 100%; }
-.heat-wd { font-size: 9px; color: var(--text-muted); display: flex; align-items: center; }
-.heat-cell { border-radius: 2px; cursor: pointer; transition: outline .1s; }
-.heat-cell:hover { outline: 1.5px solid var(--accent); outline-offset: -1px; }
-.heatmap-legend { display: flex; align-items: center; justify-content: flex-end; gap: 3px; margin-top: 8px; font-size: 10px; color: var(--text-muted); }
-.legend-cell { width: 10px; height: 10px; border-radius: 2px; }
-.trend-svg { width: 100%; overflow: visible; }
-.log-list { overflow: visible; }
-.log-toolbar { padding: 12px 16px 8px; border-bottom: 1px solid var(--border-subtle); }
-.log-search-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.log-filter { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-primary); background: var(--bg-input); outline: none; min-width: 0; flex: 1; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238b95b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; padding-right: 28px; }
-.log-filter:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.log-toolbar-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
-.log-size { font-size: 12px; color: var(--text-muted); font-family: 'SF Mono',monospace; }
-.log-clear-btns { display: flex; gap: 6px; }
-.log-count { font-size: 12px; color: var(--text-muted); }
-.clear-body-btn { padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font-size: 12px; color: var(--text-secondary); cursor: pointer; transition: all .15s; }
-.clear-body-btn:hover { background: var(--accent-soft); border-color: var(--border-hover); }
-.log-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--border-subtle); }
-.log-pagination button { padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font-size: 12px; color: var(--text-secondary); cursor: pointer; transition: all .15s; }
-.log-pagination button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--border-hover); }
-.log-pagination button:disabled { opacity: .3; cursor: default; }
-.page-info { font-size: 12px; color: var(--text-secondary); font-family: 'SF Mono',monospace; }
-.page-size { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); margin-right: auto; }
-.page-size select { padding: 2px 22px 2px 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; color: var(--text-primary); background: var(--bg-input); outline: none; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238b95b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 4px center; }
-.log-item { padding: 10px 16px; border-top: 1px solid var(--border-subtle); }
-.log-top { display: flex; align-items: center; gap: 8px; }
-.log-badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; font-family: 'SF Mono',monospace; }
-.log-badge.success { background: var(--success-soft); color: var(--success); }
-.log-badge.warn { background: var(--warning-soft); color: var(--warning); }
-.log-badge.error { background: var(--danger-soft); color: var(--danger); }
-.log-proxy { background: rgba(59,130,246,.12); color: #60a5fa; font-size: 10px; }
-.log-method { background: var(--accent-soft); color: var(--text-secondary); font-size: 10px; letter-spacing: .3px; }
-.log-upstream { font-size: 11px; color: var(--text-muted); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.log-ep { font-size: 13px; color: var(--text-secondary); }
-.log-time { font-size: 11px; color: var(--text-muted); margin-left: auto; }
-.log-meta { display: flex; gap: 12px; margin-top: 3px; font-size: 12px; color: var(--text-secondary); }
-.log-dur { font-family: 'SF Mono',monospace; }
-.log-tokens { font-family: 'SF Mono',monospace; color: var(--accent); }
-.log-body-size { font-family: 'SF Mono',monospace; color: #f59e0b; font-size: 11px; }
-.log-mapping { font-family: 'SF Mono',monospace; color: #8b5cf6; font-size: 11px; }
-.log-err { font-size: 12px; color: var(--danger); margin-top: 3px; }
-.divider { height: 1px; background: var(--accent-soft); margin: 8px 16px; }
-.log-detail { margin-top: 6px; }
-.log-detail summary { font-size: 12px; color: var(--accent); cursor: pointer; user-select: none; }
-.log-body { margin-top: 8px; }
-.log-body-label { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
-.copy-body-btn { margin-left: 8px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 4px; background: transparent; font-size: 11px; color: var(--text-secondary); cursor: pointer; transition: all .15s; }
-.copy-body-btn:hover { background: var(--accent-soft); color: var(--text-primary); }
-.copy-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 999; padding: 8px 20px; border-radius: var(--radius-md); font-size: 13px; font-weight: 500; color: var(--success); background: var(--success-soft); border: 1px solid rgba(52,211,153,.2); box-shadow: var(--shadow-md); pointer-events: none; }
-.fade-enter-active { transition: all .25s cubic-bezier(.4,0,.2,1); }
-.fade-leave-active { transition: all .2s cubic-bezier(.4,0,.2,1); }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
-.log-body pre { margin-top: 4px; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 11px; font-family: 'SF Mono',monospace; color: var(--text-secondary); white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
 
 /* HTTP Proxy */
 .proxy-field { margin-bottom: 12px; }
@@ -1172,6 +442,11 @@ label.toggle-row { cursor: pointer; margin: 0; }
 .about strong { color: var(--text-secondary); }
 .github-link { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); text-decoration: none; vertical-align: middle; cursor: pointer; }
 .github-link:hover { text-decoration: underline; }
+
+.copy-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 999; padding: 8px 20px; border-radius: var(--radius-md); font-size: 13px; font-weight: 500; color: var(--success); background: var(--success-soft); border: 1px solid rgba(52,211,153,.2); box-shadow: var(--shadow-md); pointer-events: none; }
+.fade-enter-active { transition: all .25s cubic-bezier(.4,0,.2,1); }
+.fade-leave-active { transition: all .2s cubic-bezier(.4,0,.2,1); }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
 /* Confirm dialog */
 .confirm-overlay { position: fixed; inset: 0; z-index: 9999; background: var(--bg-overlay); display: flex; align-items: center; justify-content: center; }
