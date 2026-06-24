@@ -122,6 +122,8 @@ wire_api = "responses"
 | `POST /v1/chat/completions` | OpenAI Chat Completions 格式 |
 | `POST /v1/responses` | OpenAI Responses 格式 |
 | `POST /v1/messages` | Anthropic Messages 格式 |
+| `POST /v1/images/generations` | OpenAI 图像生成格式 |
+| `POST /v1/images/edits` | OpenAI 图像编辑格式 |
 | `GET /v1/models` | 全局模型列表（OpenAI 兼容格式） |
 
 ### 📎 系统托盘
@@ -196,6 +198,7 @@ wire_api = "responses"
 |---|---|---|
 | `openai-chat` | `/v1/chat/completions` | OpenAI、中转站、大多数兼容 API |
 | `openai-response` | `/v1/responses` | OpenAI Responses API |
+| `openai-image` | `/v1/images/generations` `/v1/images/edits` | OpenAI 图像生成 API（gpt-image-2 等） |
 | `anthropic-message` | `/v1/messages` | Anthropic Claude API |
 | `google-gemini` | `/v1beta/openai/chat/completions` | Google Gemini API（OpenAI 兼容模式） |
 
@@ -203,13 +206,15 @@ wire_api = "responses"
 
 代理自动处理客户端请求格式与上游 API 格式之间的交叉转换：
 
-| 客户端请求 | → openai-chat | → openai-response | → anthropic-message |
-|---|---|---|---|
-| `/v1/chat/completions` | 直接转发 | → `/v1/responses` | → `/v1/messages` |
-| `/v1/responses` | → `/v1/chat/completions` | 直接转发 | → `/v1/messages` |
-| `/v1/messages` | → `/v1/chat/completions` | → `/v1/responses` | 直接转发 |
+| 客户端请求 | → openai-chat | → openai-response | → anthropic-message | → openai-image |
+|---|---|---|---|---|
+| `/v1/chat/completions` | 直接转发 | → `/v1/responses` | → `/v1/messages` | - |
+| `/v1/responses` | → `/v1/chat/completions` | 直接转发 | → `/v1/messages` | - |
+| `/v1/messages` | → `/v1/chat/completions` | → `/v1/responses` | 直接转发 | - |
+| `/v1/images/generations` | - | - | - | 直接转发 |
+| `/v1/images/edits` | - | - | - | 直接转发 |
 
-SSE 流式响应也会实时转换。
+SSE 流式响应也会实时转换。图像接口（`openai-image`）目前仅支持直连转发，不支持跨协议转换。
 
 ## ✅ 测试说明
 
@@ -222,6 +227,7 @@ SSE 流式响应也会实时转换。
 | MiMo | mimo-v2-pro, MiMo-2.5-pro | `openai-chat` | ✅ |
 | DeepSeek | DeepSeek V4 Pro, DeepSeek V4 Flash | `openai-chat` | ✅ |
 | GPT | gpt-5.4, gpt-5.4-mini, gpt-5.5 | `openai-chat` | ✅ |
+| GPT Image | gpt-image-2 | `openai-image` | - |
 | Claude | claude-opus-4-7, claude-sonnet-4-6, claude-opus-4-6 | `anthropic-message` | ✅ |
 | Gemini | gemini-3.1-flash, gemini-3.1-flash-lite, gemini-3.1-pro | `google-gemini` | ✅ |
 
@@ -376,7 +382,7 @@ aigateway/
 
 ## 🗓️ 后期计划
 
-- **图像接口兼容** — 支持跨协议的图像请求转换（OpenAI `image_url` ↔ Anthropic `image` 格式），让使用 OpenAI 格式的客户端也能通过 Anthropic 接口发送图片，反之亦然
+- **图像接口跨协议转换** — 支持跨协议的图像请求转换（OpenAI `image_url` ↔ Anthropic `image` 格式），让使用 OpenAI 格式的客户端也能通过 Anthropic 接口发送图片，反之亦然
 
 ## 📄 许可证
 
