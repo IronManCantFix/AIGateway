@@ -351,41 +351,6 @@ npx tauri icon <path-to-your-icon.png>
 
 该命令会自动生成所有平台（macOS、Windows、Linux、iOS）所需的图标尺寸，输出到 `src-tauri/icons/` 目录。
 
-### 何时需要重新编译代理服务器
-
-代理服务器（`proxy/proxy-server.js`）会被 `bun compile` 编译为独立的二进制文件（Sidecar），嵌入到应用中运行。因此，**修改 `proxy/proxy-server.js` 后必须重新编译才能生效**。
-
-需要重新编译的典型场景：
-
-- 修改了协议转换逻辑（请求体/响应体格式转换）
-- 修改了 SSE 流式转换器
-- 修改了路由处理（如添加新的 API 端点）
-- 修改了代理转发逻辑
-
-不需要重新编译的情况：
-
-- 只修改了前端代码（`src/` 目录下的 Vue 文件）— `npm run tauri dev` 会自动热更新
-- 只修改了 Rust 后端代码（`src-tauri/src/`）— `npm run tauri dev` 会自动重新编译
-- 只修改了配置文件或 README
-
-**开发模式下重新编译代理（当前平台）：**
-
-```bash
-npm run proxy:build:current      # 仅编译当前主机平台
-# 或直接 npm run tauri dev —— 会自动触发当前平台 Sidecar 编译
-```
-
-**生产构建（按需选择平台）：**
-
-```bash
-npm run proxy:build              # 所有平台
-npm run proxy:build:mac          # macOS (ARM + Intel)
-npm run proxy:build:windows      # 仅 Windows x64
-# ... 详见 上文「生产构建」章节
-```
-
-重新编译后需要重启应用才能生效。
-
 ## 📦 技术栈
 
 - **前端**：Vue 3 + Vite

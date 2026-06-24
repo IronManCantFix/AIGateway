@@ -351,41 +351,6 @@ npx tauri icon <path-to-your-icon.png>
 
 This command automatically generates all platform (macOS, Windows, Linux, iOS) icon sizes and outputs them to the `src-tauri/icons/` directory.
 
-### When to Recompile the Proxy Server
-
-The proxy server (`proxy/proxy-server.js`) is compiled by `bun compile` into a standalone binary (Sidecar), embedded in the app. Therefore, **you must recompile after modifying `proxy/proxy-server.js`** for changes to take effect.
-
-Typical scenarios requiring recompilation:
-
-- Modified protocol conversion logic (request/response body format conversion)
-- Modified SSE stream converters
-- Modified routing handlers (e.g., adding new API endpoints)
-- Modified proxy forwarding logic
-
-Scenarios NOT requiring recompilation:
-
-- Only modified frontend code (`src/` directory Vue files) — `npm run tauri dev` auto hot-reloads
-- Only modified Rust backend code (`src-tauri/src/`) — `npm run tauri dev` auto recompiles
-- Only modified config files or README
-
-**Recompile proxy for development (current platform):**
-
-```bash
-npm run proxy:build:current      # compile for your host platform only
-# or simply: npm run tauri dev  —— it auto-builds the Sidecar for the current platform
-```
-
-**Production build (pick the platforms you need):**
-
-```bash
-npm run proxy:build              # all platforms
-npm run proxy:build:mac          # macOS (ARM + Intel)
-npm run proxy:build:windows      # Windows x64 only
-# ... see the "Production Build" section above for all variants
-```
-
-After recompilation, restart the app for changes to take effect.
-
 ## 📦 Tech Stack
 
 - **Frontend**: Vue 3 + Vite
