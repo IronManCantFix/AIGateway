@@ -173,6 +173,52 @@ Enable "Record request and response parameters" in settings to additionally log 
 
 > ⚠️ Enabling debug logging increases storage usage. Use the "Clear Parameters" button to clear recorded request/response bodies (preserving stats), or "Clear Logs" to delete all logs.
 
+## 🔄 Model Mapping
+
+Model mapping allows you to redirect client-requested model IDs to actual model IDs. Useful when clients are locked to specific model names that you don't have.
+
+### Typical Use Cases
+
+- **Codex fixed models**: Codex only calls `gpt5.5`, but you want to use `gpt-4o`. Configure mapping: `gpt5.5` → `gpt-4o`
+- **Unified model names**: Multiple clients use different model names, map them to your actual available models
+
+### Configuration
+
+1. Find the "Model Mappings" card on the home page
+2. Click "+ Add mapping" button
+3. Fill in "Request Model" (model name sent by client) and "Actual Model" (real model name to map to)
+4. Enable the mapping toggle and save
+
+### Log Tags
+
+Mapped requests show `original_model → mapped_model` in logs for easy tracking.
+
+## ⚖️ Load Balancer
+
+When multiple providers offer the same model, configure load balancing to optimize request distribution and improve availability.
+
+### Strategies
+
+| Strategy | Description |
+|---|---|
+| **Round Robin** | Distribute requests evenly across providers |
+| **Failover** | Try providers in order, auto-switch on failure for high availability |
+
+### Configuration
+
+1. Find the "Load Balancer" card on the home page
+2. Click "+ Create Load Balancer Group" button
+3. Enter group name (e.g., "GPT-4o Dual Line")
+4. Select strategy (Round Robin or Failover)
+5. Select participating providers (at least 2 required)
+6. Save configuration
+
+### Use Cases
+
+- **Multi-account rotation**: Multiple OpenAI accounts with the same model, rotate to avoid rate limiting
+- **Primary-backup switching**: Auto-switch to backup provider on primary failure
+- **Cross-region redundancy**: Providers in different regions as backups for availability
+
 ## 🌐 HTTP Proxy
 
 When your network requires a proxy server to access upstream APIs, you can configure an HTTP proxy. All proxy requests will be forwarded through your specified HTTP/HTTPS/SOCKS5 proxy server.
@@ -379,10 +425,6 @@ aigateway/
 - Thanks to **DeepSeek V4 Pro** for its incredible cost-effectiveness. The first version ([utools plugin](https://github.com/a471640241/ai-gateway-utools)) was entirely built with DeepSeek V4 Pro
 - Thanks to **Xiaomi Orbit Hundred-Trillion Token Program** for providing a free Pro monthly plan. This desktop version was migrated from the utools version, developed with MiMo-V2.5-Pro
 - Thanks to **Claude Code** for being such a great development tool, significantly boosting development efficiency
-
-## 🗓️ Roadmap
-
-- **Image API Cross-Protocol Conversion** — Support cross-protocol image request conversion (OpenAI `image_url` ↔ Anthropic `image` format), allowing OpenAI-format clients to send images through Anthropic APIs and vice versa
 
 ## 📄 License
 
