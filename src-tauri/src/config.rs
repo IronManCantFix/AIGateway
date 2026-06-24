@@ -558,6 +558,11 @@ impl ConfigStore {
     pub fn add_log(&self, entry: &LogEntry) -> Result<(), String> {
         self.append_log_jsonl(entry)?;
 
+        // 仅统计 200 状态码的请求
+        if entry.status_code != 200 {
+            return Ok(());
+        }
+
         // Update aggregated stats
         let mut stats: AggregatedStats = self.read_json("aggregated-stats.json");
         stats.total_requests += 1;

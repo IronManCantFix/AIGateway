@@ -1056,6 +1056,73 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
     if (extra.bodySizeBefore != null) data.bodySizeBefore = extra.bodySizeBefore
     if (extra.bodySizeAfter != null) data.bodySizeAfter = extra.bodySizeAfter
   }
+  // 解析 token 使用量（无论 logEnabled 状态，优先解析）
+  if (responseBody) {
+    try {
+      let usage = null
+      // 尝试直接解析 JSON（非流式响应）
+      try {
+        const parsed = JSON.parse(responseBody)
+        usage = parsed.usage || parsed.usage_total
+      } catch {
+        // 如果不是 JSON，尝试解析 SSE 格式
+        // SSE 格式：data: {"usage": {...}}\n\n
+        const lines = responseBody.split('\n')
+        // 从后向前查找包含 usage 的最后一个事件
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const line = lines[i].trim()
+          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+            try {
+              const parsed = JSON.parse(line.slice(6))
+              if (parsed.usage) {
+                usage = parsed.usage
+                break
+              }
+              // Anthropic message_delta 格式
+              if (parsed.type === 'message_delta' && parsed.usage) {
+                usage = parsed.usage
+                break
+              }
+            } catch {}
+          }
+        }
+        // 如果还没找到，尝试从多个事件中聚合 token
+        if (!usage) {
+          let inputTokens = 0
+          let outputTokens = 0
+          for (const line of lines) {
+            const trimmed = line.trim()
+            if (trimmed.startsWith('data: ') && trimmed !== 'data: [DONE]') {
+              try {
+                const parsed = JSON.parse(trimmed.slice(6))
+                // Anthropic message_start
+                if (parsed.type === 'message_start' && parsed.message?.usage) {
+                  inputTokens = parsed.message.usage.input_tokens || 0
+                }
+                // Anthropic message_delta
+                if (parsed.type === 'message_delta' && parsed.usage) {
+                  outputTokens = parsed.usage.output_tokens || 0
+                }
+                // OpenAI chunk 格式
+                if (parsed.usage) {
+                  inputTokens = parsed.usage.prompt_tokens || parsed.usage.input_tokens || inputTokens
+                  outputTokens = parsed.usage.completion_tokens || parsed.usage.output_tokens || outputTokens
+                }
+              } catch {}
+            }
+          }
+          if (inputTokens > 0 || outputTokens > 0) {
+            usage = { prompt_tokens: inputTokens, completion_tokens: outputTokens, total_tokens: inputTokens + outputTokens }
+          }
+        }
+      }
+      if (usage) {
+        data.promptTokens = usage.prompt_tokens || usage.input_tokens || 0
+        data.completionTokens = usage.completion_tokens || usage.output_tokens || 0
+        data.totalTokens = usage.total_tokens || (data.promptTokens + data.completionTokens)
+      }
+    } catch {}
+  }
   // 仅当开启详细日志时才记录请求/响应体
   if (logEnabled) {
     data.requestBody = requestBody ? JSON.stringify(requestBody) : null
@@ -1065,18 +1132,6 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
   if (statusCode === 404) {
     if (requestBody) data.requestBody = JSON.stringify(requestBody)
     if (responseBody) data.responseBody = responseBody
-  }
-  // 解析 token 使用量
-  if (responseBody) {
-    try {
-      const parsed = JSON.parse(responseBody)
-      const usage = parsed.usage || parsed.usage_total
-      if (usage) {
-        data.promptTokens = usage.prompt_tokens || usage.input_tokens || 0
-        data.completionTokens = usage.completion_tokens || usage.output_tokens || 0
-        data.totalTokens = usage.total_tokens || (data.promptTokens + data.completionTokens)
-      }
-    } catch {}
   }
   process.stdout.write(JSON.stringify({ type: 'log', data }) + '\n')
 }
@@ -1140,10 +1195,9 @@ const server = http.createServer(async (req, res) => {
         model = (rawBody && rawBody.model) || '-'
         req._body = rawBody
       }
-      if (logEnabled) {
-        req._onResponseBody = (body) => {
-          responseBody = (PATH_TO_SOURCE[urlPath] === 'image') ? sanitizeImageResponseBody(body) : body
-        }
+      // 始终捕获响应体用于 token 统计，无论 logEnabled 状态
+      req._onResponseBody = (body) => {
+        responseBody = (PATH_TO_SOURCE[urlPath] === 'image') ? sanitizeImageResponseBody(body) : body
       }
       await handleApiRequest(req, res)
       // multipart 路径 handleApiRequest 会回写以下两个字段供日志使用

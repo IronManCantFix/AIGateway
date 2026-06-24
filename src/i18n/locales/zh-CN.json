@@ -179,7 +179,8 @@
       "nextPage": "下一页",
       "checking": "检查中…",
       "checkUpdate": "检查更新",
-      "download": "前往下载"
+      "download": "前往下载",
+      "downloading": "下载中…"
     },
     "placeholder": {
       "optional": "可选",
@@ -202,7 +203,9 @@
       "processKilled": "已关闭进程 {pid}",
       "processKillFailed": "关闭进程失败：{msg}",
       "portFreed": "端口 {port} 已释放",
-      "themeSaveFailed": "主题保存失败"
+      "themeSaveFailed": "主题保存失败",
+      "updateDownloaded": "下载完成，正在打开安装…",
+      "updateDownloadFailed": "下载失败，请前往 GitHub 手动下载"
     },
     "chart": {
       "monthsShort": "1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月",

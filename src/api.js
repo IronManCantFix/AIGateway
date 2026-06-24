@@ -58,6 +58,7 @@ export const api = {
 
   // --- Update check ---
   checkForUpdates: () => invoke('check_for_updates'),
+  downloadAndInstallUpdate: (url, fileName) => invoke('download_and_install_update', { url, fileName }),
   getAppVersion: () => invoke('get_app_version'),
 
   // --- i18n / Tray ---

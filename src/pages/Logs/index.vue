@@ -5,6 +5,7 @@ import { api } from '../../api.js'
 
 const { t } = useI18n()
 
+const logEnabled = ref(false)
 const logs = ref([])
 const logsLoading = ref(false)
 const logsLoaded = ref(false)
@@ -81,6 +82,10 @@ async function clearLogsBodyData() {
   } catch (e) {
     console.error('Clear log bodies failed:', e)
   }
+}
+
+async function toggleLogging() {
+  await api.setLogEnabled(logEnabled.value)
 }
 
 function statusLabel(c) {
@@ -188,7 +193,8 @@ function nextPage() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  logEnabled.value = await api.getLogEnabled()
   loadProfiles().catch(e => console.error('Load profiles failed:', e))
   loadLogs().catch(e => console.error('Load logs failed:', e))
 })
@@ -201,6 +207,19 @@ onMounted(() => {
     </Transition>
     <div class="page-header">
       <h2>{{ $t('nav.logs') }}</h2>
+    </div>
+
+    <!-- 日志开关 -->
+    <div class="log-toggle-card">
+      <label class="log-toggle-row" @change="toggleLogging">
+        <div class="log-toggle-label">
+          {{ $t('settings.label.logEnabled') }}
+          <p class="log-toggle-hint">{{ $t('settings.label.logHint') }}</p>
+        </div>
+        <div class="log-toggle-control">
+          <input type="checkbox" v-model="logEnabled" />
+        </div>
+      </label>
     </div>
 
     <div class="card">
@@ -302,6 +321,12 @@ onMounted(() => {
 .logs-page { padding: 16px; max-width: 780px; margin: 0 auto; padding-bottom: 40px; }
 .page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .page-header h2 { font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0; }
+.log-toggle-card { margin-bottom: 12px; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); }
+.log-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; margin: 0; }
+.log-toggle-label { flex: 1; min-width: 0; font-size: 14px; color: var(--text-primary); font-weight: 500; }
+.log-toggle-hint { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; font-weight: 400; }
+.log-toggle-control { flex-shrink: 0; display: flex; align-items: center; }
+.log-toggle-control input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 .card { margin-bottom: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); overflow: hidden; }
 .card-body { padding: 12px 16px 16px; position: relative; z-index: 1; }
 .card-empty { padding: 20px 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
