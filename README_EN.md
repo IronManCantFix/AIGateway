@@ -122,6 +122,8 @@ Supported proxy endpoints (`/v1` prefix optional, both `/chat/completions` and `
 | `POST /v1/chat/completions` | OpenAI Chat Completions format |
 | `POST /v1/responses` | OpenAI Responses format |
 | `POST /v1/messages` | Anthropic Messages format |
+| `POST /v1/images/generations` | OpenAI Image Generation format |
+| `POST /v1/images/edits` | OpenAI Image Editing format |
 | `GET /v1/models` | Global model list (OpenAI-compatible format) |
 
 ### 📠 System Tray
@@ -196,6 +198,7 @@ Requests through the proxy show a blue `PROXY` badge in logs, making it easy to 
 |---|---|---|
 | `openai-chat` | `/v1/chat/completions` | OpenAI, relays, most compatible APIs |
 | `openai-response` | `/v1/responses` | OpenAI Responses API |
+| `openai-image` | `/v1/images/generations` `/v1/images/edits` | OpenAI Image Generation API (gpt-image-2, etc.) |
 | `anthropic-message` | `/v1/messages` | Anthropic Claude API |
 | `google-gemini` | `/v1beta/openai/chat/completions` | Google Gemini API (OpenAI-compatible mode) |
 
@@ -203,13 +206,15 @@ Requests through the proxy show a blue `PROXY` badge in logs, making it easy to 
 
 The proxy automatically handles cross-conversion between client request formats and upstream API formats:
 
-| Client Request | → openai-chat | → openai-response | → anthropic-message |
-|---|---|---|---|
-| `/v1/chat/completions` | Direct forward | → `/v1/responses` | → `/v1/messages` |
-| `/v1/responses` | → `/v1/chat/completions` | Direct forward | → `/v1/messages` |
-| `/v1/messages` | → `/v1/chat/completions` | → `/v1/responses` | Direct forward |
+| Client Request | → openai-chat | → openai-response | → anthropic-message | → openai-image |
+|---|---|---|---|---|
+| `/v1/chat/completions` | Direct forward | → `/v1/responses` | → `/v1/messages` | - |
+| `/v1/responses` | → `/v1/chat/completions` | Direct forward | → `/v1/messages` | - |
+| `/v1/messages` | → `/v1/chat/completions` | → `/v1/responses` | Direct forward | - |
+| `/v1/images/generations` | - | - | - | Direct forward |
+| `/v1/images/edits` | - | - | - | Direct forward |
 
-SSE streaming responses are also converted in real-time.
+SSE streaming responses are also converted in real-time. Image endpoints (`openai-image`) currently support direct forwarding only, not cross-protocol conversion.
 
 ## ✅ Tested Models
 
@@ -222,6 +227,7 @@ SSE streaming responses are also converted in real-time.
 | MiMo | mimo-v2-pro, MiMo-2.5-pro | `openai-chat` | ✅ |
 | DeepSeek | DeepSeek V4 Pro, DeepSeek V4 Flash | `openai-chat` | ✅ |
 | GPT | gpt-5.4, gpt-5.4-mini, gpt-5.5 | `openai-chat` | ✅ |
+| GPT Image | gpt-image-2 | `openai-image` | - |
 | Claude | claude-opus-4-7, claude-sonnet-4-6, claude-opus-4-6 | `anthropic-message` | ✅ |
 | Gemini | gemini-3.1-flash, gemini-3.1-flash-lite, gemini-3.1-pro | `google-gemini` | ✅ |
 
@@ -376,7 +382,7 @@ aigateway/
 
 ## 🗓️ Roadmap
 
-- **Image API Compatibility** — Support cross-protocol image request conversion (OpenAI `image_url` ↔ Anthropic `image` format), allowing OpenAI-format clients to send images through Anthropic APIs and vice versa
+- **Image API Cross-Protocol Conversion** — Support cross-protocol image request conversion (OpenAI `image_url` ↔ Anthropic `image` format), allowing OpenAI-format clients to send images through Anthropic APIs and vice versa
 
 ## 📄 License
 
