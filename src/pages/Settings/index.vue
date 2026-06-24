@@ -17,9 +17,7 @@ let unlistenProxySettings = null
 
 const port = ref(9999)
 const autoStart = ref(false)
-const logEnabled = ref(false)
 const languageSetting = ref('auto')
-const saved = ref(false)
 const portChecking = ref(false)
 const portConflict = ref(null)
 
@@ -48,7 +46,6 @@ async function loadSettings() {
   const s = await api.getSettings()
   port.value = s.port || 9999
   autoStart.value = s.autoStart || false
-  logEnabled.value = await api.getLogEnabled()
   languageSetting.value = s.language || 'auto'
 
   if (s.httpProxy) {
@@ -70,7 +67,6 @@ async function saveSettings() {
   await api.setSettings({
     port: n,
     autoStart: autoStart.value,
-    logEnabled: logEnabled.value,
     httpProxy: {
       enabled: httpProxyEnabled.value,
       url: httpProxyUrl.value,
@@ -79,15 +75,13 @@ async function saveSettings() {
       excludeProfiles: httpProxyExcludeProfiles.value
     }
   })
-  saved.value = true; setTimeout(() => saved.value = false, 1500)
+  copyMsg.value = '✓ ' + t('settings.label.saved')
+  clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
 }
 
 async function saveProxySettings() {
   await saveSettings()
-}
-
-async function toggleLogging() {
-  await api.setLogEnabled(logEnabled.value)
 }
 
 async function checkPortConflict() {
@@ -136,12 +130,16 @@ function dismissPortConflict() {
 }
 
 async function onThemeChange() {
-  setThemeSetting(themeSetting.value)
+  const prev = themeSetting.value
+  setThemeSetting(prev)
   try {
     const current = await api.getSettings()
-    await api.setSettings({ ...current, theme: themeSetting.value })
+    await api.setSettings({ ...current, theme: prev })
   } catch (e) {
     console.error('Failed to save theme:', e)
+    copyMsg.value = t('settings.toast.themeSaveFailed')
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copyMsg.value = '' }, 2500)
   }
 }
 
@@ -167,8 +165,12 @@ async function onLanguageChange() {
 
 const updateInfo = ref(null)
 const checkingUpdate = ref(false)
+const downloading = ref(false)
+const downloadProgress = ref(0)
 const currentVersion = ref('')
 const isDev = import.meta.env.DEV
+
+let unlistenProgress = null
 
 async function checkForUpdates() {
   checkingUpdate.value = true
@@ -177,12 +179,53 @@ async function checkForUpdates() {
     updateInfo.value = info
     if (!isDev && info.has_update) {
       const ok = await showConfirm(t('settings.confirm.downloadUpdate', { version: info.latest_version }))
-      if (ok) openUrl(info.download_url).catch(e => console.error('openUrl failed:', e))
+      if (ok) await startDownload()
     }
   } catch (e) {
     console.error('check_for_updates failed:', translateError(e))
   } finally {
     checkingUpdate.value = false
+  }
+}
+
+async function startDownload() {
+  if (!updateInfo.value?.download_asset_url) {
+    // Fallback to opening browser if no asset URL
+    if (updateInfo.value?.download_url) {
+      openUrl(updateInfo.value.download_url).catch(e => console.error('openUrl failed:', e))
+    }
+    return
+  }
+
+  downloading.value = true
+  downloadProgress.value = 0
+
+  // Listen for progress events
+  const { listen } = await import('@tauri-apps/api/event')
+  unlistenProgress = await listen('update-download-progress', (event) => {
+    downloadProgress.value = event.payload
+  })
+
+  try {
+    await api.downloadAndInstallUpdate(
+      updateInfo.value.download_asset_url,
+      updateInfo.value.asset_name
+    )
+    copyMsg.value = t('settings.toast.updateDownloaded')
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copyMsg.value = '' }, 3000)
+  } catch (e) {
+    console.error('Download failed:', e)
+    copyMsg.value = t('settings.toast.updateDownloadFailed')
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copyMsg.value = '' }, 3000)
+  } finally {
+    downloading.value = false
+    downloadProgress.value = 0
+    if (unlistenProgress) {
+      unlistenProgress()
+      unlistenProgress = null
+    }
   }
 }
 
@@ -211,6 +254,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   unlistenProxySettings?.()
+  clearTimeout(copyTimer)
 })
 </script>
 
@@ -241,10 +285,10 @@ onUnmounted(() => {
 
         <!-- 外观主题 -->
         <div class="setting-row">
-          <div class="setting-label">外观</div>
+          <div class="setting-label">{{ $t('theme.appearance') }}</div>
           <div class="setting-control">
             <select v-model="themeSetting" @change="onThemeChange" class="lang-select">
-              <option value="auto">跟随系统</option>
+              <option value="auto">{{ $t('theme.auto') }}</option>
               <option value="dark">{{ $t('theme.dark') }}</option>
               <option value="light">{{ $t('theme.light') }}</option>
             </select>
@@ -259,7 +303,6 @@ onUnmounted(() => {
             <button class="port-check-btn" @click="checkPortConflict" :disabled="portChecking">
               {{ portChecking ? '...' : '🔍' }}
             </button>
-            <span class="saved" v-if="saved">&check; {{ $t('settings.label.saved') }}</span>
           </div>
         </div>
         <!-- 端口冲突提示 -->
@@ -309,7 +352,7 @@ onUnmounted(() => {
             <div class="exclude-list">
               <label v-for="p in profiles" :key="p.id" class="check-field exclude-item">
                 <input type="checkbox"
-                  :value="p.name"
+                  :value="p.id"
                   v-model="httpProxyExcludeProfiles"
                   @change="saveProxySettings" />
                 <span>{{ p.name }}</span>
@@ -325,17 +368,6 @@ onUnmounted(() => {
             <input type="checkbox" v-model="autoStart" />
           </div>
         </label>
-
-        <!-- 日志开关 -->
-        <label class="setting-row toggle-row" @change="toggleLogging">
-          <div class="setting-label">
-            {{ $t('settings.label.logEnabled') }}
-            <p class="field-hint">{{ $t('settings.label.logHint') }}</p>
-          </div>
-          <div class="setting-control">
-            <input type="checkbox" v-model="logEnabled" />
-          </div>
-        </label>
       </div>
     </div>
 
@@ -345,14 +377,20 @@ onUnmounted(() => {
       <p><strong>AIGateway</strong></p>
       <p class="about-version">
         {{ isDev ? $t('settings.label.devVersion') : (currentVersion || '...') }}
-        <button class="check-update-btn" @click="checkForUpdates" :disabled="checkingUpdate">
-          {{ checkingUpdate ? $t('settings.button.checking') : $t('settings.button.checkUpdate') }}
+        <button class="check-update-btn" @click="checkForUpdates" :disabled="checkingUpdate || downloading">
+          {{ checkingUpdate ? $t('settings.button.checking') : (downloading ? $t('settings.button.downloading') : $t('settings.button.checkUpdate')) }}
         </button>
-        <button class="download-btn" v-if="updateInfo?.has_update && !isDev" @click="openDownloadPage">{{ $t('settings.button.download') }}</button>
       </p>
+      <!-- 下载进度条 -->
+      <div class="download-progress" v-if="downloading">
+        <div class="progress-bar">
+          <div class="progress-fill" :style="{ width: downloadProgress + '%' }"></div>
+        </div>
+        <span class="progress-text">{{ downloadProgress }}%</span>
+      </div>
       <p class="about-update-hint" v-if="isDev && updateInfo">{{ $t('settings.label.latestRelease', { version: updateInfo.latest_version }) }}</p>
-      <p class="about-update-hint" v-else-if="updateInfo?.has_update">{{ $t('settings.label.updateAvailable', { version: updateInfo.latest_version }) }}</p>
-      <p class="about-update-hint up-to-date" v-else-if="updateInfo">{{ $t('settings.label.upToDate') }}</p>
+      <p class="about-update-hint" v-else-if="updateInfo?.has_update && !downloading">{{ $t('settings.label.updateAvailable', { version: updateInfo.latest_version }) }}</p>
+      <p class="about-update-hint up-to-date" v-else-if="updateInfo && !downloading">{{ $t('settings.label.upToDate') }}</p>
       <p>{{ $t('settings.label.authors') }}</p>
       <p><span class="github-link" @click="openGithub"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg> GitHub</span></p>
     </div>
@@ -383,7 +421,6 @@ onUnmounted(() => {
 .field-row { display: flex; align-items: center; gap: 12px; }
 .field-row input[type=number] { padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 15px; font-weight: 500; font-family: 'SF Mono','Fira Code',monospace; outline: none; width: 130px; transition: all .2s; background: var(--bg-input); color: var(--text-primary); }
 .field-row input[type=number]:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.saved { font-size: 13px; color: var(--success); font-weight: 500; }
 .lang-select { padding: 10px 36px 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; color: var(--text-primary); background: var(--bg-input); outline: none; min-width: 180px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238b95b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; cursor: pointer; transition: all .2s; }
 .lang-select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .check-field { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: var(--text-secondary); }
@@ -442,6 +479,11 @@ label.toggle-row { cursor: pointer; margin: 0; }
 .about strong { color: var(--text-secondary); }
 .github-link { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); text-decoration: none; vertical-align: middle; cursor: pointer; }
 .github-link:hover { text-decoration: underline; }
+
+.download-progress { display: flex; align-items: center; gap: 12px; justify-content: center; margin: 12px 0; padding: 0 40px; }
+.progress-bar { flex: 1; max-width: 200px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s ease; }
+.progress-text { font-size: 12px; color: var(--accent); font-weight: 500; min-width: 36px; text-align: left; }
 
 .copy-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 999; padding: 8px 20px; border-radius: var(--radius-md); font-size: 13px; font-weight: 500; color: var(--success); background: var(--success-soft); border: 1px solid rgba(52,211,153,.2); box-shadow: var(--shadow-md); pointer-events: none; }
 .fade-enter-active { transition: all .25s cubic-bezier(.4,0,.2,1); }

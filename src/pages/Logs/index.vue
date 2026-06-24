@@ -5,6 +5,7 @@ import { api } from '../../api.js'
 
 const { t } = useI18n()
 
+const logEnabled = ref(false)
 const logs = ref([])
 const logsLoading = ref(false)
 const logsLoaded = ref(false)
@@ -61,12 +62,30 @@ async function loadLogs() {
 
 async function clearLogs() {
   if (!await showConfirm(t('settings.confirm.clearLogs'))) return
-  await api.clearLogs(); logs.value = []; logTotal.value = 0; logPage.value = 1; logsLoaded.value = false; logFileSize.value = 0;
+  try {
+    await api.clearLogs()
+    logs.value = []
+    logTotal.value = 0
+    logPage.value = 1
+    logsLoaded.value = false
+    logFileSize.value = 0
+  } catch (e) {
+    console.error('Clear logs failed:', e)
+  }
 }
 
 async function clearLogsBodyData() {
   if (!await showConfirm(t('settings.confirm.clearBodies'))) return
-  await api.clearLogsBodies(); await loadLogs()
+  try {
+    await api.clearLogsBodies()
+    await loadLogs()
+  } catch (e) {
+    console.error('Clear log bodies failed:', e)
+  }
+}
+
+async function toggleLogging() {
+  await api.setLogEnabled(logEnabled.value)
 }
 
 function statusLabel(c) {
@@ -120,10 +139,14 @@ function fmtSize(bytes) {
 let copyTimer = 0
 const copyMsg = ref('')
 async function copyText(text, label) {
-  await api.copyText(text)
-  copyMsg.value = t('common.copySuccess', { label })
-  clearTimeout(copyTimer)
-  copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
+  try {
+    await api.copyText(text)
+    copyMsg.value = t('common.copySuccess', { label })
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
+  } catch (e) {
+    console.error('Copy text failed:', e)
+  }
 }
 
 const logTotalPages = computed(() => {
@@ -170,7 +193,8 @@ function nextPage() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  logEnabled.value = await api.getLogEnabled()
   loadProfiles().catch(e => console.error('Load profiles failed:', e))
   loadLogs().catch(e => console.error('Load logs failed:', e))
 })
@@ -178,8 +202,24 @@ onMounted(() => {
 
 <template>
   <div class="logs-page">
+    <Transition name="fade">
+      <div class="copy-toast" v-if="copyMsg">{{ copyMsg }}</div>
+    </Transition>
     <div class="page-header">
       <h2>{{ $t('nav.logs') }}</h2>
+    </div>
+
+    <!-- 日志开关 -->
+    <div class="log-toggle-card">
+      <label class="log-toggle-row" @change="toggleLogging">
+        <div class="log-toggle-label">
+          {{ $t('settings.label.logEnabled') }}
+          <p class="log-toggle-hint">{{ $t('settings.label.logHint') }}</p>
+        </div>
+        <div class="log-toggle-control">
+          <input type="checkbox" v-model="logEnabled" />
+        </div>
+      </label>
     </div>
 
     <div class="card">
@@ -281,6 +321,12 @@ onMounted(() => {
 .logs-page { padding: 16px; max-width: 780px; margin: 0 auto; padding-bottom: 40px; }
 .page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .page-header h2 { font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0; }
+.log-toggle-card { margin-bottom: 12px; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); }
+.log-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; margin: 0; }
+.log-toggle-label { flex: 1; min-width: 0; font-size: 14px; color: var(--text-primary); font-weight: 500; }
+.log-toggle-hint { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; font-weight: 400; }
+.log-toggle-control { flex-shrink: 0; display: flex; align-items: center; }
+.log-toggle-control input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 .card { margin-bottom: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); overflow: hidden; }
 .card-body { padding: 12px 16px 16px; position: relative; z-index: 1; }
 .card-empty { padding: 20px 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
@@ -329,6 +375,12 @@ onMounted(() => {
 .copy-body-btn { margin-left: 8px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 4px; background: transparent; font-size: 11px; color: var(--text-secondary); cursor: pointer; transition: all .15s; }
 .copy-body-btn:hover { background: var(--accent-soft); color: var(--text-primary); }
 .log-body pre { margin-top: 4px; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 11px; font-family: 'SF Mono',monospace; color: var(--text-secondary); white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+
+/* Toast */
+.copy-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 999; padding: 8px 20px; border-radius: var(--radius-md); font-size: 13px; font-weight: 500; color: var(--success); background: var(--success-soft); border: 1px solid rgba(52,211,153,.2); box-shadow: var(--shadow-md); pointer-events: none; }
+.fade-enter-active { transition: all .25s cubic-bezier(.4,0,.2,1); }
+.fade-leave-active { transition: all .2s cubic-bezier(.4,0,.2,1); }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
 /* Confirm dialog */
 .confirm-overlay { position: fixed; inset: 0; z-index: 9999; background: var(--bg-overlay); display: flex; align-items: center; justify-content: center; }

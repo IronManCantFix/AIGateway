@@ -122,6 +122,8 @@ Supported proxy endpoints (`/v1` prefix optional, both `/chat/completions` and `
 | `POST /v1/chat/completions` | OpenAI Chat Completions format |
 | `POST /v1/responses` | OpenAI Responses format |
 | `POST /v1/messages` | Anthropic Messages format |
+| `POST /v1/images/generations` | OpenAI Image Generation format |
+| `POST /v1/images/edits` | OpenAI Image Editing format |
 | `GET /v1/models` | Global model list (OpenAI-compatible format) |
 
 ### 📠 System Tray
@@ -171,6 +173,52 @@ Enable "Record request and response parameters" in settings to additionally log 
 
 > ⚠️ Enabling debug logging increases storage usage. Use the "Clear Parameters" button to clear recorded request/response bodies (preserving stats), or "Clear Logs" to delete all logs.
 
+## 🔄 Model Mapping
+
+Model mapping allows you to redirect client-requested model IDs to actual model IDs. Useful when clients are locked to specific model names that you don't have.
+
+### Typical Use Cases
+
+- **Codex fixed models**: Codex only calls `gpt5.5`, but you want to use `gpt-4o`. Configure mapping: `gpt5.5` → `gpt-4o`
+- **Unified model names**: Multiple clients use different model names, map them to your actual available models
+
+### Configuration
+
+1. Find the "Model Mappings" card on the home page
+2. Click "+ Add mapping" button
+3. Fill in "Request Model" (model name sent by client) and "Actual Model" (real model name to map to)
+4. Enable the mapping toggle and save
+
+### Log Tags
+
+Mapped requests show `original_model → mapped_model` in logs for easy tracking.
+
+## ⚖️ Load Balancer
+
+When multiple providers offer the same model, configure load balancing to optimize request distribution and improve availability.
+
+### Strategies
+
+| Strategy | Description |
+|---|---|
+| **Round Robin** | Distribute requests evenly across providers |
+| **Failover** | Try providers in order, auto-switch on failure for high availability |
+
+### Configuration
+
+1. Find the "Load Balancer" card on the home page
+2. Click "+ Create Load Balancer Group" button
+3. Enter group name (e.g., "GPT-4o Dual Line")
+4. Select strategy (Round Robin or Failover)
+5. Select participating providers (at least 2 required)
+6. Save configuration
+
+### Use Cases
+
+- **Multi-account rotation**: Multiple OpenAI accounts with the same model, rotate to avoid rate limiting
+- **Primary-backup switching**: Auto-switch to backup provider on primary failure
+- **Cross-region redundancy**: Providers in different regions as backups for availability
+
 ## 🌐 HTTP Proxy
 
 When your network requires a proxy server to access upstream APIs, you can configure an HTTP proxy. All proxy requests will be forwarded through your specified HTTP/HTTPS/SOCKS5 proxy server.
@@ -196,6 +244,7 @@ Requests through the proxy show a blue `PROXY` badge in logs, making it easy to 
 |---|---|---|
 | `openai-chat` | `/v1/chat/completions` | OpenAI, relays, most compatible APIs |
 | `openai-response` | `/v1/responses` | OpenAI Responses API |
+| `openai-image` | `/v1/images/generations` `/v1/images/edits` | OpenAI Image Generation API (gpt-image-2, etc.) |
 | `anthropic-message` | `/v1/messages` | Anthropic Claude API |
 | `google-gemini` | `/v1beta/openai/chat/completions` | Google Gemini API (OpenAI-compatible mode) |
 
@@ -203,13 +252,15 @@ Requests through the proxy show a blue `PROXY` badge in logs, making it easy to 
 
 The proxy automatically handles cross-conversion between client request formats and upstream API formats:
 
-| Client Request | → openai-chat | → openai-response | → anthropic-message |
-|---|---|---|---|
-| `/v1/chat/completions` | Direct forward | → `/v1/responses` | → `/v1/messages` |
-| `/v1/responses` | → `/v1/chat/completions` | Direct forward | → `/v1/messages` |
-| `/v1/messages` | → `/v1/chat/completions` | → `/v1/responses` | Direct forward |
+| Client Request | → openai-chat | → openai-response | → anthropic-message | → openai-image |
+|---|---|---|---|---|
+| `/v1/chat/completions` | Direct forward | → `/v1/responses` | → `/v1/messages` | - |
+| `/v1/responses` | → `/v1/chat/completions` | Direct forward | → `/v1/messages` | - |
+| `/v1/messages` | → `/v1/chat/completions` | → `/v1/responses` | Direct forward | - |
+| `/v1/images/generations` | - | - | - | Direct forward |
+| `/v1/images/edits` | - | - | - | Direct forward |
 
-SSE streaming responses are also converted in real-time.
+SSE streaming responses are also converted in real-time. Image endpoints (`openai-image`) currently support direct forwarding only, not cross-protocol conversion.
 
 ## ✅ Tested Models
 
@@ -222,6 +273,7 @@ SSE streaming responses are also converted in real-time.
 | MiMo | mimo-v2-pro, MiMo-2.5-pro | `openai-chat` | ✅ |
 | DeepSeek | DeepSeek V4 Pro, DeepSeek V4 Flash | `openai-chat` | ✅ |
 | GPT | gpt-5.4, gpt-5.4-mini, gpt-5.5 | `openai-chat` | ✅ |
+| GPT Image | gpt-image-2 | `openai-image` | - |
 | Claude | claude-opus-4-7, claude-sonnet-4-6, claude-opus-4-6 | `anthropic-message` | ✅ |
 | Gemini | gemini-3.1-flash, gemini-3.1-flash-lite, gemini-3.1-pro | `google-gemini` | ✅ |
 
@@ -299,41 +351,6 @@ npx tauri icon <path-to-your-icon.png>
 
 This command automatically generates all platform (macOS, Windows, Linux, iOS) icon sizes and outputs them to the `src-tauri/icons/` directory.
 
-### When to Recompile the Proxy Server
-
-The proxy server (`proxy/proxy-server.js`) is compiled by `bun compile` into a standalone binary (Sidecar), embedded in the app. Therefore, **you must recompile after modifying `proxy/proxy-server.js`** for changes to take effect.
-
-Typical scenarios requiring recompilation:
-
-- Modified protocol conversion logic (request/response body format conversion)
-- Modified SSE stream converters
-- Modified routing handlers (e.g., adding new API endpoints)
-- Modified proxy forwarding logic
-
-Scenarios NOT requiring recompilation:
-
-- Only modified frontend code (`src/` directory Vue files) — `npm run tauri dev` auto hot-reloads
-- Only modified Rust backend code (`src-tauri/src/`) — `npm run tauri dev` auto recompiles
-- Only modified config files or README
-
-**Recompile proxy for development (current platform):**
-
-```bash
-npm run proxy:build:current      # compile for your host platform only
-# or simply: npm run tauri dev  —— it auto-builds the Sidecar for the current platform
-```
-
-**Production build (pick the platforms you need):**
-
-```bash
-npm run proxy:build              # all platforms
-npm run proxy:build:mac          # macOS (ARM + Intel)
-npm run proxy:build:windows      # Windows x64 only
-# ... see the "Production Build" section above for all variants
-```
-
-After recompilation, restart the app for changes to take effect.
-
 ## 📦 Tech Stack
 
 - **Frontend**: Vue 3 + Vite
@@ -373,10 +390,6 @@ aigateway/
 - Thanks to **DeepSeek V4 Pro** for its incredible cost-effectiveness. The first version ([utools plugin](https://github.com/a471640241/ai-gateway-utools)) was entirely built with DeepSeek V4 Pro
 - Thanks to **Xiaomi Orbit Hundred-Trillion Token Program** for providing a free Pro monthly plan. This desktop version was migrated from the utools version, developed with MiMo-V2.5-Pro
 - Thanks to **Claude Code** for being such a great development tool, significantly boosting development efficiency
-
-## 🗓️ Roadmap
-
-- **Image API Compatibility** — Support cross-protocol image request conversion (OpenAI `image_url` ↔ Anthropic `image` format), allowing OpenAI-format clients to send images through Anthropic APIs and vice versa
 
 ## 📄 License
 

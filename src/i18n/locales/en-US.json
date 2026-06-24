@@ -23,7 +23,9 @@
   },
   "theme": {
     "dark": "Dark",
-    "light": "Light"
+    "light": "Light",
+    "auto": "Follow System",
+    "appearance": "Appearance"
   },
   "home": {
     "status": {
@@ -177,7 +179,8 @@
       "nextPage": "Next",
       "checking": "Checking…",
       "checkUpdate": "Check for updates",
-      "download": "Download"
+      "download": "Download",
+      "downloading": "Downloading…"
     },
     "placeholder": {
       "optional": "Optional",
@@ -199,7 +202,10 @@
       "portCheckFailed": "Port check failed",
       "processKilled": "Process {pid} killed",
       "processKillFailed": "Failed to kill process: {msg}",
-      "portFreed": "Port {port} freed"
+      "portFreed": "Port {port} freed",
+      "themeSaveFailed": "Failed to save theme",
+      "updateDownloaded": "Download complete, opening installer…",
+      "updateDownloadFailed": "Download failed, please download manually from GitHub"
     },
     "chart": {
       "monthsShort": "Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec",

@@ -316,7 +316,10 @@ impl ConfigStore {
         let mut profile_json = serde_json::to_value(&profiles[idx]).map_err(|e| e.to_string())?;
         if let (Some(obj), Some(upd)) = (profile_json.as_object_mut(), updates.as_object()) {
             for (k, v) in upd {
-                obj.insert(k.clone(), v.clone());
+                // Prevent overwriting the id field
+                if k != "id" {
+                    obj.insert(k.clone(), v.clone());
+                }
             }
         }
         let updated: Profile = serde_json::from_value(profile_json).map_err(|e| e.to_string())?;
@@ -554,6 +557,11 @@ impl ConfigStore {
 
     pub fn add_log(&self, entry: &LogEntry) -> Result<(), String> {
         self.append_log_jsonl(entry)?;
+
+        // 仅统计 200 状态码的请求
+        if entry.status_code != 200 {
+            return Ok(());
+        }
 
         // Update aggregated stats
         let mut stats: AggregatedStats = self.read_json("aggregated-stats.json");

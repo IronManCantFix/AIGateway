@@ -106,6 +106,7 @@ onMounted(async () => {
   <Stats v-else-if="route === 'gw-stats'" />
   <Logs v-else-if="route === 'gw-logs'" />
   <Settings v-else-if="route === 'gw-set'" />
+  <Home v-else />
 
   <!-- Boot Toast -->
   <Transition name="boot-fade">

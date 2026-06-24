@@ -26,6 +26,9 @@ fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            // Clean up old update installers from temp directory
+            cleanup_old_installers();
+
             let config_store = Arc::new(ConfigStore::new());
             let proxy_manager = ProxyManager::new(Arc::clone(&config_store), app.handle().clone());
 
@@ -190,6 +193,10 @@ fn main() {
                 if !autostart_manager.is_enabled().unwrap_or(false) {
                     autostart_manager.enable().ok();
                 }
+                // Hide window on autostart (run in background)
+                if let Some(window) = app.get_webview_window("main") {
+                    window.hide().ok();
+                }
             }
 
             Ok(())
@@ -228,6 +235,7 @@ fn main() {
             commands::clear_aggregated_stats,
             commands::fetch_provider_models,
             commands::check_for_updates,
+            commands::download_and_install_update,
             commands::get_app_version,
             commands::set_language,
             commands::check_port,
@@ -248,5 +256,37 @@ fn rebuild_tray_menu(app: &tauri::AppHandle, state: &AppState) {
     let menu = tray::build_tray_menu(app, &state.config, &state.proxy);
     if let Some(tray) = app.tray_by_id("main") {
         tray.set_menu(Some(menu)).ok();
+    }
+}
+
+/// Clean up old update installers from temp directory
+fn cleanup_old_installers() {
+    let temp_dir = std::env::temp_dir();
+
+    // File patterns to clean up
+    let patterns = [
+        "AIGateway",
+        "aigateway",
+    ];
+
+    let extensions = [
+        ".dmg", ".msi", ".exe", ".AppImage", ".deb",
+        ".msi.zip", ".exe.zip", ".dmg.zip",
+    ];
+
+    if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let name_str = file_name.to_string_lossy();
+
+            // Check if file matches our patterns
+            let is_installer = patterns.iter().any(|p| name_str.starts_with(p))
+                && extensions.iter().any(|e| name_str.ends_with(e));
+
+            if is_installer {
+                // Try to remove the file, ignore errors (file may be in use)
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
     }
 }

@@ -146,6 +146,8 @@ wire_api = "responses"
 | `POST /v1/chat/completions` | OpenAI Chat Completions 格式 |
 | `POST /v1/responses` | OpenAI Responses 格式 |
 | `POST /v1/messages` | Anthropic Messages 格式 |
+| `POST /v1/images/generations` | OpenAI 图像生成格式 |
+| `POST /v1/images/edits` | OpenAI 图像编辑格式 |
 | `GET /v1/models` | 全局模型列表（OpenAI 兼容格式） |
 
 ### 📎 系统托盘
@@ -195,6 +197,52 @@ wire_api = "responses"
 
 > ⚠️ 开启调试日志会增加存储占用。可通过「清空参数」按钮清除已记录的请求/响应体（保留统计计数），或「清除日志」删除全部日志。
 
+## 🔄 模型映射
+
+模型映射功能允许你将客户端请求的模型 ID 映射为真实模型 ID。适用于客户端固定模型名称但你没有该模型的场景。
+
+### 典型用例
+
+- **Codex 固定模型**：Codex 只能调用 `gpt5.5`，但你想使用 `gpt-4o`，可以配置映射规则 `gpt5.5` → `gpt-4o`
+- **统一模型名称**：多个客户端使用不同的模型名称，可以通过映射统一到实际可用的模型
+
+### 配置方式
+
+1. 在首页找到「模型映射」配置卡片
+2. 点击「+ 添加映射」按钮
+3. 填写「请求模型」（客户端发送的模型名）和「实际模型」（要映射到的真实模型名）
+4. 启用映射开关，保存配置
+
+### 日志标记
+
+经过模型映射的请求会在日志中显示 `原始模型 → 映射后模型`，方便追踪映射效果。
+
+## ⚖️ 负载均衡
+
+当多个提供商提供相同模型时，可以配置负载均衡策略来优化请求分配和提高可用性。
+
+### 负载均衡策略
+
+| 策略 | 说明 |
+|---|---|
+| **轮询（Round Robin）** | 请求轮流分配到各个提供商，均匀分担负载 |
+| **故障转移（Failover）** | 按顺序尝试提供商，失败自动切换到下一个，确保高可用 |
+
+### 配置方式
+
+1. 在首页找到「负载均衡」配置卡片
+2. 点击「+ 创建负载均衡组」按钮
+3. 填写组名称（如「GPT-4o 双线」）
+4. 选择策略（轮询或故障转移）
+5. 选择参与的提供商（至少需要 2 个）
+6. 保存配置
+
+### 使用场景
+
+- **多账号轮询**：多个 OpenAI 账号提供相同模型，轮询分配请求避免单账号限流
+- **主备切换**：主提供商故障时自动切换到备用提供商，确保服务连续性
+- **跨区域容灾**：不同区域的提供商互为备份，提高可用性
+
 ## 🌐 HTTP 代理
 
 当你的网络环境需要通过代理服务器才能访问上游 API 时，可以配置 HTTP 代理。所有代理请求都会通过你指定的 HTTP/HTTPS/SOCKS5 代理服务器转发。
@@ -220,6 +268,7 @@ wire_api = "responses"
 |---|---|---|
 | `openai-chat` | `/v1/chat/completions` | OpenAI、中转站、大多数兼容 API |
 | `openai-response` | `/v1/responses` | OpenAI Responses API |
+| `openai-image` | `/v1/images/generations` `/v1/images/edits` | OpenAI 图像生成 API（gpt-image-2 等） |
 | `anthropic-message` | `/v1/messages` | Anthropic Claude API |
 | `google-gemini` | `/v1beta/openai/chat/completions` | Google Gemini API（OpenAI 兼容模式） |
 
@@ -227,13 +276,15 @@ wire_api = "responses"
 
 代理自动处理客户端请求格式与上游 API 格式之间的交叉转换：
 
-| 客户端请求 | → openai-chat | → openai-response | → anthropic-message |
-|---|---|---|---|
-| `/v1/chat/completions` | 直接转发 | → `/v1/responses` | → `/v1/messages` |
-| `/v1/responses` | → `/v1/chat/completions` | 直接转发 | → `/v1/messages` |
-| `/v1/messages` | → `/v1/chat/completions` | → `/v1/responses` | 直接转发 |
+| 客户端请求 | → openai-chat | → openai-response | → anthropic-message | → openai-image |
+|---|---|---|---|---|
+| `/v1/chat/completions` | 直接转发 | → `/v1/responses` | → `/v1/messages` | - |
+| `/v1/responses` | → `/v1/chat/completions` | 直接转发 | → `/v1/messages` | - |
+| `/v1/messages` | → `/v1/chat/completions` | → `/v1/responses` | 直接转发 | - |
+| `/v1/images/generations` | - | - | - | 直接转发 |
+| `/v1/images/edits` | - | - | - | 直接转发 |
 
-SSE 流式响应也会实时转换。
+SSE 流式响应也会实时转换。图像接口（`openai-image`）目前仅支持直连转发，不支持跨协议转换。
 
 ## ✅ 测试说明
 
@@ -246,6 +297,7 @@ SSE 流式响应也会实时转换。
 | MiMo | mimo-v2-pro, MiMo-2.5-pro | `openai-chat` | ✅ |
 | DeepSeek | DeepSeek V4 Pro, DeepSeek V4 Flash | `openai-chat` | ✅ |
 | GPT | gpt-5.4, gpt-5.4-mini, gpt-5.5 | `openai-chat` | ✅ |
+| GPT Image | gpt-image-2 | `openai-image` | - |
 | Claude | claude-opus-4-7, claude-sonnet-4-6, claude-opus-4-6 | `anthropic-message` | ✅ |
 | Gemini | gemini-3.1-flash, gemini-3.1-flash-lite, gemini-3.1-pro | `google-gemini` | ✅ |
 
@@ -323,41 +375,6 @@ npx tauri icon <path-to-your-icon.png>
 
 该命令会自动生成所有平台（macOS、Windows、Linux、iOS）所需的图标尺寸，输出到 `src-tauri/icons/` 目录。
 
-### 何时需要重新编译代理服务器
-
-代理服务器（`proxy/proxy-server.js`）会被 `bun compile` 编译为独立的二进制文件（Sidecar），嵌入到应用中运行。因此，**修改 `proxy/proxy-server.js` 后必须重新编译才能生效**。
-
-需要重新编译的典型场景：
-
-- 修改了协议转换逻辑（请求体/响应体格式转换）
-- 修改了 SSE 流式转换器
-- 修改了路由处理（如添加新的 API 端点）
-- 修改了代理转发逻辑
-
-不需要重新编译的情况：
-
-- 只修改了前端代码（`src/` 目录下的 Vue 文件）— `npm run tauri dev` 会自动热更新
-- 只修改了 Rust 后端代码（`src-tauri/src/`）— `npm run tauri dev` 会自动重新编译
-- 只修改了配置文件或 README
-
-**开发模式下重新编译代理（当前平台）：**
-
-```bash
-npm run proxy:build:current      # 仅编译当前主机平台
-# 或直接 npm run tauri dev —— 会自动触发当前平台 Sidecar 编译
-```
-
-**生产构建（按需选择平台）：**
-
-```bash
-npm run proxy:build              # 所有平台
-npm run proxy:build:mac          # macOS (ARM + Intel)
-npm run proxy:build:windows      # 仅 Windows x64
-# ... 详见 上文「生产构建」章节
-```
-
-重新编译后需要重启应用才能生效。
-
 ## 📦 技术栈
 
 - **前端**：Vue 3 + Vite
@@ -397,10 +414,6 @@ aigateway/
 - 感谢 **DeepSeek V4 Pro** 模型的超高性价比，第一版（[utools 插件版](https://github.com/a471640241/ai-gateway-utools)）完全使用 DeepSeek V4 Pro 开发
 - 感谢 **小米 Orbit 百万亿 Token 计划**，提供了免费的 Pro 月度套餐，本桌面版从 utools 版迁移而来，使用 MiMo-V2.5-Pro 开发
 - 感谢 **Claude Code** 这么好用的开发工具，让开发效率大幅提升
-
-## 🗓️ 后期计划
-
-- **图像接口兼容** — 支持跨协议的图像请求转换（OpenAI `image_url` ↔ Anthropic `image` 格式），让使用 OpenAI 格式的客户端也能通过 Anthropic 接口发送图片，反之亦然
 
 ## 📄 许可证
 

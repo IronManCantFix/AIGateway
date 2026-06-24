@@ -22,6 +22,8 @@ pub struct UpdateInfo {
     pub latest_version: String,
     pub has_update: bool,
     pub download_url: String,
+    pub download_asset_url: String,
+    pub asset_name: String,
 }
 
 // --- Proxy commands ---
@@ -438,12 +440,135 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
 
     let has_update = compare_versions(&current_version, &latest_version);
 
+    // Find the asset URL for the current platform
+    let assets = body.get("assets")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let (download_asset_url, asset_name) = find_platform_asset(&assets);
+
     Ok(UpdateInfo {
         current_version,
         latest_version,
         has_update,
         download_url,
+        download_asset_url,
+        asset_name,
     })
+}
+
+fn find_platform_asset(assets: &[serde_json::Value]) -> (String, String) {
+    #[cfg(target_os = "macos")]
+    let keywords = ["macos", "darwin", ".dmg", "aarch64-apple-darwin"];
+
+    #[cfg(target_os = "windows")]
+    let keywords = ["windows", "win", ".msi", ".exe", "x86_64-pc-windows"];
+
+    #[cfg(target_os = "linux")]
+    let keywords = ["linux", ".AppImage", ".deb", "x86_64-unknown-linux"];
+
+    for asset in assets {
+        let name = asset.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let lower_name = name.to_lowercase();
+        for keyword in &keywords {
+            if lower_name.contains(keyword) {
+                let url = asset.get("browser_download_url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                return (url, name.to_string());
+            }
+        }
+    }
+    (String::new(), String::new())
+}
+
+#[tauri::command]
+pub async fn download_and_install_update(
+    app_handle: tauri::AppHandle,
+    url: String,
+    file_name: String,
+) -> Result<String, crate::error::AppError> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    if url.is_empty() {
+        return Err(crate::error::AppError::new("update.noDownloadUrl"));
+    }
+
+    // Download to temp directory
+    let temp_dir = std::env::temp_dir();
+    let file_path = temp_dir.join(&file_name);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| crate::error::AppError::new("http.clientFailed").with_detail(e.to_string()))?;
+
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "AIGateway")
+        .send()
+        .await
+        .map_err(|e| crate::error::AppError::new("update.downloadFailed").with_detail(e.to_string()))?;
+
+    if !resp.status().is_success() {
+        return Err(crate::error::AppError::new("update.downloadFailed")
+            .with_detail(format!("HTTP {}", resp.status())));
+    }
+
+    let total_size = resp.content_length().unwrap_or(0);
+    let mut file = tokio::fs::File::create(&file_path)
+        .await
+        .map_err(|e| crate::error::AppError::new("update.fileCreateFailed").with_detail(e.to_string()))?;
+
+    let mut downloaded: u64 = 0;
+    let mut stream = resp.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| crate::error::AppError::new("update.downloadFailed").with_detail(e.to_string()))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| crate::error::AppError::new("update.fileWriteFailed").with_detail(e.to_string()))?;
+        downloaded += chunk.len() as u64;
+
+        // Emit progress
+        if total_size > 0 {
+            let progress = (downloaded as f64 / total_size as f64 * 100.0) as u32;
+            app_handle.emit("update-download-progress", progress).ok();
+        }
+    }
+
+    file.flush().await.map_err(|e| crate::error::AppError::new("update.fileWriteFailed").with_detail(e.to_string()))?;
+    drop(file);
+
+    // Open the downloaded file
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&file_path)
+            .spawn()
+            .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &file_path.to_string_lossy()])
+            .spawn()
+            .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&file_path)
+            .spawn()
+            .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
+    }
+
+    Ok(file_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -535,7 +660,8 @@ fn get_windows_process_name(pid: u32) -> Option<String> {
 pub fn kill_process(pid: u32) -> Result<(), String> {
     #[cfg(unix)]
     {
-        // SAFETY: pid comes from lsof output, user confirmed the action
+        // SAFETY: libc::kill is an FFI call to the kernel's signal interface.
+        // The kernel enforces permission checks (EPERM if the caller doesn't own the process).
         let result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
         if result == 0 {
             Ok(())
