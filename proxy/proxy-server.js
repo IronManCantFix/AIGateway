@@ -255,7 +255,11 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     // Failover callback: if it returns false, don't write to client (allow retry)
     if (onUpstreamResponse) {
       const shouldContinue = onUpstreamResponse(upstreamRes)
-      if (!shouldContinue) return
+      if (!shouldContinue) {
+        // Clean up the upstream request to prevent resource leaks
+        upstreamReq.destroy()
+        return
+      }
     }
 
     // Decompress upstream response if content-encoded (gzip/deflate/br)

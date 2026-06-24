@@ -61,12 +61,26 @@ async function loadLogs() {
 
 async function clearLogs() {
   if (!await showConfirm(t('settings.confirm.clearLogs'))) return
-  await api.clearLogs(); logs.value = []; logTotal.value = 0; logPage.value = 1; logsLoaded.value = false; logFileSize.value = 0;
+  try {
+    await api.clearLogs()
+    logs.value = []
+    logTotal.value = 0
+    logPage.value = 1
+    logsLoaded.value = false
+    logFileSize.value = 0
+  } catch (e) {
+    console.error('Clear logs failed:', e)
+  }
 }
 
 async function clearLogsBodyData() {
   if (!await showConfirm(t('settings.confirm.clearBodies'))) return
-  await api.clearLogsBodies(); await loadLogs()
+  try {
+    await api.clearLogsBodies()
+    await loadLogs()
+  } catch (e) {
+    console.error('Clear log bodies failed:', e)
+  }
 }
 
 function statusLabel(c) {
@@ -120,10 +134,14 @@ function fmtSize(bytes) {
 let copyTimer = 0
 const copyMsg = ref('')
 async function copyText(text, label) {
-  await api.copyText(text)
-  copyMsg.value = t('common.copySuccess', { label })
-  clearTimeout(copyTimer)
-  copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
+  try {
+    await api.copyText(text)
+    copyMsg.value = t('common.copySuccess', { label })
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
+  } catch (e) {
+    console.error('Copy text failed:', e)
+  }
 }
 
 const logTotalPages = computed(() => {
@@ -178,6 +196,9 @@ onMounted(() => {
 
 <template>
   <div class="logs-page">
+    <Transition name="fade">
+      <div class="copy-toast" v-if="copyMsg">{{ copyMsg }}</div>
+    </Transition>
     <div class="page-header">
       <h2>{{ $t('nav.logs') }}</h2>
     </div>
@@ -329,6 +350,12 @@ onMounted(() => {
 .copy-body-btn { margin-left: 8px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 4px; background: transparent; font-size: 11px; color: var(--text-secondary); cursor: pointer; transition: all .15s; }
 .copy-body-btn:hover { background: var(--accent-soft); color: var(--text-primary); }
 .log-body pre { margin-top: 4px; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 11px; font-family: 'SF Mono',monospace; color: var(--text-secondary); white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+
+/* Toast */
+.copy-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 999; padding: 8px 20px; border-radius: var(--radius-md); font-size: 13px; font-weight: 500; color: var(--success); background: var(--success-soft); border: 1px solid rgba(52,211,153,.2); box-shadow: var(--shadow-md); pointer-events: none; }
+.fade-enter-active { transition: all .25s cubic-bezier(.4,0,.2,1); }
+.fade-leave-active { transition: all .2s cubic-bezier(.4,0,.2,1); }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
 /* Confirm dialog */
 .confirm-overlay { position: fixed; inset: 0; z-index: 9999; background: var(--bg-overlay); display: flex; align-items: center; justify-content: center; }

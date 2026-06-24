@@ -23,7 +23,9 @@
   },
   "theme": {
     "dark": "Dark",
-    "light": "Light"
+    "light": "Light",
+    "auto": "Follow System",
+    "appearance": "Appearance"
   },
   "home": {
     "status": {
@@ -199,7 +201,8 @@
       "portCheckFailed": "Port check failed",
       "processKilled": "Process {pid} killed",
       "processKillFailed": "Failed to kill process: {msg}",
-      "portFreed": "Port {port} freed"
+      "portFreed": "Port {port} freed",
+      "themeSaveFailed": "Failed to save theme"
     },
     "chart": {
       "monthsShort": "Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec",

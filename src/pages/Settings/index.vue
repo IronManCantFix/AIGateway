@@ -136,12 +136,16 @@ function dismissPortConflict() {
 }
 
 async function onThemeChange() {
-  setThemeSetting(themeSetting.value)
+  const prev = themeSetting.value
+  setThemeSetting(prev)
   try {
     const current = await api.getSettings()
-    await api.setSettings({ ...current, theme: themeSetting.value })
+    await api.setSettings({ ...current, theme: prev })
   } catch (e) {
     console.error('Failed to save theme:', e)
+    copyMsg.value = t('settings.toast.themeSaveFailed')
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copyMsg.value = '' }, 2500)
   }
 }
 
@@ -211,6 +215,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   unlistenProxySettings?.()
+  clearTimeout(copyTimer)
 })
 </script>
 
@@ -241,10 +246,10 @@ onUnmounted(() => {
 
         <!-- 外观主题 -->
         <div class="setting-row">
-          <div class="setting-label">外观</div>
+          <div class="setting-label">{{ $t('theme.appearance') }}</div>
           <div class="setting-control">
             <select v-model="themeSetting" @change="onThemeChange" class="lang-select">
-              <option value="auto">跟随系统</option>
+              <option value="auto">{{ $t('theme.auto') }}</option>
               <option value="dark">{{ $t('theme.dark') }}</option>
               <option value="light">{{ $t('theme.light') }}</option>
             </select>
@@ -309,7 +314,7 @@ onUnmounted(() => {
             <div class="exclude-list">
               <label v-for="p in profiles" :key="p.id" class="check-field exclude-item">
                 <input type="checkbox"
-                  :value="p.name"
+                  :value="p.id"
                   v-model="httpProxyExcludeProfiles"
                   @change="saveProxySettings" />
                 <span>{{ p.name }}</span>

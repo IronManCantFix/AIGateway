@@ -535,7 +535,8 @@ fn get_windows_process_name(pid: u32) -> Option<String> {
 pub fn kill_process(pid: u32) -> Result<(), String> {
     #[cfg(unix)]
     {
-        // SAFETY: pid comes from lsof output, user confirmed the action
+        // SAFETY: libc::kill is an FFI call to the kernel's signal interface.
+        // The kernel enforces permission checks (EPERM if the caller doesn't own the process).
         let result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
         if result == 0 {
             Ok(())
