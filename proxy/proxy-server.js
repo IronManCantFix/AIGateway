@@ -50,7 +50,7 @@ function cacheReasoning(callId, reasoning) {
 // --- Path → source format mapping ---
 
 const MAX_IMAGE_BODY = 200 * 1024 * 1024  // 200 MiB
-const MAX_JSON_BODY = 50 * 1024 * 1024  // 50 MiB
+const MAX_JSON_BODY = 200 * 1024 * 1024  // 200 MiB
 
 const PATH_TO_SOURCE = {
   '/v1/chat/completions': 'chat_completions',
