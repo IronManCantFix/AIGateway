@@ -76,8 +76,7 @@ const PROVIDER_META = {
                           } },
   'google-gemini':      { target: 'chat_completions', path: '/v1beta/openai/chat/completions' },
   'google-nano-banana': { target: 'interactions', path: '/v1beta/interactions', authType: 'x-goog-api-key', paths: {
-                            '/v1/images/generations': '/v1beta/interactions',
-                            '/v1/images/edits':       '/v1beta/interactions'
+                            '/v1/images/generations': '/v1beta/interactions'
                           } }
 }
 
@@ -144,15 +143,20 @@ function convertOpenAIToNanoBanana(body, defaultModel) {
 
 function convertNanoBananaResponseToOpenAI(interaction, responseFormat) {
   let base64Data = null
+  let mimeType = 'image/png'
   let revisedPrompt = null
   if (interaction.output_image && interaction.output_image.data) {
     base64Data = interaction.output_image.data
+    if (interaction.output_image.mime_type) mimeType = interaction.output_image.mime_type
   }
   if (!base64Data && Array.isArray(interaction.steps)) {
     for (const step of interaction.steps) {
       if (step.type === 'model_output' && Array.isArray(step.content)) {
         for (const block of step.content) {
-          if (block.type === 'image' && block.data) base64Data = block.data
+          if (block.type === 'image' && block.data) {
+            base64Data = block.data
+            if (block.mime_type) mimeType = block.mime_type
+          }
           if (block.type === 'text' && block.text) revisedPrompt = block.text
         }
       }
@@ -161,7 +165,7 @@ function convertNanoBananaResponseToOpenAI(interaction, responseFormat) {
   if (!base64Data) return { created: Math.floor(Date.now() / 1000), data: [] }
   const item = {}
   if (responseFormat === 'url') {
-    item.url = 'data:image/png;base64,' + base64Data
+    item.url = `data:${mimeType};base64,${base64Data}`
   } else {
     item.b64_json = base64Data
   }
