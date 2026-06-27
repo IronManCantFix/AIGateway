@@ -81,6 +81,7 @@ const PROVIDER_META = {
 }
 
 const IMAGE_PROVIDERS = new Set(['openai-image', 'google-nano-banana'])
+const INTERACTIONS_PROVIDERS = new Set(['google-nano-banana'])
 
 // --- OpenAI → Nano Banana conversion helpers ---
 
@@ -778,7 +779,7 @@ function findLBGroupForModel(requestedModel, source) {
       const p = currentConfig.profiles.find(pr => pr.id === pid)
       if (!p) continue
       if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
-      if (source !== 'image' && IMAGE_PROVIDERS.has(p.providerType)) continue
+      if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) continue
       if (Array.isArray(p.models) && p.models.includes(requestedModel)) {
         return group
       }
@@ -902,7 +903,7 @@ async function handleApiRequest(req, res) {
         const p = currentConfig.profiles.find(pr => pr.id === pid)
         if (!p) continue
         if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
-        if (source !== 'image' && IMAGE_PROVIDERS.has(p.providerType)) continue
+        if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) continue
         if (!Array.isArray(p.models) || !p.models.includes(requestedModel)) continue
         profile = p
         break
@@ -917,7 +918,7 @@ async function handleApiRequest(req, res) {
     if (!profile) {
       for (const p of currentConfig.profiles) {
         if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
-        if (source !== 'image' && IMAGE_PROVIDERS.has(p.providerType)) continue
+        if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) continue
         if (Array.isArray(p.models) && p.models.length > 0 && p.models.includes(requestedModel)) {
           profile = p
           break
@@ -933,7 +934,7 @@ async function handleApiRequest(req, res) {
     // No model specified — use the first profile with models (matching source family)
     for (const p of currentConfig.profiles) {
       if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
-      if (source !== 'image' && IMAGE_PROVIDERS.has(p.providerType)) continue
+      if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) continue
       if (Array.isArray(p.models) && p.models.length > 0) {
         profile = p
         break
@@ -1104,7 +1105,8 @@ async function handleApiRequest(req, res) {
   if (source === 'interactions') {
     // Native pass-through: forward request body as-is to Google Interactions API
     forwardRequest(req, res, upstreamUrl, profile.apiKey, body,
-      null, req._onResponseBody || null, null, source, profile.id, 'application/json')
+      null, req._onResponseBody || null, null, source, profile.id, 'application/json',
+      null, meta.authType)
     return
   }
 
@@ -1188,7 +1190,7 @@ async function handleApiRequest(req, res) {
         const np = currentConfig.profiles.find(p => p.id === nextPid)
         if (!np) continue
         if (source === 'image' && !IMAGE_PROVIDERS.has(np.providerType)) continue
-        if (source !== 'image' && IMAGE_PROVIDERS.has(np.providerType)) continue
+        if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(np.providerType) && IMAGE_PROVIDERS.has(np.providerType)) continue
         if (!Array.isArray(np.models) || !np.models.includes(requestedModel)) continue
         nextProfile = np
         break
