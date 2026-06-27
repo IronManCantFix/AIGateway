@@ -75,7 +75,10 @@ const PROVIDER_META = {
                             '/v1/images/edits':       '/v1/images/edits'
                           } },
   'google-gemini':      { target: 'chat_completions', path: '/v1beta/openai/chat/completions' },
-  'google-nano-banana': { target: 'interactions', path: '/v1beta/interactions', authType: 'x-goog-api-key' }
+  'google-nano-banana': { target: 'interactions', path: '/v1beta/interactions', authType: 'x-goog-api-key', paths: {
+                            '/v1/images/generations': '/v1beta/interactions',
+                            '/v1/images/edits':       '/v1beta/interactions'
+                          } }
 }
 
 const IMAGE_PROVIDERS = new Set(['openai-image', 'google-nano-banana'])
