@@ -78,6 +78,8 @@ const PROVIDER_META = {
   'google-nano-banana': { target: 'interactions', path: '/v1beta/interactions', authType: 'x-goog-api-key' }
 }
 
+const IMAGE_PROVIDERS = new Set(['openai-image', 'google-nano-banana'])
+
 // --- Read request body ---
 
 function readBody(req) {
@@ -677,14 +679,13 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
 function findLBGroupForModel(requestedModel, source) {
   if (!requestedModel || !currentConfig?.loadBalancerGroups) return null
-  const imageProviders = new Set(['openai-image', 'google-nano-banana'])
   for (const group of currentConfig.loadBalancerGroups) {
     if (!group.profileIds || group.profileIds.length === 0) continue
     for (const pid of group.profileIds) {
       const p = currentConfig.profiles.find(pr => pr.id === pid)
       if (!p) continue
-      if (source === 'image' && !imageProviders.has(p.providerType)) continue
-      if (source !== 'image' && imageProviders.has(p.providerType)) continue
+      if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
+      if (source !== 'image' && IMAGE_PROVIDERS.has(p.providerType)) continue
       if (Array.isArray(p.models) && p.models.includes(requestedModel)) {
         return group
       }
@@ -715,7 +716,6 @@ function handleModels(_, res) {
 // --- Handle API request ---
 
 async function handleApiRequest(req, res) {
-  const imageProviders = new Set(['openai-image', 'google-nano-banana'])
   // Check active profiles
   if (!currentConfig || !currentConfig.profiles || currentConfig.profiles.length === 0) {
     res.writeHead(503, { 'Content-Type': 'application/json' })
@@ -808,8 +808,8 @@ async function handleApiRequest(req, res) {
       for (const pid of lbGroup.profileIds) {
         const p = currentConfig.profiles.find(pr => pr.id === pid)
         if (!p) continue
-        if (source === 'image' && !imageProviders.has(p.providerType)) continue
-        if (source !== 'image' && imageProviders.has(p.providerType)) continue
+        if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
+        if (source !== 'image' && IMAGE_PROVIDERS.has(p.providerType)) continue
         if (!Array.isArray(p.models) || !p.models.includes(requestedModel)) continue
         profile = p
         break
@@ -823,8 +823,8 @@ async function handleApiRequest(req, res) {
     // Fallback: no LB group or LB didn't select a profile
     if (!profile) {
       for (const p of currentConfig.profiles) {
-        if (source === 'image' && !imageProviders.has(p.providerType)) continue
-        if (source !== 'image' && imageProviders.has(p.providerType)) continue
+        if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
+        if (source !== 'image' && IMAGE_PROVIDERS.has(p.providerType)) continue
         if (Array.isArray(p.models) && p.models.length > 0 && p.models.includes(requestedModel)) {
           profile = p
           break
@@ -839,8 +839,8 @@ async function handleApiRequest(req, res) {
   } else {
     // No model specified — use the first profile with models (matching source family)
     for (const p of currentConfig.profiles) {
-      if (source === 'image' && !imageProviders.has(p.providerType)) continue
-      if (source !== 'image' && imageProviders.has(p.providerType)) continue
+      if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
+      if (source !== 'image' && IMAGE_PROVIDERS.has(p.providerType)) continue
       if (Array.isArray(p.models) && p.models.length > 0) {
         profile = p
         break
@@ -1016,8 +1016,8 @@ async function handleApiRequest(req, res) {
         if (triedIds.has(nextPid)) continue
         const np = currentConfig.profiles.find(p => p.id === nextPid)
         if (!np) continue
-        if (source === 'image' && !imageProviders.has(np.providerType)) continue
-        if (source !== 'image' && imageProviders.has(np.providerType)) continue
+        if (source === 'image' && !IMAGE_PROVIDERS.has(np.providerType)) continue
+        if (source !== 'image' && IMAGE_PROVIDERS.has(np.providerType)) continue
         if (!Array.isArray(np.models) || !np.models.includes(requestedModel)) continue
         nextProfile = np
         break
