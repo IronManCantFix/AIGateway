@@ -59,7 +59,8 @@ const PATH_TO_SOURCE = {
   '/responses': 'responses',
   '/messages': 'messages',
   '/v1/images/generations': 'image',
-  '/v1/images/edits': 'image'
+  '/v1/images/edits': 'image',
+  '/v1beta/interactions': 'interactions'
 }
 
 // --- Provider type → target format + upstream path ---
@@ -73,7 +74,8 @@ const PROVIDER_META = {
                             '/v1/images/generations': '/v1/images/generations',
                             '/v1/images/edits':       '/v1/images/edits'
                           } },
-  'google-gemini':      { target: 'chat_completions', path: '/v1beta/openai/chat/completions' }
+  'google-gemini':      { target: 'chat_completions', path: '/v1beta/openai/chat/completions' },
+  'google-nano-banana': { target: 'interactions', path: '/v1beta/interactions', authType: 'x-goog-api-key' }
 }
 
 // --- Read request body ---
@@ -675,13 +677,14 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
 function findLBGroupForModel(requestedModel, source) {
   if (!requestedModel || !currentConfig?.loadBalancerGroups) return null
+  const imageProviders = new Set(['openai-image', 'google-nano-banana'])
   for (const group of currentConfig.loadBalancerGroups) {
     if (!group.profileIds || group.profileIds.length === 0) continue
     for (const pid of group.profileIds) {
       const p = currentConfig.profiles.find(pr => pr.id === pid)
       if (!p) continue
-      if (source === 'image' && p.providerType !== 'openai-image') continue
-      if (source !== 'image' && p.providerType === 'openai-image') continue
+      if (source === 'image' && !imageProviders.has(p.providerType)) continue
+      if (source !== 'image' && imageProviders.has(p.providerType)) continue
       if (Array.isArray(p.models) && p.models.includes(requestedModel)) {
         return group
       }
@@ -712,6 +715,7 @@ function handleModels(_, res) {
 // --- Handle API request ---
 
 async function handleApiRequest(req, res) {
+  const imageProviders = new Set(['openai-image', 'google-nano-banana'])
   // Check active profiles
   if (!currentConfig || !currentConfig.profiles || currentConfig.profiles.length === 0) {
     res.writeHead(503, { 'Content-Type': 'application/json' })
@@ -804,8 +808,8 @@ async function handleApiRequest(req, res) {
       for (const pid of lbGroup.profileIds) {
         const p = currentConfig.profiles.find(pr => pr.id === pid)
         if (!p) continue
-        if (source === 'image' && p.providerType !== 'openai-image') continue
-        if (source !== 'image' && p.providerType === 'openai-image') continue
+        if (source === 'image' && !imageProviders.has(p.providerType)) continue
+        if (source !== 'image' && imageProviders.has(p.providerType)) continue
         if (!Array.isArray(p.models) || !p.models.includes(requestedModel)) continue
         profile = p
         break
@@ -819,8 +823,8 @@ async function handleApiRequest(req, res) {
     // Fallback: no LB group or LB didn't select a profile
     if (!profile) {
       for (const p of currentConfig.profiles) {
-        if (source === 'image' && p.providerType !== 'openai-image') continue
-        if (source !== 'image' && p.providerType === 'openai-image') continue
+        if (source === 'image' && !imageProviders.has(p.providerType)) continue
+        if (source !== 'image' && imageProviders.has(p.providerType)) continue
         if (Array.isArray(p.models) && p.models.length > 0 && p.models.includes(requestedModel)) {
           profile = p
           break
@@ -835,8 +839,8 @@ async function handleApiRequest(req, res) {
   } else {
     // No model specified — use the first profile with models (matching source family)
     for (const p of currentConfig.profiles) {
-      if (source === 'image' && p.providerType !== 'openai-image') continue
-      if (source !== 'image' && p.providerType === 'openai-image') continue
+      if (source === 'image' && !imageProviders.has(p.providerType)) continue
+      if (source !== 'image' && imageProviders.has(p.providerType)) continue
       if (Array.isArray(p.models) && p.models.length > 0) {
         profile = p
         break
@@ -926,6 +930,13 @@ async function handleApiRequest(req, res) {
     return
   }
 
+  if (source === 'interactions') {
+    // Native pass-through: forward request body as-is to Google Interactions API
+    forwardRequest(req, res, upstreamUrl, profile.apiKey, body,
+      null, req._onResponseBody || null, null, source, profile.id, 'application/json')
+    return
+  }
+
   const needStream = req.headers.accept?.includes('text/event-stream') || body.stream
   let sseConverter = needStream ? createSSEConverter(source, meta.target) : null
   // Same-format chat_completions: convert reasoning_details / <think> tags
@@ -1005,8 +1016,8 @@ async function handleApiRequest(req, res) {
         if (triedIds.has(nextPid)) continue
         const np = currentConfig.profiles.find(p => p.id === nextPid)
         if (!np) continue
-        if (source === 'image' && np.providerType !== 'openai-image') continue
-        if (source !== 'image' && np.providerType === 'openai-image') continue
+        if (source === 'image' && !imageProviders.has(np.providerType)) continue
+        if (source !== 'image' && imageProviders.has(np.providerType)) continue
         if (!Array.isArray(np.models) || !np.models.includes(requestedModel)) continue
         nextProfile = np
         break
