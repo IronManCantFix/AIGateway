@@ -139,7 +139,7 @@ function convertOpenAIToNanoBanana(body, defaultModel) {
   return result
 }
 
-function convertNanoBananaResponseToOpenAI(interaction) {
+function convertNanoBananaResponseToOpenAI(interaction, responseFormat) {
   let base64Data = null
   let revisedPrompt = null
   if (interaction.output_image && interaction.output_image.data) {
@@ -156,7 +156,12 @@ function convertNanoBananaResponseToOpenAI(interaction) {
     }
   }
   if (!base64Data) return { created: Math.floor(Date.now() / 1000), data: [] }
-  const item = { b64_json: base64Data }
+  const item = {}
+  if (responseFormat === 'url') {
+    item.url = 'data:image/png;base64,' + base64Data
+  } else {
+    item.b64_json = base64Data
+  }
   if (revisedPrompt) item.revised_prompt = revisedPrompt
   return { created: Math.floor(Date.now() / 1000), data: [item] }
 }
@@ -1030,8 +1035,8 @@ async function handleApiRequest(req, res) {
         if (decompressor) {
           upstreamRes.pipe(decompressor)
           upstreamRes.on('error', (e) => decompressor.destroy(e))
-          upstreamRes.headers = upstreamRes.headers
-          upstreamRes.statusCode = upstreamRes.statusCode
+          decompressor.headers = upstreamRes.headers
+          decompressor.statusCode = upstreamRes.statusCode
           upstreamRes = decompressor
         }
 
@@ -1047,9 +1052,9 @@ async function handleApiRequest(req, res) {
           }
           try {
             const interaction = JSON.parse(rawBody)
-            const openaiResponse = convertNanoBananaResponseToOpenAI(interaction)
+            const openaiResponse = convertNanoBananaResponseToOpenAI(interaction, body.response_format)
             const responseBody = JSON.stringify(openaiResponse)
-            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.writeHead(upstreamRes.statusCode || 200, { 'Content-Type': 'application/json' })
             res.end(responseBody)
             if (req._onResponseBody) req._onResponseBody(responseBody)
           } catch (e) {
