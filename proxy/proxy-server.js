@@ -80,6 +80,87 @@ const PROVIDER_META = {
 
 const IMAGE_PROVIDERS = new Set(['openai-image', 'google-nano-banana'])
 
+// --- OpenAI → Nano Banana conversion helpers ---
+
+const OPENAI_SIZE_TO_NANOBANANA = {
+  '1024x1024': { aspect_ratio: '1:1', image_size: '1K' },
+  '1792x1024': { aspect_ratio: '16:9', image_size: '2K' },
+  '1024x1792': { aspect_ratio: '9:16', image_size: '2K' },
+  '512x512':   { aspect_ratio: '1:1', image_size: '0.5K' },
+  '256x256':   { aspect_ratio: '1:1', image_size: '0.5K' }
+}
+
+const NANOBANANA_RATIOS = [
+  { ratio: '1:1', w: 1, h: 1 },
+  { ratio: '16:9', w: 16, h: 9 },
+  { ratio: '9:16', w: 9, h: 16 },
+  { ratio: '4:3', w: 4, h: 3 },
+  { ratio: '3:4', w: 3, h: 4 },
+  { ratio: '3:2', w: 3, h: 2 },
+  { ratio: '2:3', w: 2, h: 3 },
+  { ratio: '5:4', w: 5, h: 4 },
+  { ratio: '4:5', w: 4, h: 5 },
+  { ratio: '21:9', w: 21, h: 9 }
+]
+
+function convertOpenAISizeToNanoBanana(size) {
+  if (!size) return {}
+  const direct = OPENAI_SIZE_TO_NANOBANANA[size]
+  if (direct) return direct
+  const match = /^(\d+)x(\d+)$/.exec(size)
+  if (!match) return {}
+  const w = parseInt(match[1])
+  const h = parseInt(match[2])
+  const targetRatio = w / h
+  let best = NANOBANANA_RATIOS[0]
+  let bestDiff = Infinity
+  for (const r of NANOBANANA_RATIOS) {
+    const diff = Math.abs((r.w / r.h) - targetRatio)
+    if (diff < bestDiff) { bestDiff = diff; best = r }
+  }
+  const maxDim = Math.max(w, h)
+  const image_size = maxDim <= 512 ? '0.5K' : maxDim <= 1024 ? '1K' : '2K'
+  return { aspect_ratio: best.ratio, image_size }
+}
+
+function convertOpenAIToNanoBanana(body, defaultModel) {
+  const input = []
+  if (body.prompt) {
+    input.push({ type: 'text', text: body.prompt })
+  }
+  const result = {
+    model: body.model || defaultModel,
+    input: input.length === 1 ? input[0] : input
+  }
+  const format = convertOpenAISizeToNanoBanana(body.size)
+  if (format.aspect_ratio || format.image_size) {
+    result.response_format = { type: 'image', ...format }
+  }
+  return result
+}
+
+function convertNanoBananaResponseToOpenAI(interaction) {
+  let base64Data = null
+  let revisedPrompt = null
+  if (interaction.output_image && interaction.output_image.data) {
+    base64Data = interaction.output_image.data
+  }
+  if (!base64Data && Array.isArray(interaction.steps)) {
+    for (const step of interaction.steps) {
+      if (step.type === 'model_output' && Array.isArray(step.content)) {
+        for (const block of step.content) {
+          if (block.type === 'image' && block.data) base64Data = block.data
+          if (block.type === 'text' && block.text) revisedPrompt = block.text
+        }
+      }
+    }
+  }
+  if (!base64Data) return { created: Math.floor(Date.now() / 1000), data: [] }
+  const item = { b64_json: base64Data }
+  if (revisedPrompt) item.revised_prompt = revisedPrompt
+  return { created: Math.floor(Date.now() / 1000), data: [item] }
+}
+
 // --- Read request body ---
 
 function readBody(req) {
@@ -916,6 +997,84 @@ async function handleApiRequest(req, res) {
   req._upstreamUrl = upstreamUrl
 
   if (source === 'image') {
+    // OpenAI → Nano Banana conversion
+    if (profile.providerType === 'google-nano-banana' && urlPath === '/v1/images/generations') {
+      const nanoBody = convertOpenAIToNanoBanana(body, profile.defaultModel)
+      const nanoUrl = `${baseUrl}/v1beta/interactions`
+      req._upstreamUrl = nanoUrl
+
+      const parsed = new URL(nanoUrl)
+      const proxyConfig = currentConfig?.settings?.httpProxy
+      const agent = createProxyAgent(proxyConfig, true, profile.id)
+      const bodyBuf = Buffer.from(JSON.stringify(nanoBody))
+
+      const options = {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method: 'POST',
+        agent,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': bodyBuf.length,
+          'x-goog-api-key': profile.apiKey
+        }
+      }
+
+      const upstreamReq = https.request(options, (upstreamRes) => {
+        const encoding = upstreamRes.headers['content-encoding']
+        const decompressor = encoding === 'gzip' ? zlib.createGunzip()
+          : encoding === 'deflate' ? zlib.createInflate()
+          : encoding === 'br' ? zlib.createBrotliDecompress()
+          : null
+        if (decompressor) {
+          upstreamRes.pipe(decompressor)
+          upstreamRes.on('error', (e) => decompressor.destroy(e))
+          upstreamRes.headers = upstreamRes.headers
+          upstreamRes.statusCode = upstreamRes.statusCode
+          upstreamRes = decompressor
+        }
+
+        const chunks = []
+        upstreamRes.on('data', c => chunks.push(c))
+        upstreamRes.on('end', () => {
+          const rawBody = Buffer.concat(chunks).toString()
+          if (upstreamRes.statusCode >= 400) {
+            res.writeHead(upstreamRes.statusCode, { 'Content-Type': 'application/json' })
+            res.end(rawBody)
+            if (req._onResponseBody) req._onResponseBody(rawBody)
+            return
+          }
+          try {
+            const interaction = JSON.parse(rawBody)
+            const openaiResponse = convertNanoBananaResponseToOpenAI(interaction)
+            const responseBody = JSON.stringify(openaiResponse)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(responseBody)
+            if (req._onResponseBody) req._onResponseBody(responseBody)
+          } catch (e) {
+            res.writeHead(502, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Bad Gateway', message: 'Failed to convert Nano Banana response: ' + e.message }))
+          }
+        })
+      })
+
+      upstreamReq.setTimeout(600000, () => {
+        upstreamReq.destroy(new Error('upstream request timeout'))
+      })
+
+      upstreamReq.on('error', (err) => {
+        if (!res.headersSent) {
+          res.writeHead(502, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Bad Gateway', message: err.message }))
+        }
+      })
+
+      upstreamReq.write(bodyBuf)
+      upstreamReq.end()
+      return
+    }
+
     // No SSE, no body conversion — pass through.
     const rawBuffer = req._rawBuffer  // null for JSON path
     forwardRequest(req, res, upstreamUrl, profile.apiKey,
