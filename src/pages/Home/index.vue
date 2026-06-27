@@ -129,7 +129,7 @@ async function confirmDelete(id) {
 }
 
 function providerLabel(type) {
-  const map = { 'openai-chat': 'OpenAI Chat', 'openai-response': 'OpenAI Response', 'anthropic-message': 'Anthropic', 'openai-image': 'OpenAI Image', 'google-gemini': 'Google Gemini', 'google-nano-banana': 'Nano Banana', 'newapi': 'NEW API' }
+  const map = { 'openai-chat': 'OpenAI Chat', 'openai-response': 'OpenAI Response', 'anthropic-message': 'Anthropic', 'openai-image': 'OpenAI Image', 'google-gemini': 'Google Gemini', 'google-nano-banana': 'Google Nano Banana', 'newapi': 'NEW API' }
   return map[type] || type
 }
 

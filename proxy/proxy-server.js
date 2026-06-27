@@ -1013,10 +1013,9 @@ async function handleApiRequest(req, res) {
     // OpenAI → Nano Banana conversion
     if (profile.providerType === 'google-nano-banana' && urlPath === '/v1/images/generations') {
       const nanoBody = convertOpenAIToNanoBanana(body, profile.defaultModel)
-      const nanoUrl = `${baseUrl}/v1beta/interactions`
-      req._upstreamUrl = nanoUrl
+      req._upstreamUrl = upstreamUrl
 
-      const parsed = new URL(nanoUrl)
+      const parsed = new URL(upstreamUrl)
       const proxyConfig = currentConfig?.settings?.httpProxy
       const agent = createProxyAgent(proxyConfig, true, profile.id)
       const bodyBuf = Buffer.from(JSON.stringify(nanoBody))
@@ -1078,8 +1077,10 @@ async function handleApiRequest(req, res) {
 
       upstreamReq.on('error', (err) => {
         if (!res.headersSent) {
+          const errorBody = JSON.stringify({ error: 'Bad Gateway', message: err.message })
           res.writeHead(502, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'Bad Gateway', message: err.message }))
+          res.end(errorBody)
+          if (req._onResponseBody) req._onResponseBody(errorBody)
         }
       })
 
