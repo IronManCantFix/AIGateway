@@ -215,6 +215,7 @@ onMounted(() => {
               <option value="anthropic-message">{{ $t('profileEdit.providerType.anthropic-message') }}</option>
               <option value="openai-image">{{ $t('profileEdit.providerType.openai-image') }}</option>
               <option value="google-gemini">{{ $t('profileEdit.providerType.google-gemini') }}</option>
+              <option value="google-nano-banana">{{ $t('profileEdit.providerType.google-nano-banana') }}</option>
               <option value="newapi">{{ $t('profileEdit.providerType.newapi') }}</option>
             </select>
           </div>

@@ -50,6 +50,7 @@ function cacheReasoning(callId, reasoning) {
 // --- Path → source format mapping ---
 
 const MAX_IMAGE_BODY = 200 * 1024 * 1024  // 200 MiB
+const MAX_JSON_BODY = 200 * 1024 * 1024  // 200 MiB
 
 const PATH_TO_SOURCE = {
   '/v1/chat/completions': 'chat_completions',
@@ -59,7 +60,8 @@ const PATH_TO_SOURCE = {
   '/responses': 'responses',
   '/messages': 'messages',
   '/v1/images/generations': 'image',
-  '/v1/images/edits': 'image'
+  '/v1/images/edits': 'image',
+  '/v1beta/interactions': 'interactions'
 }
 
 // --- Provider type → target format + upstream path ---
@@ -73,7 +75,104 @@ const PROVIDER_META = {
                             '/v1/images/generations': '/v1/images/generations',
                             '/v1/images/edits':       '/v1/images/edits'
                           } },
-  'google-gemini':      { target: 'chat_completions', path: '/v1beta/openai/chat/completions' }
+  'google-gemini':      { target: 'chat_completions', path: '/v1beta/openai/chat/completions' },
+  'google-nano-banana': { target: 'interactions', path: '/v1beta/interactions', authType: 'x-goog-api-key', paths: {
+                            '/v1/images/generations': '/v1beta/interactions'
+                          } }
+}
+
+const IMAGE_PROVIDERS = new Set(['openai-image', 'google-nano-banana'])
+const INTERACTIONS_PROVIDERS = new Set(['google-nano-banana'])
+
+// --- OpenAI → Nano Banana conversion helpers ---
+
+const OPENAI_SIZE_TO_NANOBANANA = {
+  '1024x1024': { aspect_ratio: '1:1', image_size: '1K' },
+  '1792x1024': { aspect_ratio: '16:9', image_size: '2K' },
+  '1024x1792': { aspect_ratio: '9:16', image_size: '2K' },
+  '512x512':   { aspect_ratio: '1:1', image_size: '0.5K' },
+  '256x256':   { aspect_ratio: '1:1', image_size: '0.5K' }
+}
+
+const NANOBANANA_RATIOS = [
+  { ratio: '1:1', w: 1, h: 1 },
+  { ratio: '16:9', w: 16, h: 9 },
+  { ratio: '9:16', w: 9, h: 16 },
+  { ratio: '4:3', w: 4, h: 3 },
+  { ratio: '3:4', w: 3, h: 4 },
+  { ratio: '3:2', w: 3, h: 2 },
+  { ratio: '2:3', w: 2, h: 3 },
+  { ratio: '5:4', w: 5, h: 4 },
+  { ratio: '4:5', w: 4, h: 5 },
+  { ratio: '21:9', w: 21, h: 9 }
+]
+
+function convertOpenAISizeToNanoBanana(size) {
+  if (!size) return {}
+  const direct = OPENAI_SIZE_TO_NANOBANANA[size]
+  if (direct) return direct
+  const match = /^(\d+)x(\d+)$/.exec(size)
+  if (!match) return {}
+  const w = parseInt(match[1])
+  const h = parseInt(match[2])
+  const targetRatio = w / h
+  let best = NANOBANANA_RATIOS[0]
+  let bestDiff = Infinity
+  for (const r of NANOBANANA_RATIOS) {
+    const diff = Math.abs((r.w / r.h) - targetRatio)
+    if (diff < bestDiff) { bestDiff = diff; best = r }
+  }
+  const maxDim = Math.max(w, h)
+  const image_size = maxDim <= 512 ? '0.5K' : maxDim <= 1024 ? '1K' : '2K'
+  return { aspect_ratio: best.ratio, image_size }
+}
+
+function convertOpenAIToNanoBanana(body, defaultModel) {
+  const input = []
+  if (body.prompt) {
+    input.push({ type: 'text', text: body.prompt })
+  }
+  const result = {
+    model: body.model || defaultModel,
+    input: input.length === 1 ? input[0] : input
+  }
+  const format = convertOpenAISizeToNanoBanana(body.size)
+  if (format.aspect_ratio || format.image_size) {
+    result.response_format = { type: 'image', ...format }
+  }
+  return result
+}
+
+function convertNanoBananaResponseToOpenAI(interaction, responseFormat) {
+  let base64Data = null
+  let mimeType = 'image/png'
+  let revisedPrompt = null
+  if (interaction.output_image && interaction.output_image.data) {
+    base64Data = interaction.output_image.data
+    if (interaction.output_image.mime_type) mimeType = interaction.output_image.mime_type
+  }
+  if (!base64Data && Array.isArray(interaction.steps)) {
+    for (const step of interaction.steps) {
+      if (step.type === 'model_output' && Array.isArray(step.content)) {
+        for (const block of step.content) {
+          if (block.type === 'image' && block.data) {
+            base64Data = block.data
+            if (block.mime_type) mimeType = block.mime_type
+          }
+          if (block.type === 'text' && block.text) revisedPrompt = block.text
+        }
+      }
+    }
+  }
+  if (!base64Data) return { created: Math.floor(Date.now() / 1000), data: [] }
+  const item = {}
+  if (responseFormat === 'url') {
+    item.url = `data:${mimeType};base64,${base64Data}`
+  } else {
+    item.b64_json = base64Data
+  }
+  if (revisedPrompt) item.revised_prompt = revisedPrompt
+  return { created: Math.floor(Date.now() / 1000), data: [item] }
 }
 
 // --- Read request body ---
@@ -81,7 +180,16 @@ const PROVIDER_META = {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []
-    req.on('data', c => chunks.push(c))
+    let received = 0
+    req.on('data', c => {
+      received += c.length
+      if (received > MAX_JSON_BODY) {
+        req.destroy()
+        reject(new Error('JSON body too large (max 50 MiB)'))
+        return
+      }
+      chunks.push(c)
+    })
     req.on('end', () => {
       try {
         resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {})
@@ -304,12 +412,12 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
       const decoder = new StringDecoder('utf8')
       let lineBuffer = ''
-      let rawBuffer = Buffer.alloc(0)
+      const rawChunks = []
       let lineCount = 0
       let convertedCount = 0
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        rawBuffer = Buffer.concat([rawBuffer, chunk])
+        rawChunks.push(chunk)
         // StringDecoder 会正确处理多字节 UTF-8 字符在 chunk 边界被截断的情况，
         // 不完整的字节会被缓存到下一个 chunk 一起解码，避免中文乱码。
         lineBuffer += decoder.write(chunk)
@@ -343,6 +451,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         }
         // Stream ended
         clientRes.end()
+        const rawBuffer = Buffer.concat(rawChunks)
         if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
       })
     } else if (isStreaming) {
@@ -371,16 +480,17 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
       upstreamRes.on('error', cleanup)
 
-      let rawBuffer = Buffer.alloc(0)
+      const rawChunks = []
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        rawBuffer = Buffer.concat([rawBuffer, chunk])
+        rawChunks.push(chunk)
         clientRes.write(chunk)
       })
       upstreamRes.on('end', () => {
         if (closed) return
         closed = true
         clearInterval(keepAlive)
+        const rawBuffer = Buffer.concat(rawChunks)
         if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
         clientRes.end()
       })
@@ -680,8 +790,8 @@ function findLBGroupForModel(requestedModel, source) {
     for (const pid of group.profileIds) {
       const p = currentConfig.profiles.find(pr => pr.id === pid)
       if (!p) continue
-      if (source === 'image' && p.providerType !== 'openai-image') continue
-      if (source !== 'image' && p.providerType === 'openai-image') continue
+      if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
+      if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) continue
       if (Array.isArray(p.models) && p.models.includes(requestedModel)) {
         return group
       }
@@ -804,23 +914,23 @@ async function handleApiRequest(req, res) {
       for (const pid of lbGroup.profileIds) {
         const p = currentConfig.profiles.find(pr => pr.id === pid)
         if (!p) continue
-        if (source === 'image' && p.providerType !== 'openai-image') continue
-        if (source !== 'image' && p.providerType === 'openai-image') continue
+        if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
+        if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) continue
         if (!Array.isArray(p.models) || !p.models.includes(requestedModel)) continue
         profile = p
         break
       }
       if (!profile) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: { message: `AI 网关负载均衡组内无匹配模型: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
+        res.end(JSON.stringify({ error: { message: `No matching model in load balancer group: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
         return
       }
     }
     // Fallback: no LB group or LB didn't select a profile
     if (!profile) {
       for (const p of currentConfig.profiles) {
-        if (source === 'image' && p.providerType !== 'openai-image') continue
-        if (source !== 'image' && p.providerType === 'openai-image') continue
+        if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
+        if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) continue
         if (Array.isArray(p.models) && p.models.length > 0 && p.models.includes(requestedModel)) {
           profile = p
           break
@@ -829,14 +939,14 @@ async function handleApiRequest(req, res) {
     }
     if (!profile) {
       res.writeHead(400, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: { message: `AI 网关未匹配到模型: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
+      res.end(JSON.stringify({ error: { message: `No matching provider for model: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
       return
     }
   } else {
     // No model specified — use the first profile with models (matching source family)
     for (const p of currentConfig.profiles) {
-      if (source === 'image' && p.providerType !== 'openai-image') continue
-      if (source !== 'image' && p.providerType === 'openai-image') continue
+      if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
+      if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) continue
       if (Array.isArray(p.models) && p.models.length > 0) {
         profile = p
         break
@@ -844,7 +954,7 @@ async function handleApiRequest(req, res) {
     }
     if (!profile) {
       res.writeHead(503, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'AI 网关无可用提供商配置' }))
+      res.end(JSON.stringify({ error: 'Service Unavailable: no available provider configured' }))
       return
     }
   }
@@ -912,6 +1022,85 @@ async function handleApiRequest(req, res) {
   req._upstreamUrl = upstreamUrl
 
   if (source === 'image') {
+    // OpenAI → Nano Banana conversion
+    if (profile.providerType === 'google-nano-banana' && urlPath === '/v1/images/generations') {
+      const nanoBody = convertOpenAIToNanoBanana(body, profile.defaultModel)
+      req._upstreamUrl = upstreamUrl
+
+      const parsed = new URL(upstreamUrl)
+      const proxyConfig = currentConfig?.settings?.httpProxy
+      const agent = createProxyAgent(proxyConfig, true, profile.id)
+      const bodyBuf = Buffer.from(JSON.stringify(nanoBody))
+
+      const options = {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method: 'POST',
+        agent,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': bodyBuf.length,
+          'x-goog-api-key': profile.apiKey
+        }
+      }
+
+      const upstreamReq = https.request(options, (upstreamRes) => {
+        const encoding = upstreamRes.headers['content-encoding']
+        const decompressor = encoding === 'gzip' ? zlib.createGunzip()
+          : encoding === 'deflate' ? zlib.createInflate()
+          : encoding === 'br' ? zlib.createBrotliDecompress()
+          : null
+        if (decompressor) {
+          upstreamRes.pipe(decompressor)
+          upstreamRes.on('error', (e) => decompressor.destroy(e))
+          decompressor.headers = upstreamRes.headers
+          decompressor.statusCode = upstreamRes.statusCode
+          upstreamRes = decompressor
+        }
+
+        const chunks = []
+        upstreamRes.on('data', c => chunks.push(c))
+        upstreamRes.on('end', () => {
+          const rawBody = Buffer.concat(chunks).toString()
+          if (upstreamRes.statusCode >= 400) {
+            res.writeHead(upstreamRes.statusCode, { 'Content-Type': 'application/json' })
+            res.end(rawBody)
+            if (req._onResponseBody) req._onResponseBody(rawBody)
+            return
+          }
+          try {
+            const interaction = JSON.parse(rawBody)
+            const openaiResponse = convertNanoBananaResponseToOpenAI(interaction, body.response_format)
+            const responseBody = JSON.stringify(openaiResponse)
+            res.writeHead(upstreamRes.statusCode || 200, { 'Content-Type': 'application/json' })
+            res.end(responseBody)
+            if (req._onResponseBody) req._onResponseBody(responseBody)
+          } catch (e) {
+            res.writeHead(502, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Bad Gateway', message: 'Failed to convert Nano Banana response: ' + e.message }))
+          }
+        })
+      })
+
+      upstreamReq.setTimeout(600000, () => {
+        upstreamReq.destroy(new Error('upstream request timeout'))
+      })
+
+      upstreamReq.on('error', (err) => {
+        if (!res.headersSent) {
+          const errorBody = JSON.stringify({ error: 'Bad Gateway', message: err.message })
+          res.writeHead(502, { 'Content-Type': 'application/json' })
+          res.end(errorBody)
+          if (req._onResponseBody) req._onResponseBody(errorBody)
+        }
+      })
+
+      upstreamReq.write(bodyBuf)
+      upstreamReq.end()
+      return
+    }
+
     // No SSE, no body conversion — pass through.
     const rawBuffer = req._rawBuffer  // null for JSON path
     forwardRequest(req, res, upstreamUrl, profile.apiKey,
@@ -923,6 +1112,14 @@ async function handleApiRequest(req, res) {
       profile.id,
       rawBuffer ? req._contentType : 'application/json'
     )
+    return
+  }
+
+  if (source === 'interactions') {
+    // Native pass-through: forward request body as-is to Google Interactions API
+    forwardRequest(req, res, upstreamUrl, profile.apiKey, body,
+      null, req._onResponseBody || null, null, source, profile.id, 'application/json',
+      null, meta.authType)
     return
   }
 
@@ -1005,8 +1202,8 @@ async function handleApiRequest(req, res) {
         if (triedIds.has(nextPid)) continue
         const np = currentConfig.profiles.find(p => p.id === nextPid)
         if (!np) continue
-        if (source === 'image' && np.providerType !== 'openai-image') continue
-        if (source !== 'image' && np.providerType === 'openai-image') continue
+        if (source === 'image' && !IMAGE_PROVIDERS.has(np.providerType)) continue
+        if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(np.providerType) && IMAGE_PROVIDERS.has(np.providerType)) continue
         if (!Array.isArray(np.models) || !np.models.includes(requestedModel)) continue
         nextProfile = np
         break

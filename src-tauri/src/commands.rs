@@ -302,7 +302,7 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
     let provider_type = profile.get("providerType").and_then(|v| v.as_str()).unwrap_or("");
 
     let base_url = base_url.trim_end_matches('/').trim_end_matches("/v1");
-    let is_gemini = provider_type == "google-gemini";
+    let is_gemini = provider_type == "google-gemini" || provider_type == "google-nano-banana";
 
     let url = if is_gemini {
         format!("{}/v1beta/models", base_url)
@@ -495,6 +495,12 @@ pub async fn download_and_install_update(
 
     if url.is_empty() {
         return Err(crate::error::AppError::new("update.noDownloadUrl"));
+    }
+
+    // Validate download URL to prevent arbitrary URL downloads
+    if !url.starts_with("https://github.com/IronManCantFix/AIGateway/releases/") {
+        return Err(crate::error::AppError::new("update.invalidUrl")
+            .with_detail("Download URL must be from the official GitHub releases".to_string()));
     }
 
     // Download to temp directory
