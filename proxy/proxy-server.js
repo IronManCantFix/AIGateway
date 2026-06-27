@@ -50,6 +50,7 @@ function cacheReasoning(callId, reasoning) {
 // --- Path → source format mapping ---
 
 const MAX_IMAGE_BODY = 200 * 1024 * 1024  // 200 MiB
+const MAX_JSON_BODY = 50 * 1024 * 1024  // 50 MiB
 
 const PATH_TO_SOURCE = {
   '/v1/chat/completions': 'chat_completions',
@@ -179,7 +180,16 @@ function convertNanoBananaResponseToOpenAI(interaction, responseFormat) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []
-    req.on('data', c => chunks.push(c))
+    let received = 0
+    req.on('data', c => {
+      received += c.length
+      if (received > MAX_JSON_BODY) {
+        req.destroy()
+        reject(new Error('JSON body too large (max 50 MiB)'))
+        return
+      }
+      chunks.push(c)
+    })
     req.on('end', () => {
       try {
         resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {})
@@ -402,12 +412,12 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
       const decoder = new StringDecoder('utf8')
       let lineBuffer = ''
-      let rawBuffer = Buffer.alloc(0)
+      const rawChunks = []
       let lineCount = 0
       let convertedCount = 0
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        rawBuffer = Buffer.concat([rawBuffer, chunk])
+        rawChunks.push(chunk)
         // StringDecoder 会正确处理多字节 UTF-8 字符在 chunk 边界被截断的情况，
         // 不完整的字节会被缓存到下一个 chunk 一起解码，避免中文乱码。
         lineBuffer += decoder.write(chunk)
@@ -441,6 +451,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         }
         // Stream ended
         clientRes.end()
+        const rawBuffer = Buffer.concat(rawChunks)
         if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
       })
     } else if (isStreaming) {
@@ -469,16 +480,17 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
       upstreamRes.on('error', cleanup)
 
-      let rawBuffer = Buffer.alloc(0)
+      const rawChunks = []
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        rawBuffer = Buffer.concat([rawBuffer, chunk])
+        rawChunks.push(chunk)
         clientRes.write(chunk)
       })
       upstreamRes.on('end', () => {
         if (closed) return
         closed = true
         clearInterval(keepAlive)
+        const rawBuffer = Buffer.concat(rawChunks)
         if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
         clientRes.end()
       })
