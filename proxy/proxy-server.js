@@ -341,11 +341,17 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     method: clientReq.method,
     agent,
     headers: (() => {
-      // 透传客户端所有请求头，然后用代理自己的值覆盖需要控制的头
+      // 仅转发白名单中的客户端请求头，用代理自己的值覆盖需要控制的头
       const h = {}
-      const skip = new Set(['host', 'connection', 'content-length', 'content-type', 'authorization', 'x-api-key', 'x-goog-api-key'])
+      const forwardHeaders = new Set([
+        'accept', 'accept-encoding', 'accept-language',
+        'user-agent', 'x-request-id', 'x-stainless-arch',
+        'x-stainless-lang', 'x-stainless-os', 'x-stainless-runtime',
+        'x-stainless-runtime-version', 'anthropic-version',
+        'anthropic-beta', 'http-referer', 'x-title'
+      ])
       for (const [k, v] of Object.entries(clientReq.headers)) {
-        if (!skip.has(k.toLowerCase())) h[k] = v
+        if (forwardHeaders.has(k.toLowerCase())) h[k] = v
       }
       h['Content-Type'] = effectiveContentType
       h['Content-Length'] = bodyBuf.length

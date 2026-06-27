@@ -497,6 +497,12 @@ pub async fn download_and_install_update(
         return Err(crate::error::AppError::new("update.noDownloadUrl"));
     }
 
+    // Validate download URL to prevent arbitrary URL downloads
+    if !url.starts_with("https://github.com/IronManCantFix/AIGateway/releases/") {
+        return Err(crate::error::AppError::new("update.invalidUrl")
+            .with_detail("Download URL must be from the official GitHub releases".to_string()));
+    }
+
     // Download to temp directory
     let temp_dir = std::env::temp_dir();
     let file_path = temp_dir.join(&file_name);

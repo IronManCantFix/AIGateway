@@ -281,6 +281,11 @@ impl ConfigStore {
         let tmp = path.with_extension("json.tmp");
         let json = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
         fs::write(&tmp, &json).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
+        }
         fs::rename(&tmp, &path).map_err(|e| e.to_string())
     }
 
