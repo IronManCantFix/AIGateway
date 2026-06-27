@@ -274,7 +274,8 @@
       "anthropic-message": "Anthropic Messages",
       "openai-image": "OpenAI 图像",
       "newapi": "NEW API",
-      "google-gemini": "Google Gemini"
+      "google-gemini": "Google Gemini",
+      "google-nano-banana": "Google Nano Banana"
     }
   },
   "errors": {
