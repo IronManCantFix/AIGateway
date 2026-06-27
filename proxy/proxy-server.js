@@ -922,7 +922,7 @@ async function handleApiRequest(req, res) {
       }
       if (!profile) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: { message: `AI 网关负载均衡组内无匹配模型: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
+        res.end(JSON.stringify({ error: { message: `No matching model in load balancer group: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
         return
       }
     }
@@ -939,7 +939,7 @@ async function handleApiRequest(req, res) {
     }
     if (!profile) {
       res.writeHead(400, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: { message: `AI 网关未匹配到模型: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
+      res.end(JSON.stringify({ error: { message: `No matching provider for model: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
       return
     }
   } else {
@@ -954,7 +954,7 @@ async function handleApiRequest(req, res) {
     }
     if (!profile) {
       res.writeHead(503, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'AI 网关无可用提供商配置' }))
+      res.end(JSON.stringify({ error: 'Service Unavailable: no available provider configured' }))
       return
     }
   }
