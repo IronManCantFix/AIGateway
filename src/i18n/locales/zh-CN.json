@@ -180,7 +180,8 @@
       "checking": "检查中…",
       "checkUpdate": "检查更新",
       "download": "前往下载",
-      "downloading": "下载中…"
+      "downloading": "下载中…",
+      "devTools": "开发者控制台"
     },
     "placeholder": {
       "optional": "可选",

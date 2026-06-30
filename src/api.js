@@ -61,6 +61,7 @@ export const api = {
   downloadAndInstallUpdate: (url, fileName) => invoke('download_and_install_update', { url, fileName }),
   getAppVersion: () => invoke('get_app_version'),
   restartApp: () => invoke('restart_app'),
+  toggleDevTools: () => invoke('toggle_devtools'),
 
   // --- i18n / Tray ---
   setLanguage: (lang) => invoke('set_language', { lang }),

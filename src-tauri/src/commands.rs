@@ -639,6 +639,15 @@ pub fn restart_app(app_handle: tauri::AppHandle) {
     app_handle.restart();
 }
 
+#[tauri::command]
+pub fn toggle_devtools(app_handle: tauri::AppHandle) -> bool {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        window.open_devtools();
+        return true;
+    }
+    false
+}
+
 // --- Port check commands ---
 
 #[tauri::command]

@@ -180,7 +180,8 @@
       "checking": "Checking…",
       "checkUpdate": "Check for updates",
       "download": "Download",
-      "downloading": "Downloading…"
+      "downloading": "Downloading…",
+      "devTools": "Developer Console"
     },
     "placeholder": {
       "optional": "Optional",
