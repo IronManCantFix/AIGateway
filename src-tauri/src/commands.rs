@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::config::{ConfigStore, LoadBalancerGroup, ModelMappings, Profile, Settings};
 use crate::proxy::{ProxyManager, ProxyStatus};
