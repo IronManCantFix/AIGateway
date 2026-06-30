@@ -20,7 +20,9 @@
         "center": true
       }
     ],
-    "security": {},
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.github.com"
+    },
     "macOSPrivateApi": true
   },
   "bundle": {
