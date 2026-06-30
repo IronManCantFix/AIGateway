@@ -180,6 +180,11 @@ fn main() {
                 rebuild_tray_menu(&app_handle, &state);
             });
 
+            // Open devtools for debugging (temporary)
+            if let Some(window) = app.get_webview_window("main") {
+                window.open_devtools();
+            }
+
             // Auto-start proxy if configured
             let settings = config_store.get_settings();
             if settings.auto_start {
