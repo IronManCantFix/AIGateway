@@ -237,6 +237,7 @@ fn main() {
             commands::check_for_updates,
             commands::download_and_install_update,
             commands::get_app_version,
+            commands::restart_app,
             commands::set_language,
             commands::check_port,
             commands::kill_process,

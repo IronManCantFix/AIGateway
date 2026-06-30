@@ -207,13 +207,23 @@ async function startDownload() {
   })
 
   try {
-    await api.downloadAndInstallUpdate(
+    const result = await api.downloadAndInstallUpdate(
       updateInfo.value.download_asset_url,
       updateInfo.value.asset_name
     )
-    copyMsg.value = t('settings.toast.updateDownloaded')
-    clearTimeout(copyTimer)
-    copyTimer = setTimeout(() => { copyMsg.value = '' }, 3000)
+    if (result.installed) {
+      // macOS: app was auto-installed to /Applications
+      const restart = await showConfirm(t('settings.confirm.restartToUpdate'))
+      if (restart) {
+        await api.restartApp()
+        return
+      }
+    } else {
+      // Windows/Linux: installer was launched
+      copyMsg.value = t('settings.toast.updateDownloaded')
+      clearTimeout(copyTimer)
+      copyTimer = setTimeout(() => { copyMsg.value = '' }, 3000)
+    }
   } catch (e) {
     console.error('Download failed:', e)
     copyMsg.value = t('settings.toast.updateDownloadFailed')

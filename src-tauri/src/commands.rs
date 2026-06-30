@@ -26,6 +26,12 @@ pub struct UpdateInfo {
     pub asset_name: String,
 }
 
+#[derive(serde::Serialize)]
+pub struct UpdateResult {
+    pub file_path: String,
+    pub installed: bool,
+}
+
 // --- Proxy commands ---
 
 #[tauri::command]
@@ -489,7 +495,7 @@ pub async fn download_and_install_update(
     app_handle: tauri::AppHandle,
     url: String,
     file_name: String,
-) -> Result<String, crate::error::AppError> {
+) -> Result<UpdateResult, crate::error::AppError> {
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
 
@@ -549,13 +555,56 @@ pub async fn download_and_install_update(
     file.flush().await.map_err(|e| crate::error::AppError::new("update.fileWriteFailed").with_detail(e.to_string()))?;
     drop(file);
 
-    // Open the downloaded file
+    // Platform-specific installation
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
-            .arg(&file_path)
-            .spawn()
+        // Mount DMG silently (no Finder window, no sidebar entry)
+        let mount_output = std::process::Command::new("hdiutil")
+            .args(["attach", "-nobrowse", "-quiet", &file_path.to_string_lossy()])
+            .output()
             .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
+
+        if !mount_output.status.success() {
+            return Err(crate::error::AppError::new("update.openFailed")
+                .with_detail(format!("hdiutil attach failed: {}", String::from_utf8_lossy(&mount_output.stderr))));
+        }
+
+        // Parse mount point from stdout (last line: /dev/diskN  /Volumes/XXX)
+        let mount_stdout = String::from_utf8_lossy(&mount_output.stdout);
+        let mount_point = mount_stdout.lines().last()
+            .and_then(|line| line.split_whitespace().last())
+            .ok_or_else(|| crate::error::AppError::new("update.openFailed").with_detail("Cannot parse mount point".to_string()))?;
+
+        // Find .app bundle in the mounted volume
+        let app_path = std::fs::read_dir(mount_point)
+            .ok()
+            .and_then(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .find(|e| {
+                        e.path().extension().map_or(false, |ext| ext == "app")
+                    })
+                    .map(|e| e.path())
+            })
+            .ok_or_else(|| crate::error::AppError::new("update.openFailed")
+                .with_detail(format!("No .app found in mounted volume: {}", mount_point)))?;
+
+        // Copy to /Applications (overwrite existing)
+        let dest = std::path::PathBuf::from("/Applications").join(app_path.file_name().unwrap());
+        let cp_status = std::process::Command::new("cp")
+            .args(["-Rf", &app_path.to_string_lossy(), &dest.to_string_lossy()])
+            .status()
+            .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
+
+        // Unmount DMG
+        let _ = std::process::Command::new("hdiutil")
+            .args(["detach", "-quiet", mount_point])
+            .status();
+
+        if !cp_status.success() {
+            return Err(crate::error::AppError::new("update.openFailed")
+                .with_detail("Failed to copy app to /Applications".to_string()));
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -574,12 +623,20 @@ pub async fn download_and_install_update(
             .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
     }
 
-    Ok(file_path.to_string_lossy().to_string())
+    Ok(UpdateResult {
+        file_path: file_path.to_string_lossy().to_string(),
+        installed: cfg!(target_os = "macos"),
+    })
 }
 
 #[tauri::command]
 pub fn get_app_version(app_handle: tauri::AppHandle) -> String {
     app_handle.package_info().version.to_string()
+}
+
+#[tauri::command]
+pub fn restart_app(app_handle: tauri::AppHandle) {
+    app_handle.restart();
 }
 
 // --- Port check commands ---

@@ -60,6 +60,7 @@ export const api = {
   checkForUpdates: () => invoke('check_for_updates'),
   downloadAndInstallUpdate: (url, fileName) => invoke('download_and_install_update', { url, fileName }),
   getAppVersion: () => invoke('get_app_version'),
+  restartApp: () => invoke('restart_app'),
 
   // --- i18n / Tray ---
   setLanguage: (lang) => invoke('set_language', { lang }),
