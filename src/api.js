@@ -25,19 +25,16 @@ export const api = {
   setSettings: (settings) => invoke('set_settings', { settings }),
 
   // --- Models ---
-  getModels: () => invoke('get_models'),
+  getModelEntries: () => invoke('get_model_entries'),
   addModel: (modelId) => invoke('add_model', { modelId }),
   removeModel: (modelId) => invoke('remove_model', { modelId }),
+  setModelStrategy: (modelName, strategy) => invoke('set_model_strategy', { modelName, strategy }),
 
   // --- Model Mappings ---
   getModelMappings: () => invoke('get_model_mappings'),
   setModelMappings: (mappings) => invoke('set_model_mappings', { mappings }),
 
-  // --- Load Balancer ---
-  getLBGroups: () => invoke('get_lb_groups'),
-  addLBGroup: (group) => invoke('add_lb_group', { group }),
-  updateLBGroup: (id, updates) => invoke('update_lb_group', { id, updates }),
-  deleteLBGroup: (id) => invoke('delete_lb_group', { id }),
+
 
   // --- Stats & Logs ---
   getStats: () => invoke('get_stats'),

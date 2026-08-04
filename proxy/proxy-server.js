@@ -31,7 +31,7 @@ let currentConfig = null // { profile: {...}, models: [...] }
 let logEnabled = false
 let initialized = false
 let startupKeepAlive = null
-const rrCounters = {} // groupId → counter (round-robin load balancing)
+const rrCounters = {} // modelName → counter (round-robin load balancing)
 const reasoningCache = new Map() // call_id → reasoning_content, for re-injection when clients strip non-standard fields
 const REASONING_CACHE_MAX = 500
 setReasoningCache(reasoningCache)
@@ -781,35 +781,38 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
   upstreamReq.end()
 }
 
-// --- Load Balancer helpers ---
+// --- Model strategy helpers ---
 
-function findLBGroupForModel(requestedModel, source) {
-  if (!requestedModel || !currentConfig?.loadBalancerGroups) return null
-  for (const group of currentConfig.loadBalancerGroups) {
-    if (!group.profileIds || group.profileIds.length === 0) continue
-    for (const pid of group.profileIds) {
-      const p = currentConfig.profiles.find(pr => pr.id === pid)
-      if (!p) continue
-      if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
-      if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) continue
-      if (Array.isArray(p.models) && p.models.includes(requestedModel)) {
-        return group
-      }
-    }
+function getModelStrategy(requestedModel) {
+  if (!requestedModel || !currentConfig?.models) return 'none'
+  const models = currentConfig.models
+  // models can be array of { name, strategy } or plain strings
+  for (const m of models) {
+    if (typeof m === 'object' && m.name === requestedModel) return m.strategy || 'none'
   }
-  return null
+  return 'none'
 }
 
-function selectRoundRobin(group) {
-  const idx = (rrCounters[group.id] || 0) % group.profileIds.length
-  rrCounters[group.id] = idx + 1
-  return group.profileIds[idx]
+function getProfilesForModel(requestedModel, source) {
+  return currentConfig.profiles.filter(p => {
+    if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) return false
+    if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) return false
+    return Array.isArray(p.models) && p.models.includes(requestedModel)
+  })
+}
+
+function selectRoundRobinForModel(requestedModel, profiles) {
+  const idx = (rrCounters[requestedModel] || 0) % profiles.length
+  rrCounters[requestedModel] = idx + 1
+  return profiles[idx]
 }
 
 // --- Route: /v1/models ---
 
 function handleModels(_, res) {
-  const globalModels = (currentConfig && currentConfig.models) ? currentConfig.models : []
+  const rawModels = (currentConfig && currentConfig.models) ? currentConfig.models : []
+  // Handle both new format ({ name, strategy }) and old format (plain strings)
+  const globalModels = rawModels.map(m => typeof m === 'object' ? m.name : m)
   const providerModels = (currentConfig && currentConfig.profiles)
     ? currentConfig.profiles.flatMap(p => (Array.isArray(p.models) ? p.models : []))
     : []
@@ -898,45 +901,31 @@ async function handleApiRequest(req, res) {
     }
   }
 
-  // Route by model: find the first profile whose models include body.model
+  // Route by model: find profile based on per-model strategy
   const requestedModel = body.model
   let profile = null
-  let lbGroup = null
+  let modelStrategy = 'none'
 
   if (requestedModel) {
-    // Check load balancer groups first
-    lbGroup = findLBGroupForModel(requestedModel, source)
-    if (lbGroup && lbGroup.strategy === 'round-robin') {
-      const selectedId = selectRoundRobin(lbGroup)
-      profile = currentConfig.profiles.find(p => p.id === selectedId)
-    } else if (lbGroup && lbGroup.strategy === 'failover') {
-      // Failover: try each profile in order until one succeeds
-      for (const pid of lbGroup.profileIds) {
-        const p = currentConfig.profiles.find(pr => pr.id === pid)
-        if (!p) continue
-        if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
-        if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) continue
-        if (!Array.isArray(p.models) || !p.models.includes(requestedModel)) continue
-        profile = p
-        break
+    modelStrategy = getModelStrategy(requestedModel)
+    const candidates = getProfilesForModel(requestedModel, source)
+
+    if (modelStrategy === 'round-robin') {
+      if (candidates.length > 0) {
+        profile = selectRoundRobinForModel(requestedModel, candidates)
       }
-      if (!profile) {
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: { message: `No matching model in load balancer group: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
-        return
+    } else if (modelStrategy === 'failover') {
+      // Failover: pick the first matching profile; retry logic is handled later
+      if (candidates.length > 0) {
+        profile = candidates[0]
+      }
+    } else {
+      // 'none': use first matching profile (profile list order = priority)
+      if (candidates.length > 0) {
+        profile = candidates[0]
       }
     }
-    // Fallback: no LB group or LB didn't select a profile
-    if (!profile) {
-      for (const p of currentConfig.profiles) {
-        if (source === 'image' && !IMAGE_PROVIDERS.has(p.providerType)) continue
-        if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(p.providerType) && IMAGE_PROVIDERS.has(p.providerType)) continue
-        if (Array.isArray(p.models) && p.models.length > 0 && p.models.includes(requestedModel)) {
-          profile = p
-          break
-        }
-      }
-    }
+
     if (!profile) {
       res.writeHead(400, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: { message: `No matching provider for model: ${requestedModel}`, type: 'invalid_request_error', code: 'model_not_found' } }))
@@ -1138,12 +1127,13 @@ async function handleApiRequest(req, res) {
   const responseBodyConverter = getResponseBodyConverter(source, meta.target)
 
   // Failover: try providers in order, retry on HTTP error before data is sent
-  if (lbGroup && lbGroup.strategy === 'failover') {
+  if (modelStrategy === 'failover') {
+    const candidates = getProfilesForModel(requestedModel, source)
     const triedIds = new Set()
     let currentProfile = profile
     let lastError = null
 
-    for (let attempt = 0; attempt < lbGroup.profileIds.length; attempt++) {
+    for (let attempt = 0; attempt < candidates.length; attempt++) {
       const pid = currentProfile.id
       triedIds.add(pid)
 
@@ -1161,7 +1151,6 @@ async function handleApiRequest(req, res) {
           curBody.messages.unshift({ role: 'system', content: curBody.system })
           delete curBody.system
         }
-        // Inject Gemini thought_signature in failover path too
         if (currentProfile.providerType === 'google-gemini' && Array.isArray(curBody.messages)) {
           injectGeminiThoughtSignatures(curBody.messages)
         }
@@ -1182,32 +1171,20 @@ async function handleApiRequest(req, res) {
         source, currentProfile.id, null,
         (upstreamRes) => {
           if (upstreamRes.statusCode >= 400 && !res.headersSent) {
-            // HTTP error before any data written — try next provider
             failed = true
             lastError = upstreamRes.statusCode
-            // Drain the error response body
             upstreamRes.resume()
-            return false // don't continue processing
+            return false
           }
-          return true // continue normally
+          return true
         },
         curMeta.authType
       )
 
       if (!failed) return
 
-      // Find next profile in the group that we haven't tried
-      let nextProfile = null
-      for (const nextPid of lbGroup.profileIds) {
-        if (triedIds.has(nextPid)) continue
-        const np = currentConfig.profiles.find(p => p.id === nextPid)
-        if (!np) continue
-        if (source === 'image' && !IMAGE_PROVIDERS.has(np.providerType)) continue
-        if (source !== 'image' && !INTERACTIONS_PROVIDERS.has(np.providerType) && IMAGE_PROVIDERS.has(np.providerType)) continue
-        if (!Array.isArray(np.models) || !np.models.includes(requestedModel)) continue
-        nextProfile = np
-        break
-      }
+      // Find next profile that we haven't tried
+      const nextProfile = candidates.find(p => !triedIds.has(p.id))
       if (!nextProfile) break
       currentProfile = nextProfile
     }
@@ -1215,7 +1192,7 @@ async function handleApiRequest(req, res) {
     // All providers failed
     if (!res.headersSent) {
       res.writeHead(lastError || 502, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Bad Gateway', message: 'All upstream providers in load balancer group failed' }))
+      res.end(JSON.stringify({ error: 'Bad Gateway', message: 'All upstream providers failed' }))
     }
     return
   }

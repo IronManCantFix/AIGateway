@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 
-use crate::config::{ConfigStore, LoadBalancerGroup, ModelMappings, Profile, Settings};
+use crate::config::{ConfigStore, ModelEntry, ModelMappings, Profile, Settings};
 use crate::proxy::{ProxyManager, ProxyStatus};
 
 #[derive(serde::Serialize)]
@@ -156,32 +156,42 @@ pub fn set_settings(state: State<'_, AppState>, settings: serde_json::Value) -> 
 // --- Models commands ---
 
 #[tauri::command]
-pub fn get_models(state: State<'_, AppState>) -> Vec<String> {
-    state.config.get_models()
+pub fn get_model_entries(state: State<'_, AppState>) -> Vec<ModelEntry> {
+    state.config.get_model_entries()
 }
 
 #[tauri::command]
-pub fn add_model(state: State<'_, AppState>, model_id: String) -> Result<Vec<String>, String> {
-    let mut models = state.config.get_models();
-    if !models.contains(&model_id) {
-        models.push(model_id);
-        state.config.set_models(&models)?;
+pub fn add_model(state: State<'_, AppState>, model_id: String) -> Result<Vec<ModelEntry>, String> {
+    let mut entries = state.config.get_model_entries();
+    if !entries.iter().any(|e| e.name == model_id) {
+        entries.push(ModelEntry { name: model_id, strategy: "none".to_string() });
+        let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+        state.config.set_models(&names)?;
         if state.proxy.get_status().status == "running" {
             state.proxy.reload()?;
         }
     }
-    Ok(models)
+    Ok(state.config.get_model_entries())
 }
 
 #[tauri::command]
-pub fn remove_model(state: State<'_, AppState>, model_id: String) -> Result<Vec<String>, String> {
-    let mut models = state.config.get_models();
-    models.retain(|m| m != &model_id);
-    state.config.set_models(&models)?;
+pub fn remove_model(state: State<'_, AppState>, model_id: String) -> Result<Vec<ModelEntry>, String> {
+    let mut entries = state.config.get_model_entries();
+    entries.retain(|e| e.name != model_id);
+    state.config.set_model_entries(&entries)?;
     if state.proxy.get_status().status == "running" {
         state.proxy.reload()?;
     }
-    Ok(models)
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn set_model_strategy(state: State<'_, AppState>, model_name: String, strategy: String) -> Result<(), String> {
+    state.config.set_model_strategy(&model_name, &strategy)?;
+    if state.proxy.get_status().status == "running" {
+        state.proxy.reload()?;
+    }
+    Ok(())
 }
 
 // --- Model Mappings commands ---
@@ -201,43 +211,7 @@ pub fn set_model_mappings(state: State<'_, AppState>, mappings: serde_json::Valu
     Ok(m)
 }
 
-// --- Load Balancer commands ---
 
-#[tauri::command]
-pub fn get_lb_groups(state: State<'_, AppState>) -> Vec<LoadBalancerGroup> {
-    state.config.get_lb_groups()
-}
-
-#[tauri::command]
-pub fn add_lb_group(app_handle: tauri::AppHandle, state: State<'_, AppState>, group: serde_json::Value) -> Result<LoadBalancerGroup, String> {
-    let g: LoadBalancerGroup = serde_json::from_value(group).map_err(|e| e.to_string())?;
-    let saved = state.config.add_lb_group(g)?;
-    if state.proxy.get_status().status == "running" {
-        state.proxy.reload()?;
-    }
-    app_handle.emit("tray-menu-update", ()).ok();
-    Ok(saved)
-}
-
-#[tauri::command]
-pub fn update_lb_group(app_handle: tauri::AppHandle, state: State<'_, AppState>, id: String, updates: serde_json::Value) -> Result<LoadBalancerGroup, String> {
-    let saved = state.config.update_lb_group(&id, updates)?;
-    if state.proxy.get_status().status == "running" {
-        state.proxy.reload()?;
-    }
-    app_handle.emit("tray-menu-update", ()).ok();
-    Ok(saved)
-}
-
-#[tauri::command]
-pub fn delete_lb_group(app_handle: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.config.delete_lb_group(&id)?;
-    if state.proxy.get_status().status == "running" {
-        state.proxy.reload()?;
-    }
-    app_handle.emit("tray-menu-update", ()).ok();
-    Ok(())
-}
 
 // --- Log commands ---
 

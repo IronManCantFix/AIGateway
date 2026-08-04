@@ -37,14 +37,12 @@
     "section": {
       "providers": "提供商",
       "models": "可用模型",
-      "mappings": "模型映射",
-      "lb": "负载均衡"
+      "mappings": "模型映射"
     },
     "tip": {
       "providers": "支持同时启用多个提供商，请求时按照列表从上到下的顺序匹配模型 ID，匹配到的第一个提供商将处理该请求",
       "models": "聚合自已启用提供商的可用模型列表，通过 <code>/v1/models</code> 接口返回给客户端",
-      "mappings": "将客户端请求的模型 ID 映射为真实模型 ID。适用于客户端固定模型名称（如 Codex 只能调用 gpt5.5）但你没有该模型的场景",
-      "lb": "当多个提供商提供相同模型时，可配置负载均衡策略：轮询（请求轮流分配）或故障转移（按顺序尝试，失败自动切换）"
+      "mappings": "将客户端请求的模型 ID 映射为真实模型 ID。适用于客户端固定模型名称（如 Codex 只能调用 gpt5.5）但你没有该模型的场景"
     },
     "button": {
       "start": "启动",
@@ -75,8 +73,7 @@
       "providers": "尚未添加提供商，点击「+ 添加」开始配置",
       "models": "启用提供商并配置可用模型后，此处自动聚合展示",
       "mappingsDisabled": "启用后可添加模型映射规则",
-      "mappingsRules": "暂无映射规则，点击下方添加",
-      "lb": "暂无负载均衡组，点击下方创建"
+      "mappingsRules": "暂无映射规则，点击下方添加"
     },
     "toast": {
       "urlCopied": "已复制代理地址",
@@ -91,19 +88,10 @@
     "confirm": {
       "deleteProfile": "确定要删除该提供商吗？"
     },
-    "lb": {
+    "strategy": {
+      "none": "不负载",
       "roundRobin": "轮询",
-      "failover": "故障转移",
-      "create": "+ 创建负载均衡组",
-      "createGroup": "创建负载均衡组",
-      "editGroup": "编辑负载均衡组",
-      "name": "名称",
-      "namePlaceholder": "如：GPT-4o 双线",
-      "strategy": "策略",
-      "selectProfiles": "选择参与的提供商",
-      "nameRequired": "请输入名称",
-      "minProfiles": "至少需要选择 2 个提供商",
-      "confirmDelete": "确定要删除该负载均衡组吗？"
+      "failover": "故障转移"
     }
   },
   "settings": {

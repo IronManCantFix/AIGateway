@@ -87,25 +87,15 @@ impl Default for ModelMappings {
     }
 }
 
-// --- Load Balancer ---
+// --- Model Entry (with per-model load balancing strategy) ---
+
+fn default_model_strategy() -> String { "none".to_string() }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoadBalancerGroup {
-    #[serde(default)]
-    pub id: String,
+pub struct ModelEntry {
     pub name: String,
-    #[serde(default = "default_lb_strategy")]
+    #[serde(default = "default_model_strategy")]
     pub strategy: String,
-    #[serde(rename = "profileIds", default)]
-    pub profile_ids: Vec<String>,
-}
-
-fn default_lb_strategy() -> String { "round-robin".to_string() }
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct LoadBalancerConfig {
-    #[serde(default)]
-    pub groups: Vec<LoadBalancerGroup>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -276,7 +266,7 @@ impl ConfigStore {
         }
     }
 
-    fn write_json<T: Serialize>(&self, name: &str, value: &T) -> Result<(), String> {
+    pub fn write_json<T: Serialize>(&self, name: &str, value: &T) -> Result<(), String> {
         let path = self.path(name);
         let tmp = path.with_extension("json.tmp");
         let json = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
@@ -386,17 +376,41 @@ impl ConfigStore {
 
     // --- Models ---
 
-    pub fn get_models(&self) -> Vec<String> {
+    /// Returns model entries. Handles backward compat: old format is plain string array.
+    pub fn get_model_entries(&self) -> Vec<ModelEntry> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum FlexModel { Entry(ModelEntry), Name(String) }
         #[derive(Deserialize, Default)]
-        struct Wrapper { #[serde(default)] models: Vec<String> }
+        struct Wrapper { #[serde(default)] models: Vec<FlexModel> }
         let w: Wrapper = self.read_json("models.json");
-        w.models
+        w.models.into_iter().map(|m| match m {
+            FlexModel::Entry(e) => e,
+            FlexModel::Name(n) => ModelEntry { name: n, strategy: default_model_strategy() },
+        }).collect()
+    }
+
+    /// Returns model name strings only (backward-compatible helper).
+    pub fn get_models(&self) -> Vec<String> {
+        self.get_model_entries().into_iter().map(|e| e.name).collect()
+    }
+
+    pub fn set_model_strategy(&self, model_name: &str, strategy: &str) -> Result<(), String> {
+        let mut entries = self.get_model_entries();
+        if let Some(e) = entries.iter_mut().find(|e| e.name == model_name) {
+            e.strategy = strategy.to_string();
+        }
+        self.write_json("models.json", &serde_json::json!({ "models": entries }))
     }
 
     pub fn set_models(&self, models: &[String]) -> Result<(), String> {
         #[derive(Serialize)]
         struct Wrapper<'a> { models: &'a [String] }
         self.write_json("models.json", &Wrapper { models })
+    }
+
+    pub fn set_model_entries(&self, entries: &[ModelEntry]) -> Result<(), String> {
+        self.write_json("models.json", &serde_json::json!({ "models": entries }))
     }
 
     // --- Model Mappings ---
@@ -407,50 +421,6 @@ impl ConfigStore {
 
     pub fn set_model_mappings(&self, mappings: &ModelMappings) -> Result<(), String> {
         self.write_json("model-mappings.json", mappings)
-    }
-
-    // --- Load Balancer Groups ---
-
-    pub fn get_lb_groups(&self) -> Vec<LoadBalancerGroup> {
-        let config: LoadBalancerConfig = self.read_json("load-balancer.json");
-        config.groups
-    }
-
-    fn save_lb_groups(&self, groups: &[LoadBalancerGroup]) -> Result<(), String> {
-        let config = LoadBalancerConfig { groups: groups.to_vec() };
-        self.write_json("load-balancer.json", &config)
-    }
-
-    pub fn add_lb_group(&self, mut group: LoadBalancerGroup) -> Result<LoadBalancerGroup, String> {
-        if group.id.is_empty() {
-            group.id = uuid::Uuid::new_v4().to_string();
-        }
-        let mut groups = self.get_lb_groups();
-        groups.push(group.clone());
-        self.save_lb_groups(&groups)?;
-        Ok(group)
-    }
-
-    pub fn update_lb_group(&self, id: &str, updates: serde_json::Value) -> Result<LoadBalancerGroup, String> {
-        let mut groups = self.get_lb_groups();
-        let idx = groups.iter().position(|g| g.id == id)
-            .ok_or_else(|| "Load balancer group not found".to_string())?;
-        let mut group_json = serde_json::to_value(&groups[idx]).map_err(|e| e.to_string())?;
-        if let (Some(obj), Some(upd)) = (group_json.as_object_mut(), updates.as_object()) {
-            for (k, v) in upd {
-                obj.insert(k.clone(), v.clone());
-            }
-        }
-        let updated: LoadBalancerGroup = serde_json::from_value(group_json).map_err(|e| e.to_string())?;
-        groups[idx] = updated.clone();
-        self.save_lb_groups(&groups)?;
-        Ok(updated)
-    }
-
-    pub fn delete_lb_group(&self, id: &str) -> Result<(), String> {
-        let mut groups = self.get_lb_groups();
-        groups.retain(|g| g.id != id);
-        self.save_lb_groups(&groups)
     }
 
     // --- Log Enabled ---
@@ -713,10 +683,9 @@ impl ConfigStore {
             .filter(|p| active_ids.contains(&p.id))
             .collect();
         let settings = self.get_settings();
-        let models = self.get_models();
+        let model_entries = self.get_model_entries();
         let model_mappings = self.get_model_mappings();
         let log_enabled = self.get_log_enabled();
-        let lb_groups = self.get_lb_groups();
 
         serde_json::json!({
             "profiles": active_profiles,
@@ -725,9 +694,8 @@ impl ConfigStore {
                 "logEnabled": log_enabled,
                 "httpProxy": settings.http_proxy,
             },
-            "models": models,
+            "models": model_entries,
             "modelMappings": model_mappings,
-            "loadBalancerGroups": lb_groups,
         })
     }
 }
