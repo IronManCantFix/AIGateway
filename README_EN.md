@@ -173,6 +173,13 @@ Enable "Record request and response parameters" in settings to additionally log 
 
 > ⚠️ Enabling debug logging increases storage usage. Use the "Clear Parameters" button to clear recorded request/response bodies (preserving stats), or "Clear Logs" to delete all logs.
 
+### Developer Console
+
+Open the built-in DevTools for troubleshooting:
+
+- **Keyboard shortcut**: `Cmd+Shift+D` (macOS) / `Ctrl+Shift+D` (Windows/Linux) — works anytime, even when the page is blank
+- **Settings page**: Go to Settings → About section → click "Developer Console"
+
 ## 🔄 Model Mapping
 
 Model mapping allows you to redirect client-requested model IDs to actual model IDs. Useful when clients are locked to specific model names that you don't have.

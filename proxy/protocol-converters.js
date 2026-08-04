@@ -379,11 +379,40 @@ function convertResponsesToChat(body) {
         // assistant message missing reasoning_content
       }
       if (m.content && Array.isArray(m.content)) {
-        const text = m.content
-          .filter(c => c.type === 'input_text' || c.type === 'output_text' || c.type === 'text')
-          .map(c => c.text || '')
-          .join('')
-        const msg = { role, content: text }
+        const hasNonText = m.content.some(c =>
+          c.type === 'input_image' || c.type === 'image' || c.type === 'image_url'
+        )
+        let content
+        if (hasNonText) {
+          // Keep array format and convert to OpenAI vision format
+          content = m.content.map(c => {
+            if (c.type === 'input_text' || c.type === 'text' || c.type === 'output_text') {
+              return { type: 'text', text: c.text || '' }
+            }
+            if (c.type === 'input_image') {
+              // Responses: { type: 'input_image', image_url: 'data:...' | 'https://...' | { url } }
+              const url = typeof c.image_url === 'string' ? c.image_url : c.image_url?.url
+              if (url) return { type: 'image_url', image_url: { url } }
+            }
+            if (c.type === 'image') {
+              // Anthropic image: { type: 'image', source: { type: 'base64'|'url', ... } }
+              if (c.source?.type === 'url') {
+                return { type: 'image_url', image_url: { url: c.source.url } }
+              }
+              if (c.source?.type === 'base64') {
+                return { type: 'image_url', image_url: { url: `data:${c.source.media_type};base64,${c.source.data}` } }
+              }
+            }
+            if (c.type === 'image_url') return c
+            return null
+          }).filter(Boolean)
+        } else {
+          content = m.content
+            .filter(c => c.type === 'input_text' || c.type === 'output_text' || c.type === 'text')
+            .map(c => c.text || '')
+            .join('')
+        }
+        const msg = { role, content }
         if (role === 'assistant' && reasoningFromMeta) msg.reasoning_content = reasoningFromMeta
         if (role === 'user' || role === 'system') activeReasoning = ''
         return msg
@@ -514,6 +543,23 @@ function convertMessagesToResponses(body) {
   return result
 }
 
+// Convert a data URI (data:image/png;base64,...) or plain URL into an
+// Anthropic Messages image block: { type: 'image', source: {...} }
+function dataUriToAnthropicImage(url) {
+  const m = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(url)
+  if (m && m[3] !== undefined) {
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: m[1] || 'image/png',
+        data: m[3]
+      }
+    }
+  }
+  return { type: 'image', source: { type: 'url', url } }
+}
+
 function flattenResponsesMessageContent(content) {
   if (!Array.isArray(content)) return content
   const flattenable = content.every(c =>
@@ -521,8 +567,23 @@ function flattenResponsesMessageContent(content) {
     c.type === 'output_text' ||
     c.type === 'text'
   )
-  if (!flattenable) return content
-  return content.map(c => c.text || '').join('')
+  if (flattenable) return content.map(c => c.text || '').join('')
+  // Non-text content (e.g. images): convert to Anthropic Messages format
+  return content.map(c => {
+    if (c.type === 'input_text' || c.type === 'text' || c.type === 'output_text') {
+      return { type: 'text', text: c.text || '' }
+    }
+    if (c.type === 'input_image' || c.type === 'image_url') {
+      const url = typeof c.image_url === 'string' ? c.image_url : c.image_url?.url
+      if (!url) return null
+      return dataUriToAnthropicImage(url)
+    }
+    if (c.type === 'image') {
+      // Already Anthropic format
+      return c
+    }
+    return null
+  }).filter(Boolean)
 }
 
 function convertResponsesToMessages(body) {

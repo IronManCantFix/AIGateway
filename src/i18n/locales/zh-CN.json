@@ -180,7 +180,8 @@
       "checking": "检查中…",
       "checkUpdate": "检查更新",
       "download": "前往下载",
-      "downloading": "下载中…"
+      "downloading": "下载中…",
+      "devTools": "开发者控制台"
     },
     "placeholder": {
       "optional": "可选",
@@ -194,7 +195,8 @@
       "clearLogs": "确定要清除所有请求日志吗？统计计数将保留。",
       "clearStats": "确定要清除所有统计数据吗？此操作不可恢复。",
       "clearBodies": "确定要清空所有请求参数和返回参数吗？统计计数将保留。",
-      "downloadUpdate": "发现新版本 {version}，是否前往下载？",
+      "downloadUpdate": "发现新版本 {version}，是否下载并安装？",
+      "restartToUpdate": "更新已安装到 /Applications，是否立即重启应用以使用新版本？",
       "portConflict": "端口 {port} 已被占用（{process}，PID: {pid}），是否关闭该进程？",
       "portConflictUnknown": "端口 {port} 已被占用，是否尝试关闭占用进程？"
     },

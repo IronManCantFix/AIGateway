@@ -180,7 +180,8 @@
       "checking": "Checking…",
       "checkUpdate": "Check for updates",
       "download": "Download",
-      "downloading": "Downloading…"
+      "downloading": "Downloading…",
+      "devTools": "Developer Console"
     },
     "placeholder": {
       "optional": "Optional",
@@ -194,7 +195,8 @@
       "clearLogs": "Clear all request logs? Statistics counters will be preserved.",
       "clearStats": "Clear all statistics? This cannot be undone.",
       "clearBodies": "Clear all request and response payloads? Statistics counters will be preserved.",
-      "downloadUpdate": "New version {version} available. Open download page?",
+      "downloadUpdate": "New version {version} available. Download and install?",
+      "restartToUpdate": "Update installed to /Applications. Restart now to use the new version?",
       "portConflict": "Port {port} is in use ({process}, PID: {pid}). Kill the process?",
       "portConflictUnknown": "Port {port} is in use. Try to kill the occupying process?"
     },
