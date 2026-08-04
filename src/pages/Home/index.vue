@@ -14,9 +14,7 @@ const profiles = ref([])
 const activeProfileIds = ref([])
 const toast = ref('')
 const modelMappings = ref({ enabled: false, rules: [] })
-const lbGroups = ref([])
-const lbExpanded = ref(false)
-const lbEditState = ref({ visible: false, id: null, name: '', strategy: 'round-robin', profileIds: [] })
+const modelEntries = ref([])
 const confirmState = ref({ visible: false, message: '', resolve: null })
 let statusUnlisten = null
 let toastUnlisten = null
@@ -42,7 +40,7 @@ async function loadData() {
   proxyStatus.value = status.status
   proxyPort.value = status.port
   modelMappings.value = await api.getModelMappings()
-  lbGroups.value = await api.getLBGroups()
+  modelEntries.value = await api.getModelEntries()
 }
 
 const aggregatedModels = computed(() => {
@@ -57,6 +55,11 @@ const aggregatedModels = computed(() => {
       }
     }
   }
+  // Build strategy map from modelEntries
+  const strategyMap = {}
+  for (const e of modelEntries.value) {
+    strategyMap[e.name] = e.strategy || 'none'
+  }
   const result = []
   const seen = new Set()
   for (const p of activeProfiles) {
@@ -64,7 +67,7 @@ const aggregatedModels = computed(() => {
       for (const m of p.models) {
         if (!seen.has(m)) {
           seen.add(m)
-          result.push({ model: m, providers: modelProviders[m] })
+          result.push({ model: m, providers: modelProviders[m], strategy: strategyMap[m] || 'none' })
         }
       }
     }
@@ -277,57 +280,6 @@ async function addQuickMappings(fromModels) {
   showToast(`Added ${newRules.length} mapping(s)`)
 }
 
-// --- Load Balancer ---
-function lbProfileName(id) {
-  const p = profiles.value.find(pr => pr.id === id)
-  return p ? p.name : id
-}
-
-function lbStrategyLabel(strategy) {
-  return strategy === 'round-robin' ? t('home.lb.roundRobin') : t('home.lb.failover')
-}
-
-function openLBCreate() {
-  lbEditState.value = { visible: true, id: null, name: '', strategy: 'round-robin', profileIds: [] }
-}
-
-function openLBEdit(group) {
-  lbEditState.value = { visible: true, id: group.id, name: group.name, strategy: group.strategy, profileIds: [...group.profileIds] }
-}
-
-function closeLBEdit() {
-  lbEditState.value.visible = false
-}
-
-async function saveLBGroup() {
-  const { id, name, strategy, profileIds } = lbEditState.value
-  if (!name.trim()) { showToast(t('home.lb.nameRequired')); return }
-  if (profileIds.length < 2) { showToast(t('home.lb.minProfiles')); return }
-  try {
-    if (id) {
-      await api.updateLBGroup(id, { name, strategy, profileIds })
-    } else {
-      await api.addLBGroup({ name, strategy, profileIds })
-    }
-    lbGroups.value = await api.getLBGroups()
-    closeLBEdit()
-  } catch (e) {
-    showToast(typeof e === 'string' ? e : e?.message || 'Error')
-  }
-}
-
-async function deleteLBGroup(id) {
-  if (!await showConfirm(t('home.lb.confirmDelete'))) return
-  await api.deleteLBGroup(id)
-  lbGroups.value = await api.getLBGroups()
-}
-
-function lbToggleProfile(pid) {
-  const ids = lbEditState.value.profileIds
-  const idx = ids.indexOf(pid)
-  if (idx >= 0) { ids.splice(idx, 1) } else { ids.push(pid) }
-}
-
 onMounted(async () => {
   await loadData()
   statusUnlisten = await api.onStatusChange((payload) => {
@@ -456,6 +408,11 @@ onUnmounted(() => {
             <div class="model-providers">
               <span v-for="pv in item.providers" :key="pv" class="provider-tag">{{ pv }}</span>
             </div>
+            <select class="strategy-select" :value="item.strategy" @change="onStrategyChange(item.model, $event.target.value)">
+              <option value="none">{{ $t('home.strategy.none') }}</option>
+              <option value="round-robin">{{ $t('home.strategy.roundRobin') }}</option>
+              <option value="failover">{{ $t('home.strategy.failover') }}</option>
+            </select>
             <button class="model-copy-btn" @click.stop="copyModelId(item.model)" :title="$t('home.label.copyModelId')">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
@@ -527,44 +484,6 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-
-    <!-- 负载均衡 -->
-    <div class="card">
-      <div class="card-header">
-        <h3 @click="lbExpanded = !lbExpanded" style="cursor:pointer">
-          {{ $t('home.section.lb') }}
-          <span class="tip-icon">
-            ?
-            <span class="tip-pop">{{ $t('home.tip.lb') }}</span>
-          </span>
-        </h3>
-        <button class="toggle-btn" :class="{ on: lbExpanded }" @click="lbExpanded = !lbExpanded">
-          {{ lbExpanded ? $t('home.button.collapse') : $t('home.button.expand') }}
-        </button>
-      </div>
-      <div class="card-body" v-if="lbExpanded">
-        <div class="lb-groups" v-if="lbGroups.length > 0">
-          <div v-for="group in lbGroups" :key="group.id" class="lb-group-card">
-            <div class="lb-group-header">
-              <span class="lb-group-name">{{ group.name }}</span>
-              <span class="lb-strategy-tag">{{ lbStrategyLabel(group.strategy) }}</span>
-              <div class="lb-group-actions">
-                <button class="act-btn" @click="openLBEdit(group)">{{ $t('home.button.edit') }}</button>
-                <button class="act-btn danger" @click="deleteLBGroup(group.id)">{{ $t('common.delete') }}</button>
-              </div>
-            </div>
-            <div class="lb-profiles">
-              <div v-for="(pid, idx) in group.profileIds" :key="pid" class="lb-profile-row">
-                <span class="lb-order">{{ idx + 1 }}</span>
-                <span class="lb-profile-name">{{ lbProfileName(pid) }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="card-empty" v-else style="padding: 16px 0;">{{ $t('home.empty.lb') }}</div>
-        <button class="add-rule-btn" @click="openLBCreate">{{ $t('home.lb.create') }}</button>
-      </div>
-    </div>
   </div>
 
   <!-- 确认弹窗 -->
@@ -580,36 +499,6 @@ onUnmounted(() => {
     </div>
   </Teleport>
 
-  <!-- 负载均衡编辑弹窗 -->
-  <Teleport to="body">
-    <div class="confirm-overlay" v-if="lbEditState.visible" @click.self="closeLBEdit">
-      <div class="confirm-dialog" style="min-width:400px;max-width:500px;">
-        <p class="confirm-msg" style="margin-bottom:16px;">{{ lbEditState.id ? $t('home.lb.editGroup') : $t('home.lb.createGroup') }}</p>
-        <div class="lb-form">
-          <label class="lb-label">{{ $t('home.lb.name') }}</label>
-          <input class="mapping-input" v-model="lbEditState.name" :placeholder="$t('home.lb.namePlaceholder')" />
-          <label class="lb-label" style="margin-top:12px;">{{ $t('home.lb.strategy') }}</label>
-          <select class="mapping-select" v-model="lbEditState.strategy">
-            <option value="round-robin">{{ $t('home.lb.roundRobin') }}</option>
-            <option value="failover">{{ $t('home.lb.failover') }}</option>
-          </select>
-          <label class="lb-label" style="margin-top:12px;">{{ $t('home.lb.selectProfiles') }}</label>
-          <div class="lb-profile-select">
-            <div v-for="p in profiles" :key="p.id" class="lb-profile-option" :class="{ selected: lbEditState.profileIds.includes(p.id) }" @click="lbToggleProfile(p.id)">
-              <span class="pr-checkbox" :class="{ on: lbEditState.profileIds.includes(p.id) }">
-                <svg v-if="lbEditState.profileIds.includes(p.id)" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
-              </span>
-              <span>{{ p.name }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="confirm-actions" style="margin-top:20px;">
-          <button class="confirm-cancel" @click="closeLBEdit">{{ $t('common.cancel') }}</button>
-          <button class="confirm-ok" style="background:var(--accent);" @click="saveLBGroup">{{ $t('common.save') }}</button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
 </template>
 
 <style scoped>
@@ -1011,6 +900,25 @@ onUnmounted(() => {
   color: var(--accent);
 }
 
+.strategy-select {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  outline: none;
+  transition: border-color .15s;
+}
+.strategy-select:hover {
+  border-color: var(--border-hover);
+}
+.strategy-select:focus {
+  border-color: var(--accent);
+}
+
 .model-id {
   font-size: 12.5px;
   font-family: 'SF Mono', 'Fira Code', monospace;
@@ -1330,78 +1238,4 @@ onUnmounted(() => {
 .confirm-ok:hover { background: #ef4444; box-shadow: 0 0 12px rgba(248, 113, 113, 0.3); }
 
 /* ===== Load Balancer ===== */
-.lb-groups { display: flex; flex-direction: column; gap: 10px; }
-.lb-group-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  background: var(--accent-soft);
-}
-.lb-group-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.lb-group-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.lb-strategy-tag {
-  font-size: 10.5px;
-  padding: 1.5px 7px;
-  border-radius: 5px;
-  font-weight: 600;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.lb-group-actions { margin-left: auto; display: flex; gap: 4px; }
-.lb-profiles { display: flex; flex-direction: column; gap: 4px; }
-.lb-profile-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-}
-.lb-order {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.lb-profile-name { font-size: 13px; color: var(--text-secondary); }
-.lb-form { display: flex; flex-direction: column; gap: 6px; }
-.lb-label { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
-.lb-profile-select {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 200px;
-  overflow-y: auto;
-}
-.lb-profile-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--text-secondary);
-  transition: all .15s;
-}
-.lb-profile-option:hover { border-color: var(--border-hover); background: var(--accent-soft); }
-.lb-profile-option.selected { border-color: var(--accent); background: var(--accent-soft); }
 </style>
