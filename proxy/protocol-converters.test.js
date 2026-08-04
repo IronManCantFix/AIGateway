@@ -508,3 +508,87 @@ test('Chat to Responses SSE flush always emits response.completed', () => {
   const completed = events.find(e => e.type === 'response.completed')
   assert.ok(completed.response.output.length > 0)
 })
+
+test('convertResponsesToChat preserves input_image as OpenAI vision content', () => {
+  // Codex calls view_image and sends the image back as input_image content.
+  // The gateway must keep the image (OpenAI vision format) instead of dropping it.
+  const result = convertResponsesToChat({
+    model: 'vision-test',
+    stream: true,
+    input: [
+      { type: 'message', role: 'user', content: 'What is in this image?' },
+      { type: 'message', role: 'user', content: [
+        { type: 'input_text', text: 'Look at this.' },
+        { type: 'input_image', image_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==' }
+      ] }
+    ]
+  })
+
+  const userMsg = result.messages.find(m => m.role === 'user' && Array.isArray(m.content))
+  assert.ok(userMsg, 'user message with image should keep array content')
+  assert.deepEqual(userMsg.content, [
+    { type: 'text', text: 'Look at this.' },
+    { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==' } }
+  ])
+  const serialized = JSON.stringify(result.messages)
+  assert.ok(serialized.includes('image_url'), 'image data must not be dropped')
+  assert.ok(serialized.includes('iVBORw0KGgoAAAANSUhEUg=='), 'base64 payload must be forwarded')
+})
+
+test('convertResponsesToChat preserves Anthropic-style image blocks', () => {
+  const result = convertResponsesToChat({
+    model: 'vision-test',
+    input: [
+      { type: 'message', role: 'user', content: [
+        { type: 'input_text', text: 'Look.' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'aGVsbG8=' } }
+      ] }
+    ]
+  })
+
+  const userMsg = result.messages.find(m => m.role === 'user' && Array.isArray(m.content))
+  assert.ok(userMsg, 'user message with image should keep array content')
+  assert.deepEqual(userMsg.content[1], {
+    type: 'image_url',
+    image_url: { url: 'data:image/jpeg;base64,aGVsbG8=' }
+  })
+})
+
+test('convertResponsesToMessages converts input_image to Anthropic image block', () => {
+  const result = convertResponsesToMessages({
+    model: 'claude-test',
+    input: [
+      { type: 'message', role: 'user', content: [
+        { type: 'input_text', text: 'Describe this image.' },
+        { type: 'input_image', image_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==' }
+      ] }
+    ]
+  })
+
+  const userMsg = result.messages.find(m => m.role === 'user' && Array.isArray(m.content))
+  assert.ok(userMsg, 'user message with image should keep array content')
+  assert.deepEqual(userMsg.content, [
+    { type: 'text', text: 'Describe this image.' },
+    {
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUg==' }
+    }
+  ])
+})
+
+test('convertResponsesToMessages converts remote image_url to Anthropic url source', () => {
+  const result = convertResponsesToMessages({
+    model: 'claude-test',
+    input: [
+      { type: 'message', role: 'user', content: [
+        { type: 'input_image', image_url: 'https://example.com/photo.png' }
+      ] }
+    ]
+  })
+
+  const userMsg = result.messages.find(m => m.role === 'user' && Array.isArray(m.content))
+  assert.ok(userMsg, 'user message with image should keep array content')
+  assert.deepEqual(userMsg.content, [
+    { type: 'image', source: { type: 'url', url: 'https://example.com/photo.png' } }
+  ])
+})
