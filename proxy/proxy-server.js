@@ -402,6 +402,12 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         closed = true
         clearInterval(keepAlive)
         upstreamReq.destroy()
+        // 客户端提前断开（如 Codex 收到 response.completed 后立即关闭连接）时，
+        // 也要把已收到的响应体回传给日志记录，避免 token 统计缺失。
+        if (onResponseBody) {
+          const rawBuffer = Buffer.concat(rawChunks)
+          if (rawBuffer.length > 0) onResponseBody(rawBuffer.toString('utf8'))
+        }
         if (!clientRes.writableEnded) clientRes.end()
       }
 
@@ -472,6 +478,11 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         closed = true
         clearInterval(keepAlive)
         upstreamReq.destroy()
+        // 客户端提前断开时同样捕获已收到的响应体，保证 token 统计不丢失。
+        if (onResponseBody) {
+          const rawBuffer = Buffer.concat(rawChunks)
+          if (rawBuffer.length > 0) onResponseBody(rawBuffer.toString('utf8'))
+        }
         if (!clientRes.writableEnded) clientRes.end()
       }
 
@@ -1342,6 +1353,7 @@ const server = http.createServer(async (req, res) => {
       res.on('finish', () => {
         logRequest(endpoint, '-', res.statusCode, Date.now() - startTime, null, null, null, '-', { method: req.method })
       })
+      return
     } else if (urlPath === '/v1/messages/count_tokens') {
       // Anthropic token counting endpoint — return estimated count since upstream providers don't support it
       rawBody = await readBody(req)
@@ -1352,6 +1364,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ input_tokens: inputTokens }))
       logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-', { method: req.method })
+      return
     } else if (PATH_TO_SOURCE[urlPath]) {
       const ct = req.headers['content-type'] || ''
       const isMultipart = PATH_TO_SOURCE[urlPath] === 'image' && ct.startsWith('multipart/form-data')
@@ -1401,6 +1414,7 @@ const server = http.createServer(async (req, res) => {
       // 尝试从请求体中提取 model，便于排查
       const modelFromBody = (bodyForLog && bodyForLog.model) || '-'
       logRequest(endpoint, modelFromBody, 404, Date.now() - startTime, 'route_not_found', bodyForLog, notFoundBody, '-', { method: req.method })
+      return
     }
   } catch (err) {
     if (!res.headersSent) {
@@ -1415,10 +1429,18 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
-  res.on('finish', () => {
+  // 仅监听 finish 时，客户端提前断开（如 Codex 收到 response.completed 后立即关闭连接）
+  // 会导致 finish 永不触发，请求完全丢失日志与统计。因此同时监听 finish 和 close，
+  // 并用 logged 守卫保证同一请求只记录一次。
+  let logged = false
+  const finalizeLog = () => {
+    if (logged) return
+    logged = true
     const extra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
     logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra)
-  })
+  }
+  res.on('finish', finalizeLog)
+  res.on('close', finalizeLog)
 })
 
 function sanitizeImageResponseBody(rawText) {
