@@ -31,6 +31,8 @@ pub struct ProxyStatus {
 
 struct ProxyInner {
     child: Option<Child>,
+    // stdin 独立加锁，避免 reload / config_request 回复 / shutdown 并发写管道时交错
+    stdin: Mutex<Option<std::process::ChildStdin>>,
     status: String,
     port: u16,
     stopping: bool,
@@ -60,6 +62,7 @@ impl ProxyManager {
         Self {
             inner: Arc::new(Mutex::new(ProxyInner {
                 child: None,
+                stdin: Mutex::new(None),
                 status: "stopped".to_string(),
                 port,
                 stopping: false,
@@ -165,16 +168,15 @@ impl ProxyManager {
             .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
 
         // Send init config via stdin
-        if let Some(ref mut stdin) = child.stdin {
-            let msg = serde_json::json!({
-                "type": "init",
-                "config": config,
-            });
-            let line = serde_json::to_string(&msg).expect("json serialization");
-            stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
-            stdin.write_all(b"\n").map_err(|e| e.to_string())?;
-            stdin.flush().map_err(|e| e.to_string())?;
-        }
+        let mut stdin = child.stdin.take().ok_or("Failed to open sidecar stdin")?;
+        let msg = serde_json::json!({
+            "type": "init",
+            "config": config,
+        });
+        let line = serde_json::to_string(&msg).expect("json serialization");
+        stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+        stdin.write_all(b"\n").map_err(|e| e.to_string())?;
+        stdin.flush().map_err(|e| e.to_string())?;
 
         // Spawn stderr reader thread
         let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
@@ -229,6 +231,25 @@ impl ProxyManager {
                                     crate::tray::update_tray_stats(&app_handle_clone, &config_store_clone, true);
                                 }
                             }
+                        }
+                    }
+                    Some("config_request") => {
+                        // Sidecar 请求最新配置（例如 GET /v1/models 时），
+                        // 从磁盘重新构建并回复，保证接口始终反映最新可用模型。
+                        let config = config_store_clone.build_proxy_config();
+                        let id = msg.get("id").cloned();
+                        let guard = inner_clone.lock().unwrap();
+                        let mut stdin_guard = guard.stdin.lock().unwrap();
+                        if let Some(ref mut stdin) = *stdin_guard {
+                            let reply = serde_json::json!({
+                                "type": "config_update",
+                                "id": id,
+                                "config": config,
+                            });
+                            let line = serde_json::to_string(&reply).expect("json serialization");
+                            let _ = stdin.write_all(line.as_bytes());
+                            let _ = stdin.write_all(b"\n");
+                            let _ = stdin.flush();
                         }
                     }
                     Some("error") => {
@@ -286,6 +307,7 @@ impl ProxyManager {
         });
 
         guard.child = Some(child);
+        *guard.stdin.lock().unwrap() = Some(stdin);
         guard.status = "starting".to_string();
         guard.port = port;
 
@@ -298,9 +320,9 @@ impl ProxyManager {
             let mut guard = self.inner.lock().unwrap();
             guard.stopping = true;
             guard.status = "stopping".to_string();
-            guard.child.take().map(|mut c| {
+            let stdin = guard.stdin.lock().unwrap().take();
+            guard.child.take().map(|c| {
                 let pid = c.id();
-                let stdin = c.stdin.take();
                 (c, pid, stdin)
             })
         };
@@ -341,19 +363,18 @@ impl ProxyManager {
     }
 
     pub fn reload(&self) -> Result<(), String> {
-        let mut guard = self.inner.lock().unwrap();
-        if let Some(ref mut child) = guard.child {
-            if let Some(ref mut stdin) = child.stdin {
-                let config = self.config_store.build_proxy_config();
-                let msg = serde_json::json!({
-                    "type": "reload",
-                    "config": config,
-                });
-                let line = serde_json::to_string(&msg).expect("json serialization");
-                stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
-                stdin.write_all(b"\n").map_err(|e| e.to_string())?;
-                stdin.flush().map_err(|e| e.to_string())?;
-            }
+        let guard = self.inner.lock().unwrap();
+        let mut stdin_guard = guard.stdin.lock().unwrap();
+        if let Some(ref mut stdin) = *stdin_guard {
+            let config = self.config_store.build_proxy_config();
+            let msg = serde_json::json!({
+                "type": "reload",
+                "config": config,
+            });
+            let line = serde_json::to_string(&msg).expect("json serialization");
+            stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+            stdin.write_all(b"\n").map_err(|e| e.to_string())?;
+            stdin.flush().map_err(|e| e.to_string())?;
         }
         Ok(())
     }

@@ -63,9 +63,9 @@ pub fn add_profile(app_handle: tauri::AppHandle, state: State<'_, AppState>, pro
     let active = state.config.get_active_profiles();
     if active.is_empty() {
         state.config.set_active_profiles(&[saved.id.clone()])?;
-        if state.proxy.get_status().status == "running" {
-            state.proxy.reload()?;
-        }
+    }
+    if state.proxy.get_status().status == "running" {
+        state.proxy.reload()?;
     }
     app_handle.emit("tray-menu-update", ()).ok();
     Ok(saved)
@@ -74,8 +74,7 @@ pub fn add_profile(app_handle: tauri::AppHandle, state: State<'_, AppState>, pro
 #[tauri::command]
 pub fn update_profile(app_handle: tauri::AppHandle, state: State<'_, AppState>, id: String, updates: serde_json::Value) -> Result<Profile, String> {
     let saved = state.config.update_profile(&id, updates)?;
-    let active = state.config.get_active_profiles();
-    if active.contains(&id) && state.proxy.get_status().status == "running" {
+    if state.proxy.get_status().status == "running" {
         state.proxy.reload()?;
     }
     app_handle.emit("tray-menu-update", ()).ok();
@@ -84,9 +83,8 @@ pub fn update_profile(app_handle: tauri::AppHandle, state: State<'_, AppState>, 
 
 #[tauri::command]
 pub fn delete_profile(app_handle: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let was_active = state.config.get_active_profiles().contains(&id);
     state.config.delete_profile(&id)?;
-    if was_active && state.proxy.get_status().status == "running" {
+    if state.proxy.get_status().status == "running" {
         state.proxy.reload()?;
     }
     app_handle.emit("tray-menu-update", ()).ok();

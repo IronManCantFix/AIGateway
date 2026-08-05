@@ -837,14 +837,35 @@ function selectRoundRobinForModel(requestedModel, profiles) {
 
 // --- Route: /v1/models ---
 
-function handleModels(_, res) {
-  const rawModels = (currentConfig && currentConfig.models) ? currentConfig.models : []
-  // Handle both new format ({ name, strategy }) and old format (plain strings)
-  const globalModels = rawModels.map(m => typeof m === 'object' ? m.name : m)
+// In-flight "please give me the freshest config" requests to the parent
+// process. Each request carries an id; the parent answers with a
+// config_update message carrying the same id.
+let configRequestSeq = 0
+const pendingConfigRequests = new Map() // id → { resolve, timer }
+
+function requestLatestConfig() {
+  return new Promise((resolve) => {
+    const id = ++configRequestSeq
+    const timer = setTimeout(() => {
+      pendingConfigRequests.delete(id)
+      resolve(null) // parent did not answer in time; fall back to currentConfig
+    }, 1000)
+    pendingConfigRequests.set(id, { resolve, timer })
+    process.stdout.write(JSON.stringify({ type: 'config_request', id }) + '\n')
+  })
+}
+
+async function handleModels(_, res) {
+  // 配置可能随时变动（增删 profile、启用/停用等），每次请求都向父进程拉取
+  // 最新配置，保证与首页"可用模型"（已启用 profile 的模型并集）一致。
+  const freshConfig = await requestLatestConfig()
+  if (freshConfig && Array.isArray(freshConfig.profiles)) {
+    currentConfig = freshConfig
+  }
   const providerModels = (currentConfig && currentConfig.profiles)
     ? currentConfig.profiles.flatMap(p => (Array.isArray(p.models) ? p.models : []))
     : []
-  const allModels = [...new Set([...globalModels, ...providerModels])]
+  const allModels = [...new Set(providerModels)]
   const data = allModels.map(id => ({ id, object: 'model', owned_by: 'aigateway' }))
   res.writeHead(200, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify({ object: 'list', data }))
@@ -853,14 +874,16 @@ function handleModels(_, res) {
 // --- Handle API request ---
 
 async function handleApiRequest(req, res) {
-  // Check active profiles
-  if (!currentConfig || !currentConfig.profiles || currentConfig.profiles.length === 0) {
+  const urlPath = req.url.split('?')[0]
+  const isModelsEndpoint = urlPath === '/v1/models' && req.method === 'GET'
+  // Check active profiles. /v1/models 例外：它每次都会向父进程拉取最新配置，
+  // 不应因为本地快照为空而直接返回 503。
+  if (!isModelsEndpoint && (!currentConfig || !currentConfig.profiles || currentConfig.profiles.length === 0)) {
     res.writeHead(503, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Service Unavailable: no active profile configured' }))
     return
   }
 
-  const urlPath = req.url.split('?')[0]
   const source = PATH_TO_SOURCE[urlPath]
 
   if (!source) {
@@ -1359,7 +1382,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (urlPath === '/v1/models' && req.method === 'GET') {
-      handleModels(req, res)
+      await handleModels(req, res)
       res.on('finish', () => {
         logRequest(endpoint, '-', res.statusCode, Date.now() - startTime, null, null, null, '-', { method: req.method })
       })
@@ -1508,6 +1531,17 @@ process.stdin.on('data', (chunk) => {
     } else if (msg.type === 'reload') {
       currentConfig = msg.config
       logEnabled = !!(msg.config.settings && msg.config.settings.logEnabled)
+    } else if (msg.type === 'config_update') {
+      if (msg.config && Array.isArray(msg.config.profiles)) {
+        currentConfig = msg.config
+        logEnabled = !!(msg.config.settings && msg.config.settings.logEnabled)
+      }
+      if (msg.id !== undefined && msg.id !== null && pendingConfigRequests.has(msg.id)) {
+        const pending = pendingConfigRequests.get(msg.id)
+        clearTimeout(pending.timer)
+        pendingConfigRequests.delete(msg.id)
+        pending.resolve(msg.config || null)
+      }
     } else if (msg.type === 'shutdown') {
       try { server.closeAllConnections() } catch {}
       server.close()
