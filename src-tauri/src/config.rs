@@ -377,17 +377,55 @@ impl ConfigStore {
     // --- Models ---
 
     /// Returns model entries. Handles backward compat: old format is plain string array.
+    /// Returns all model entries: union of the global models list and all
+    /// profile models, each annotated with its load-balancing strategy.
     pub fn get_model_entries(&self) -> Vec<ModelEntry> {
+        let strategies = self.get_model_strategies();
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+
+        // Global models list (new format entries / legacy plain strings)
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum FlexModel { Entry(ModelEntry), Name(String) }
         #[derive(Deserialize, Default)]
         struct Wrapper { #[serde(default)] models: Vec<FlexModel> }
         let w: Wrapper = self.read_json("models.json");
-        w.models.into_iter().map(|m| match m {
-            FlexModel::Entry(e) => e,
-            FlexModel::Name(n) => ModelEntry { name: n, strategy: default_model_strategy() },
-        }).collect()
+        for m in w.models {
+            let name = match &m {
+                FlexModel::Entry(e) => e.name.clone(),
+                FlexModel::Name(n) => n.clone(),
+            };
+            if seen.insert(name.clone()) {
+                out.push(ModelEntry {
+                    strategy: strategies.get(&name).cloned().unwrap_or_else(default_model_strategy),
+                    ..match m {
+                        FlexModel::Entry(e) => e,
+                        FlexModel::Name(_) => ModelEntry { name: name.clone(), strategy: String::new() },
+                    }
+                });
+            }
+        }
+
+        // Profile models (ensure every model visible in the UI has an entry)
+        for p in self.get_profiles() {
+            for m in p.models {
+                if seen.insert(m.clone()) {
+                    out.push(ModelEntry {
+                        name: m.clone(),
+                        strategy: strategies.get(&m).cloned().unwrap_or_else(default_model_strategy),
+                    });
+                }
+            }
+        }
+
+        // Make sure strategies read from the store win over legacy inline values
+        for e in out.iter_mut() {
+            if let Some(s) = strategies.get(&e.name) {
+                e.strategy = s.clone();
+            }
+        }
+        out
     }
 
     /// Returns model name strings only (backward-compatible helper).
@@ -395,12 +433,19 @@ impl ConfigStore {
         self.get_model_entries().into_iter().map(|e| e.name).collect()
     }
 
+    /// Loads per-model strategies from model-strategies.json (independent of
+    /// models.json so strategies work for any model, including profile-only ones).
+    pub fn get_model_strategies(&self) -> std::collections::HashMap<String, String> {
+        #[derive(Deserialize, Default)]
+        struct Wrapper { #[serde(default)] strategies: std::collections::HashMap<String, String> }
+        let w: Wrapper = self.read_json("model-strategies.json");
+        w.strategies
+    }
+
     pub fn set_model_strategy(&self, model_name: &str, strategy: &str) -> Result<(), String> {
-        let mut entries = self.get_model_entries();
-        if let Some(e) = entries.iter_mut().find(|e| e.name == model_name) {
-            e.strategy = strategy.to_string();
-        }
-        self.write_json("models.json", &serde_json::json!({ "models": entries }))
+        let mut strategies = self.get_model_strategies();
+        strategies.insert(model_name.to_string(), strategy.to_string());
+        self.write_json("model-strategies.json", &serde_json::json!({ "strategies": strategies }))
     }
 
     pub fn set_models(&self, models: &[String]) -> Result<(), String> {
@@ -684,6 +729,7 @@ impl ConfigStore {
             .collect();
         let settings = self.get_settings();
         let model_entries = self.get_model_entries();
+        let model_strategies = self.get_model_strategies();
         let model_mappings = self.get_model_mappings();
         let log_enabled = self.get_log_enabled();
 
@@ -695,6 +741,7 @@ impl ConfigStore {
                 "httpProxy": settings.http_proxy,
             },
             "models": model_entries,
+            "modelStrategies": model_strategies,
             "modelMappings": model_mappings,
         })
     }

@@ -293,7 +293,11 @@ async function cycleStrategy(modelName, current) {
   try {
     await api.setModelStrategy(modelName, next)
     const idx = modelEntries.value.findIndex(e => e.name === modelName)
-    if (idx >= 0) modelEntries.value[idx].strategy = next
+    if (idx >= 0) {
+      modelEntries.value[idx].strategy = next
+    } else {
+      modelEntries.value.push({ name: modelName, strategy: next })
+    }
   } catch (e) {
     showToast(typeof e === 'string' ? e : e?.message || 'Error')
   }

@@ -784,11 +784,18 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 // --- Model strategy helpers ---
 
 function getModelStrategy(requestedModel) {
-  if (!requestedModel || !currentConfig?.models) return 'none'
-  const models = currentConfig.models
-  // models can be array of { name, strategy } or plain strings
-  for (const m of models) {
-    if (typeof m === 'object' && m.name === requestedModel) return m.strategy || 'none'
+  if (!requestedModel) return 'none'
+  // Strategies are stored per model name in currentConfig.modelStrategies
+  if (currentConfig?.modelStrategies && currentConfig.modelStrategies[requestedModel]) {
+    return currentConfig.modelStrategies[requestedModel]
+  }
+  // Fallback: read from the models array entries ({ name, strategy })
+  if (currentConfig?.models) {
+    for (const m of currentConfig.models) {
+      if (typeof m === 'object' && m.name === requestedModel && m.strategy) {
+        return m.strategy
+      }
+    }
   }
   return 'none'
 }
