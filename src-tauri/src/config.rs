@@ -585,6 +585,11 @@ impl ConfigStore {
         if entry.status_code != 200 {
             return Ok(());
         }
+        // 非中转接口（token 估算、模型列表等由网关本地处理、不转发上游的请求）
+        // 只记录日志，不计入调用成功次数
+        if Self::is_non_relay_endpoint(&entry.endpoint) {
+            return Ok(());
+        }
 
         // Update aggregated stats
         let mut stats: AggregatedStats = self.read_json("aggregated-stats.json");
@@ -616,6 +621,13 @@ impl ConfigStore {
         *stats.daily_tokens.entry(date).or_insert(0) += entry.total_tokens.unwrap_or(0);
 
         self.write_json("aggregated-stats.json", &stats)
+    }
+
+    /// 判断是否为网关本地处理、不转发上游的接口。
+    /// 这类请求只写日志，不参与“调用成功次数”等中转统计。
+    fn is_non_relay_endpoint(endpoint: &str) -> bool {
+        let path = endpoint.split('?').next().unwrap_or(endpoint);
+        matches!(path, "/v1/messages/count_tokens" | "/v1/models")
     }
 
     pub fn clear_logs(&self) -> Result<(), String> {

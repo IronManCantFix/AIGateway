@@ -402,6 +402,15 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         closed = true
         clearInterval(keepAlive)
         upstreamReq.destroy()
+        // 客户端提前断开（如 Codex 收到 response.completed 后立即关闭连接）时，
+        // 也要把已收到的响应体回传给日志记录，避免 token 统计缺失。
+        if (onResponseBody) {
+          const rawBuffer = Buffer.concat(rawChunks)
+          if (rawBuffer.length > 0) onResponseBody(rawBuffer.toString('utf8'))
+        }
+        // bun 运行时下 res 的 close/finish 事件在客户端提前断开时可能不触发，
+        // 直接调用主处理器的日志兜底回调，确保请求被记录。
+        if (clientReq._finalizeLog) clientReq._finalizeLog()
         if (!clientRes.writableEnded) clientRes.end()
       }
 
@@ -453,6 +462,9 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         clientRes.end()
         const rawBuffer = Buffer.concat(rawChunks)
         if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
+        // bun 运行时下客户端提前断开（如 Codex 收到 response.completed 后立即关闭
+        // 连接）时 finish/close 事件可能都不触发，SSE 流完整结束时直接记录日志。
+        if (clientReq._finalizeLog) clientReq._finalizeLog()
       })
     } else if (isStreaming) {
       // SSE streaming without conversion — pipe through immediately
@@ -472,6 +484,13 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         closed = true
         clearInterval(keepAlive)
         upstreamReq.destroy()
+        // 客户端提前断开时同样捕获已收到的响应体，保证 token 统计不丢失。
+        if (onResponseBody) {
+          const rawBuffer = Buffer.concat(rawChunks)
+          if (rawBuffer.length > 0) onResponseBody(rawBuffer.toString('utf8'))
+        }
+        // bun 运行时兜底：直接触发日志记录，不依赖 res close/finish 事件。
+        if (clientReq._finalizeLog) clientReq._finalizeLog()
         if (!clientRes.writableEnded) clientRes.end()
       }
 
@@ -492,6 +511,8 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         clearInterval(keepAlive)
         const rawBuffer = Buffer.concat(rawChunks)
         if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
+        // bun 运行时兜底：SSE 流完整结束时直接记录日志。
+        if (clientReq._finalizeLog) clientReq._finalizeLog()
         clientRes.end()
       })
     } else if (sseConverter) {
@@ -816,14 +837,35 @@ function selectRoundRobinForModel(requestedModel, profiles) {
 
 // --- Route: /v1/models ---
 
-function handleModels(_, res) {
-  const rawModels = (currentConfig && currentConfig.models) ? currentConfig.models : []
-  // Handle both new format ({ name, strategy }) and old format (plain strings)
-  const globalModels = rawModels.map(m => typeof m === 'object' ? m.name : m)
+// In-flight "please give me the freshest config" requests to the parent
+// process. Each request carries an id; the parent answers with a
+// config_update message carrying the same id.
+let configRequestSeq = 0
+const pendingConfigRequests = new Map() // id → { resolve, timer }
+
+function requestLatestConfig() {
+  return new Promise((resolve) => {
+    const id = ++configRequestSeq
+    const timer = setTimeout(() => {
+      pendingConfigRequests.delete(id)
+      resolve(null) // parent did not answer in time; fall back to currentConfig
+    }, 1000)
+    pendingConfigRequests.set(id, { resolve, timer })
+    process.stdout.write(JSON.stringify({ type: 'config_request', id }) + '\n')
+  })
+}
+
+async function handleModels(_, res) {
+  // 配置可能随时变动（增删 profile、启用/停用等），每次请求都向父进程拉取
+  // 最新配置，保证与首页"可用模型"（已启用 profile 的模型并集）一致。
+  const freshConfig = await requestLatestConfig()
+  if (freshConfig && Array.isArray(freshConfig.profiles)) {
+    currentConfig = freshConfig
+  }
   const providerModels = (currentConfig && currentConfig.profiles)
     ? currentConfig.profiles.flatMap(p => (Array.isArray(p.models) ? p.models : []))
     : []
-  const allModels = [...new Set([...globalModels, ...providerModels])]
+  const allModels = [...new Set(providerModels)]
   const data = allModels.map(id => ({ id, object: 'model', owned_by: 'aigateway' }))
   res.writeHead(200, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify({ object: 'list', data }))
@@ -832,14 +874,16 @@ function handleModels(_, res) {
 // --- Handle API request ---
 
 async function handleApiRequest(req, res) {
-  // Check active profiles
-  if (!currentConfig || !currentConfig.profiles || currentConfig.profiles.length === 0) {
+  const urlPath = req.url.split('?')[0]
+  const isModelsEndpoint = urlPath === '/v1/models' && req.method === 'GET'
+  // Check active profiles. /v1/models 例外：它每次都会向父进程拉取最新配置，
+  // 不应因为本地快照为空而直接返回 503。
+  if (!isModelsEndpoint && (!currentConfig || !currentConfig.profiles || currentConfig.profiles.length === 0)) {
     res.writeHead(503, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Service Unavailable: no active profile configured' }))
     return
   }
 
-  const urlPath = req.url.split('?')[0]
   const source = PATH_TO_SOURCE[urlPath]
 
   if (!source) {
@@ -1338,10 +1382,11 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (urlPath === '/v1/models' && req.method === 'GET') {
-      handleModels(req, res)
+      await handleModels(req, res)
       res.on('finish', () => {
         logRequest(endpoint, '-', res.statusCode, Date.now() - startTime, null, null, null, '-', { method: req.method })
       })
+      return
     } else if (urlPath === '/v1/messages/count_tokens') {
       // Anthropic token counting endpoint — return estimated count since upstream providers don't support it
       rawBody = await readBody(req)
@@ -1352,6 +1397,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ input_tokens: inputTokens }))
       logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-', { method: req.method })
+      return
     } else if (PATH_TO_SOURCE[urlPath]) {
       const ct = req.headers['content-type'] || ''
       const isMultipart = PATH_TO_SOURCE[urlPath] === 'image' && ct.startsWith('multipart/form-data')
@@ -1401,6 +1447,7 @@ const server = http.createServer(async (req, res) => {
       // 尝试从请求体中提取 model，便于排查
       const modelFromBody = (bodyForLog && bodyForLog.model) || '-'
       logRequest(endpoint, modelFromBody, 404, Date.now() - startTime, 'route_not_found', bodyForLog, notFoundBody, '-', { method: req.method })
+      return
     }
   } catch (err) {
     if (!res.headersSent) {
@@ -1415,10 +1462,24 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
-  res.on('finish', () => {
+  // 仅监听 finish 时，客户端提前断开（如 Codex 收到 response.completed 后立即关闭连接）
+  // 会导致 finish 永不触发，请求完全丢失日志与统计。因此同时监听 finish 和 close，
+  // 并用 logged 守卫保证同一请求只记录一次。
+  let logged = false
+  const finalizeLog = () => {
+    if (logged) return
+    logged = true
     const extra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
     logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra)
-  })
+  }
+  // bun 运行时下 res 的 close 事件在客户端提前断开时可能不触发，
+  // 因此把 finalizeLog 挂到 req 上供 forwardRequest 直接调用，并监听
+  // req 的 close/aborted 作为额外兜底。logged 守卫保证只记录一次。
+  req._finalizeLog = finalizeLog
+  res.on('finish', finalizeLog)
+  res.on('close', finalizeLog)
+  req.on('close', finalizeLog)
+  req.on('aborted', finalizeLog)
 })
 
 function sanitizeImageResponseBody(rawText) {
@@ -1470,6 +1531,17 @@ process.stdin.on('data', (chunk) => {
     } else if (msg.type === 'reload') {
       currentConfig = msg.config
       logEnabled = !!(msg.config.settings && msg.config.settings.logEnabled)
+    } else if (msg.type === 'config_update') {
+      if (msg.config && Array.isArray(msg.config.profiles)) {
+        currentConfig = msg.config
+        logEnabled = !!(msg.config.settings && msg.config.settings.logEnabled)
+      }
+      if (msg.id !== undefined && msg.id !== null && pendingConfigRequests.has(msg.id)) {
+        const pending = pendingConfigRequests.get(msg.id)
+        clearTimeout(pending.timer)
+        pendingConfigRequests.delete(msg.id)
+        pending.resolve(msg.config || null)
+      }
     } else if (msg.type === 'shutdown') {
       try { server.closeAllConnections() } catch {}
       server.close()
