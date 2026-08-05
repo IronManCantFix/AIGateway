@@ -408,6 +408,9 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
           const rawBuffer = Buffer.concat(rawChunks)
           if (rawBuffer.length > 0) onResponseBody(rawBuffer.toString('utf8'))
         }
+        // bun 运行时下 res 的 close/finish 事件在客户端提前断开时可能不触发，
+        // 直接调用主处理器的日志兜底回调，确保请求被记录。
+        if (clientReq._finalizeLog) clientReq._finalizeLog()
         if (!clientRes.writableEnded) clientRes.end()
       }
 
@@ -459,6 +462,9 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         clientRes.end()
         const rawBuffer = Buffer.concat(rawChunks)
         if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
+        // bun 运行时下客户端提前断开（如 Codex 收到 response.completed 后立即关闭
+        // 连接）时 finish/close 事件可能都不触发，SSE 流完整结束时直接记录日志。
+        if (clientReq._finalizeLog) clientReq._finalizeLog()
       })
     } else if (isStreaming) {
       // SSE streaming without conversion — pipe through immediately
@@ -483,6 +489,8 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
           const rawBuffer = Buffer.concat(rawChunks)
           if (rawBuffer.length > 0) onResponseBody(rawBuffer.toString('utf8'))
         }
+        // bun 运行时兜底：直接触发日志记录，不依赖 res close/finish 事件。
+        if (clientReq._finalizeLog) clientReq._finalizeLog()
         if (!clientRes.writableEnded) clientRes.end()
       }
 
@@ -503,6 +511,8 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         clearInterval(keepAlive)
         const rawBuffer = Buffer.concat(rawChunks)
         if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
+        // bun 运行时兜底：SSE 流完整结束时直接记录日志。
+        if (clientReq._finalizeLog) clientReq._finalizeLog()
         clientRes.end()
       })
     } else if (sseConverter) {
@@ -1439,8 +1449,14 @@ const server = http.createServer(async (req, res) => {
     const extra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
     logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra)
   }
+  // bun 运行时下 res 的 close 事件在客户端提前断开时可能不触发，
+  // 因此把 finalizeLog 挂到 req 上供 forwardRequest 直接调用，并监听
+  // req 的 close/aborted 作为额外兜底。logged 守卫保证只记录一次。
+  req._finalizeLog = finalizeLog
   res.on('finish', finalizeLog)
   res.on('close', finalizeLog)
+  req.on('close', finalizeLog)
+  req.on('aborted', finalizeLog)
 })
 
 function sanitizeImageResponseBody(rawText) {
