@@ -107,6 +107,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 需要完整历史与 tags 用于生成基于 git log 的中文更新日志
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -117,11 +121,84 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f
 
+      - name: Generate Chinese changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          # 按版本降序取上一个 v* tag 作为变更范围起点
+          PREV_TAG="$(git tag --list 'v*' --sort=-version:refname | awk 'NR==2{print; exit}')"
+          RANGE="${PREV_TAG:+$PREV_TAG..}HEAD"
+          TYPE_RE='^([a-z]+)(\([^)]*\))?:[[:space:]]*(.*)$'
+
+          {
+            echo "## AIGateway v${VERSION} 更新日志"
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "**版本范围**：[\`$PREV_TAG\` → \`v$VERSION\`](https://github.com/${GITHUB_REPOSITORY}/compare/$PREV_TAG...v$VERSION)"
+            else
+              echo "**初始版本发布**"
+            fi
+            echo
+
+            new=()
+            fix=()
+            docs=()
+            refactor=()
+            perf=()
+            ui=()
+            other=()
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              if [[ "$line" =~ $TYPE_RE ]]; then
+                t="${BASH_REMATCH[1]}"
+                desc="${BASH_REMATCH[3]}"
+                [ -z "$desc" ] && desc="$line"
+              else
+                t="other"
+                desc="$line"
+              fi
+              case "$t" in
+                feat)        new+=("$desc") ;;
+                fix)         fix+=("$desc") ;;
+                docs)        docs+=("$desc") ;;
+                refactor)    refactor+=("$desc") ;;
+                perf)        perf+=("$desc") ;;
+                ui)          ui+=("$desc") ;;
+                chore|build|ci|test|style|revert) other+=("$desc") ;;
+                *)           other+=("$desc") ;;
+              esac
+            done <<< "$(git log --pretty=format:'%s' $RANGE)"
+
+            section() {
+              local title="$1"; shift
+              local items=("$@")
+              if [ "${#items[@]}" -gt 0 ]; then
+                echo "### $title"
+                for it in "${items[@]}"; do
+                  echo "- $it"
+                done
+                echo
+              fi
+            }
+
+            section "✨ 新增" ${new[@]+"${new[@]}"}
+            section "🐛 修复" ${fix[@]+"${fix[@]}"}
+            section "📝 文档" ${docs[@]+"${docs[@]}"}
+            section "♻️ 重构" ${refactor[@]+"${refactor[@]}"}
+            section "⚡ 性能优化" ${perf[@]+"${perf[@]}"}
+            section "🎨 界面优化" ${ui[@]+"${ui[@]}"}
+            section "🔧 其他变更" ${other[@]+"${other[@]}"}
+          } > release_body.md
+
+          echo "===== release_body.md ====="
+          cat release_body.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          generate_release_notes: true
+          body_path: release_body.md
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.msi
