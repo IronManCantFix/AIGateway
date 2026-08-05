@@ -91,7 +91,9 @@
     "strategy": {
       "none": "No LB",
       "roundRobin": "Round Robin",
-      "failover": "Failover"
+      "failover": "Failover",
+      "tooltip": "Click to cycle: None → Round Robin → Failover",
+      "saved": "Switched to {strategy}"
     }
   },
   "settings": {
@@ -100,7 +102,8 @@
       "proxyPort": "Proxy Port",
       "httpProxy": "HTTP Proxy",
       "statsOverview": "Request Statistics",
-      "general": "General"
+      "general": "General",
+      "todayStats": "Today's Stats"
     },
     "language": {
       "title": "Language",
@@ -150,7 +153,10 @@
       "latestRelease": "Latest stable: {version}",
       "updateAvailable": "Version {version} available",
       "upToDate": "You are on the latest version",
-      "authors": "Made by Claude Code & DeepSeek v4 Pro & mimo-v2.5-pro"
+      "authors": "Made by Claude Code & DeepSeek v4 Pro & mimo-v2.5-pro",
+      "todayRequests": "Calls today",
+      "todayTokens": "Tokens today",
+      "trayStats": "Show today's calls & tokens in the menu bar icon"
     },
     "button": {
       "refresh": "Refresh",

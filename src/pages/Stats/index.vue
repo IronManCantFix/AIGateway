@@ -184,6 +184,21 @@ onMounted(() => {
           </div>
         </div>
         <div class="card-body overview-body">
+          <!-- 今日统计 -->
+          <div class="today-stats" v-if="stats.today">
+            <div class="today-title">{{ $t('settings.section.todayStats') }}</div>
+            <div class="today-values">
+              <div class="today-stat">
+                <span class="today-number">{{ stats.today.count.toLocaleString() }}</span>
+                <span class="today-label">{{ $t('settings.label.todayRequests') }}</span>
+              </div>
+              <div class="today-divider"></div>
+              <div class="today-stat">
+                <span class="today-number token">{{ fmtTok(stats.today.tokens) }}</span>
+                <span class="today-label">{{ $t('settings.label.todayTokens') }}</span>
+              </div>
+            </div>
+          </div>
           <div class="overview-stats">
             <div class="overview-stat">
               <div class="stat-number">{{ stats.totalRequests.toLocaleString() }}</div>
@@ -423,6 +438,16 @@ onMounted(() => {
 .card-tabs button { padding: 10px 16px; border: none; background: transparent; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; margin-bottom: -1px; }
 .card-tabs button:hover { color: var(--text-secondary); }
 .card-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Today stats */
+.today-stats { margin-bottom: 16px; padding: 14px 16px; border: 1px solid var(--accent-soft); border-radius: var(--radius-md, 10px); background: linear-gradient(135deg, var(--accent-soft), transparent); }
+.today-title { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 10px; }
+.today-values { display: flex; align-items: center; justify-content: center; gap: 0; }
+.today-stat { text-align: center; padding: 0 24px; }
+.today-number { font-size: 26px; font-weight: 800; color: var(--text-primary); line-height: 1; font-family: 'SF Mono','Fira Code',monospace; }
+.today-number.token { background: linear-gradient(135deg, var(--accent), #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.today-label { font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block; }
+.today-divider { width: 1px; height: 36px; background: var(--border); }
 
 /* Overview stats */
 .overview-body { padding: 20px 20px 16px; }

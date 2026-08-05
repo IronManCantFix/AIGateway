@@ -144,12 +144,14 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 }
 
 #[tauri::command]
-pub fn set_settings(state: State<'_, AppState>, settings: serde_json::Value) -> Result<Settings, String> {
+pub fn set_settings(app_handle: tauri::AppHandle, state: State<'_, AppState>, settings: serde_json::Value) -> Result<Settings, String> {
     let s: Settings = serde_json::from_value(settings).map_err(|e| e.to_string())?;
     state.config.set_settings(&s)?;
     if state.proxy.get_status().status == "running" {
         state.proxy.reload()?;
     }
+    let running = state.proxy.get_status().status == "running";
+    crate::tray::update_tray_stats(&app_handle, &state.config, running);
     Ok(s)
 }
 
@@ -257,8 +259,11 @@ pub fn clear_logs(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn clear_all_data(state: State<'_, AppState>) -> Result<(), String> {
-    state.config.clear_all_data()
+pub fn clear_all_data(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.config.clear_all_data()?;
+    let running = state.proxy.get_status().status == "running";
+    crate::tray::update_tray_stats(&app_handle, &state.config, running);
+    Ok(())
 }
 
 #[tauri::command]
@@ -267,8 +272,11 @@ pub fn clear_logs_bodies(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn clear_aggregated_stats(state: State<'_, AppState>) -> Result<(), String> {
-    state.config.clear_aggregated_stats()
+pub fn clear_aggregated_stats(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.config.clear_aggregated_stats()?;
+    let running = state.proxy.get_status().status == "running";
+    crate::tray::update_tray_stats(&app_handle, &state.config, running);
+    Ok(())
 }
 
 // Clipboard is handled directly by tauri-plugin-clipboard-manager on the frontend.
@@ -749,5 +757,7 @@ pub async fn set_language(
         tray.set_menu(Some(menu))
             .map_err(|e| crate::error::AppError::new("tray.setMenuFailed").with_detail(e.to_string()))?;
     }
+    let running = state.proxy.get_status().status == "running";
+    crate::tray::update_tray_stats(&app, &state.config, running);
     Ok(())
 }

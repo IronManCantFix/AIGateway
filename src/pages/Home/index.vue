@@ -280,7 +280,59 @@ async function addQuickMappings(fromModels) {
   showToast(`Added ${newRules.length} mapping(s)`)
 }
 
+// --- Per-model strategy ---
+const STRATEGY_ORDER = ['none', 'round-robin', 'failover']
+
+function strategyLabel(strategy) {
+  const map = { 'none': t('home.strategy.none'), 'round-robin': t('home.strategy.roundRobin'), 'failover': t('home.strategy.failover') }
+  return map[strategy] || strategy
+}
+
+const strategyMenu = ref(null)      // model name of the open menu
+const strategyMenuPos = ref({ x: 0, y: 0 })
+
+function openStrategyMenu(modelName, event) {
+  if (strategyMenu.value === modelName) {
+    strategyMenu.value = null
+    return
+  }
+  const rect = event.currentTarget.getBoundingClientRect()
+  const menuWidth = 150
+  let x = rect.left
+  if (x + menuWidth > window.innerWidth - 8) x = window.innerWidth - menuWidth - 8
+  strategyMenuPos.value = { x, y: rect.bottom + 6 }
+  strategyMenu.value = modelName
+}
+
+function closeStrategyMenu() {
+  strategyMenu.value = null
+}
+
+async function selectStrategy(modelName, strategy) {
+  try {
+    await api.setModelStrategy(modelName, strategy)
+    closeStrategyMenu()
+    // Refresh from backend to guarantee the UI reflects the saved state
+    modelEntries.value = await api.getModelEntries()
+    showToast(t('home.strategy.saved', { strategy: strategyLabel(strategy) }))
+  } catch (e) {
+    showToast(typeof e === 'string' ? e : e?.message || 'Error')
+  }
+}
+
+function onStrategyMenuValue(modelName) {
+  const item = aggregatedModels.value.find(i => i.model === modelName)
+  return item ? item.strategy : 'none'
+}
+
+function onGlobalClick(e) {
+  if (strategyMenu.value && !e.target.closest('.strategy-menu') && !e.target.closest('.strategy-pill')) {
+    strategyMenu.value = null
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener('click', onGlobalClick)
   await loadData()
   statusUnlisten = await api.onStatusChange((payload) => {
     proxyStatus.value = payload.status
@@ -304,6 +356,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('click', onGlobalClick)
   clearTimeout(mappingSaveTimer)
   statusUnlisten?.()
   toastUnlisten?.()
@@ -408,11 +461,11 @@ onUnmounted(() => {
             <div class="model-providers">
               <span v-for="pv in item.providers" :key="pv" class="provider-tag">{{ pv }}</span>
             </div>
-            <select class="strategy-select" :value="item.strategy" @change="onStrategyChange(item.model, $event.target.value)">
-              <option value="none">{{ $t('home.strategy.none') }}</option>
-              <option value="round-robin">{{ $t('home.strategy.roundRobin') }}</option>
-              <option value="failover">{{ $t('home.strategy.failover') }}</option>
-            </select>
+            <button class="strategy-pill" :class="'strategy-' + item.strategy" @click.stop="openStrategyMenu(item.model, $event)" :title="$t('home.strategy.tooltip')">
+              <span class="strategy-dot"></span>
+              {{ strategyLabel(item.strategy) }}
+              <svg class="strategy-chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
             <button class="model-copy-btn" @click.stop="copyModelId(item.model)" :title="$t('home.label.copyModelId')">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
@@ -499,6 +552,18 @@ onUnmounted(() => {
     </div>
   </Teleport>
 
+  <!-- 策略选择浮层 -->
+  <Teleport to="body">
+    <div v-if="strategyMenu" class="strategy-menu-overlay" @click.stop="closeStrategyMenu">
+      <div class="strategy-menu" :style="{ top: strategyMenuPos.y + 'px', left: strategyMenuPos.x + 'px' }">
+        <button v-for="s in STRATEGY_ORDER" :key="s" class="strategy-menu-item" :class="{ active: onStrategyMenuValue(strategyMenu) === s }" @click.stop="selectStrategy(strategyMenu, s)">
+          <span class="strategy-dot" :class="'dot-' + s"></span>
+          <span class="strategy-menu-label">{{ strategyLabel(s) }}</span>
+          <svg v-if="onStrategyMenuValue(strategyMenu) === s" class="strategy-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -900,23 +965,114 @@ onUnmounted(() => {
   color: var(--accent);
 }
 
-.strategy-select {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
+.strategy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   cursor: pointer;
   flex-shrink: 0;
-  outline: none;
-  transition: border-color .15s;
+  transition: all .2s ease;
+  white-space: nowrap;
+  line-height: 1.6;
 }
-.strategy-select:hover {
-  border-color: var(--border-hover);
+.strategy-pill:hover {
+  filter: brightness(1.15);
+  transform: scale(1.04);
 }
-.strategy-select:focus {
-  border-color: var(--accent);
+.strategy-pill:active {
+  transform: scale(0.97);
+}
+.strategy-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.strategy-none {
+  background: var(--bg-input);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.strategy-none .strategy-dot { background: var(--text-muted); }
+.strategy-round-robin {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid rgba(91, 141, 239, 0.15);
+}
+.strategy-round-robin .strategy-dot { background: var(--accent); }
+.strategy-failover {
+  background: var(--success-soft);
+  color: var(--success);
+  border: 1px solid rgba(52, 211, 153, 0.15);
+}
+.strategy-failover .strategy-dot { background: var(--success); }
+.dot-none { background: var(--text-muted); }
+.dot-round-robin { background: var(--accent); }
+.dot-failover { background: var(--success); }
+
+.strategy-chevron {
+  opacity: .55;
+  flex-shrink: 0;
+  transition: transform .15s ease;
+}
+.strategy-pill:hover .strategy-chevron {
+  opacity: .85;
+}
+
+/* Strategy dropdown menu */
+.strategy-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+}
+.strategy-menu {
+  position: fixed;
+  z-index: 9991;
+  min-width: 152px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.strategy-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: background .12s, color .12s;
+}
+.strategy-menu-item:hover {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+.strategy-menu-item.active {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.strategy-menu-label {
+  flex: 1;
+}
+.strategy-check {
+  color: var(--accent);
+  flex-shrink: 0;
 }
 
 .model-id {
