@@ -166,6 +166,29 @@ fn main() {
                 proxy: proxy_manager,
             });
 
+            // Refresh tray stats from a background thread: the first pass ~1s after
+            // launch, then every 60s (covers midnight rollover). Tray updates must
+            // NOT be dispatched synchronously from the setup callback (which runs on
+            // the main thread) because they block on the main-thread event loop.
+            {
+                let app_handle = app.handle().clone();
+                let config_store = Arc::clone(&config_store);
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    loop {
+                        if config_store.get_settings().tray_stats_enabled {
+                            let running = app_handle
+                                .state::<AppState>()
+                                .proxy
+                                .get_status()
+                                .status == "running";
+                            tray::update_tray_stats(&app_handle, &config_store, running);
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(60));
+                    }
+                });
+            }
+
             // Listen for proxy status changes and rebuild tray menu
             let app_handle = app.handle().clone();
             app.listen("proxy-status-changed", move |_event| {

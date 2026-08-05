@@ -18,6 +18,7 @@ let unlistenProxySettings = null
 const port = ref(9999)
 const autoStart = ref(false)
 const languageSetting = ref('auto')
+const trayStatsEnabled = ref(false)
 const portChecking = ref(false)
 const portConflict = ref(null)
 
@@ -47,6 +48,7 @@ async function loadSettings() {
   port.value = s.port || 9999
   autoStart.value = s.autoStart || false
   languageSetting.value = s.language || 'auto'
+  trayStatsEnabled.value = s.trayStatsEnabled || false
 
   if (s.httpProxy) {
     httpProxyEnabled.value = s.httpProxy.enabled || false
@@ -67,6 +69,7 @@ async function saveSettings() {
   await api.setSettings({
     port: n,
     autoStart: autoStart.value,
+    trayStatsEnabled: trayStatsEnabled.value,
     httpProxy: {
       enabled: httpProxyEnabled.value,
       url: httpProxyUrl.value,
@@ -380,6 +383,14 @@ onUnmounted(() => {
           <div class="setting-label">{{ $t('settings.label.autoStart') }}</div>
           <div class="setting-control">
             <input type="checkbox" v-model="autoStart" />
+          </div>
+        </label>
+
+        <!-- 菜单栏图标显示今日统计 -->
+        <label class="setting-row toggle-row" @change="saveSettings">
+          <div class="setting-label">{{ $t('settings.label.trayStats') }}</div>
+          <div class="setting-control">
+            <input type="checkbox" v-model="trayStatsEnabled" />
           </div>
         </label>
       </div>

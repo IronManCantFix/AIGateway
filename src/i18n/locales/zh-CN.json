@@ -102,7 +102,8 @@
       "proxyPort": "代理端口",
       "httpProxy": "HTTP 代理",
       "statsOverview": "请求统计",
-      "general": "通用设置"
+      "general": "通用设置",
+      "todayStats": "今日统计"
     },
     "language": {
       "title": "界面语言",
@@ -152,7 +153,10 @@
       "latestRelease": "最新正式版: {version}",
       "updateAvailable": "新版本 {version} 可用",
       "upToDate": "已是最新版本",
-      "authors": "作者 Claude Code & DeepSeek v4 Pro & mimo-v2.5-pro"
+      "authors": "作者 Claude Code & DeepSeek v4 Pro & mimo-v2.5-pro",
+      "todayRequests": "今日调用次数",
+      "todayTokens": "今日 Token",
+      "trayStats": "菜单栏图标显示今日调用次数与 Token 数"
     },
     "button": {
       "refresh": "刷新",

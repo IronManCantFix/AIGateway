@@ -48,6 +48,8 @@ pub struct Settings {
     pub language: String,
     #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(rename = "trayStatsEnabled", default)]
+    pub tray_stats_enabled: bool,
 }
 
 fn default_port() -> u16 { 9999 }
@@ -63,6 +65,7 @@ impl Default for Settings {
             http_proxy: None,
             language: "auto".to_string(),
             theme: "auto".to_string(),
+            tray_stats_enabled: false,
         }
     }
 }
@@ -664,6 +667,19 @@ impl ConfigStore {
 
     // --- Stats aggregation ---
 
+    /// Returns today's request count and token usage (count, tokens).
+    pub fn get_today_stats(&self) -> (u64, u64) {
+        let stats: AggregatedStats = self.read_json("aggregated-stats.json");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let today = chrono_date(now);
+        let count = stats.daily_counts.get(&today).copied().unwrap_or(0);
+        let tokens = stats.daily_tokens.get(&today).copied().unwrap_or(0);
+        (count, tokens)
+    }
+
     pub fn get_stats(&self) -> serde_json::Value {
         let stats: AggregatedStats = self.read_json("aggregated-stats.json");
 
@@ -705,7 +721,13 @@ impl ConfigStore {
             })
         }).collect();
 
+        let (today_count, today_tokens) = self.get_today_stats();
+
         serde_json::json!({
+            "today": {
+                "count": today_count,
+                "tokens": today_tokens,
+            },
             "totalRequests": stats.total_requests,
             "totalTokens": stats.total_tokens,
             "totalPromptTokens": stats.total_prompt_tokens,

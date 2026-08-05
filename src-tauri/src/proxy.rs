@@ -217,6 +217,7 @@ impl ProxyManager {
                         if let Some(tray) = tray_clone.lock().unwrap().as_ref() {
                             set_tray_icon(tray, true);
                         }
+                        crate::tray::update_tray_stats(&app_handle_clone, &config_store_clone, true);
                         app_handle_clone
                             .emit("proxy-status-changed", serde_json::json!({"status": "running"}))
                             .ok();
@@ -224,7 +225,9 @@ impl ProxyManager {
                     Some("log") => {
                         if let Some(data) = msg.get("data") {
                             if let Ok(entry) = serde_json::from_value::<LogEntry>(data.clone()) {
-                                config_store_clone.add_log(&entry).ok();
+                                if config_store_clone.add_log(&entry).is_ok() {
+                                    crate::tray::update_tray_stats(&app_handle_clone, &config_store_clone, true);
+                                }
                             }
                         }
                     }
@@ -269,6 +272,7 @@ impl ProxyManager {
             if let Some(tray) = tray_clone.lock().unwrap().as_ref() {
                 set_tray_icon(tray, false);
             }
+            crate::tray::update_tray_stats(&app_handle_clone, &config_store_clone, false);
 
             if crashed {
                 app_handle_clone
