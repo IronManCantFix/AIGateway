@@ -91,7 +91,8 @@
     "strategy": {
       "none": "No LB",
       "roundRobin": "Round Robin",
-      "failover": "Failover"
+      "failover": "Failover",
+      "tooltip": "Click to cycle: None → Round Robin → Failover"
     }
   },
   "settings": {

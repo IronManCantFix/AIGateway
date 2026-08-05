@@ -408,11 +408,10 @@ onUnmounted(() => {
             <div class="model-providers">
               <span v-for="pv in item.providers" :key="pv" class="provider-tag">{{ pv }}</span>
             </div>
-            <select class="strategy-select" :value="item.strategy" @change="onStrategyChange(item.model, $event.target.value)">
-              <option value="none">{{ $t('home.strategy.none') }}</option>
-              <option value="round-robin">{{ $t('home.strategy.roundRobin') }}</option>
-              <option value="failover">{{ $t('home.strategy.failover') }}</option>
-            </select>
+            <button class="strategy-pill" :class="'strategy-' + item.strategy" @click.stop="cycleStrategy(item.model, item.strategy)" :title="$t('home.strategy.tooltip')">
+              <span class="strategy-dot"></span>
+              {{ strategyLabel(item.strategy) }}
+            </button>
             <button class="model-copy-btn" @click.stop="copyModelId(item.model)" :title="$t('home.label.copyModelId')">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
@@ -900,24 +899,53 @@ onUnmounted(() => {
   color: var(--accent);
 }
 
-.strategy-select {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
+.strategy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   cursor: pointer;
   flex-shrink: 0;
-  outline: none;
-  transition: border-color .15s;
+  transition: all .2s ease;
+  white-space: nowrap;
+  line-height: 1.6;
 }
-.strategy-select:hover {
-  border-color: var(--border-hover);
+.strategy-pill:hover {
+  filter: brightness(1.15);
+  transform: scale(1.04);
 }
-.strategy-select:focus {
-  border-color: var(--accent);
+.strategy-pill:active {
+  transform: scale(0.97);
 }
+.strategy-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.strategy-none {
+  background: var(--bg-input);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.strategy-none .strategy-dot { background: var(--text-muted); }
+.strategy-round-robin {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid rgba(91, 141, 239, 0.15);
+}
+.strategy-round-robin .strategy-dot { background: var(--accent); }
+.strategy-failover {
+  background: var(--success-soft);
+  color: var(--success);
+  border: 1px solid rgba(52, 211, 153, 0.15);
+}
+.strategy-failover .strategy-dot { background: var(--success); }
 
 .model-id {
   font-size: 12.5px;

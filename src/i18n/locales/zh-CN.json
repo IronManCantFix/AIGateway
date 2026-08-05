@@ -91,7 +91,8 @@
     "strategy": {
       "none": "不负载",
       "roundRobin": "轮询",
-      "failover": "故障转移"
+      "failover": "故障转移",
+      "tooltip": "点击切换策略：不负载 → 轮询 → 故障转移"
     }
   },
   "settings": {
