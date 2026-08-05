@@ -280,6 +280,25 @@ async function addQuickMappings(fromModels) {
   showToast(`Added ${newRules.length} mapping(s)`)
 }
 
+// --- Per-model strategy ---
+const STRATEGY_ORDER = ['none', 'round-robin', 'failover']
+
+function strategyLabel(strategy) {
+  const map = { 'none': t('home.strategy.none'), 'round-robin': t('home.strategy.roundRobin'), 'failover': t('home.strategy.failover') }
+  return map[strategy] || strategy
+}
+
+async function cycleStrategy(modelName, current) {
+  const next = STRATEGY_ORDER[(STRATEGY_ORDER.indexOf(current) + 1) % STRATEGY_ORDER.length]
+  try {
+    await api.setModelStrategy(modelName, next)
+    const idx = modelEntries.value.findIndex(e => e.name === modelName)
+    if (idx >= 0) modelEntries.value[idx].strategy = next
+  } catch (e) {
+    showToast(typeof e === 'string' ? e : e?.message || 'Error')
+  }
+}
+
 onMounted(async () => {
   await loadData()
   statusUnlisten = await api.onStatusChange((payload) => {
