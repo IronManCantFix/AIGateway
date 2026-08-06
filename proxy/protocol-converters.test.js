@@ -509,6 +509,42 @@ test('Chat to Responses SSE flush always emits response.completed', () => {
   assert.ok(completed.response.output.length > 0)
 })
 
+test('Chat to Responses surfaces upstream SSE error instead of empty success', () => {
+  // Regression: upstream errors delivered as SSE data lines ({"error": ...})
+  // used to be swallowed, producing an empty "successful" response with zero
+  // usage and no model (Codex + MiMo empty-response issue).
+  const convert = createSSEConverter('responses', 'chat_completions')
+  let output = convert('data: {"error":{"message":"prefill failed: unexpected end of data: line 1 column 69 (char 68)"}}')
+  output += convert.flush()
+
+  const events = ssePayloads(output)
+  const completed = events.find(e => e.type === 'response.completed')
+  assert.ok(completed, 'should still complete the response')
+  const msg = completed.response.output.find(o => o.type === 'message')
+  assert.ok(msg, 'should emit a message item with the error')
+  assert.match(msg.content[0].text, /\[Error\] Upstream model returned an error: prefill failed/)
+})
+
+test('Chat to Responses flags truncated tool call arguments as error', () => {
+  // Regression: MiMo intermittently streams a truncated function_call whose
+  // arguments JSON is incomplete. Emitting the broken function_call makes the
+  // client (Codex) fail parsing and resend the invalid call upstream, which
+  // then rejects the request ("prefill failed: unexpected end of data").
+  const convert = createSSEConverter('responses', 'chat_completions')
+  let output = ''
+  output += convert('data: {"id":"1","object":"chat.completion.chunk","model":"mimo-v2.5-pro","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"update_plan","arguments":"{\\"explanation\\": \\"测试"}}]},"finish_reason":null}]}')
+  output += convert('data: {"id":"2","object":"chat.completion.chunk","model":"mimo-v2.5-pro","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"。\\""}}]},"finish_reason":null}]}')
+  output += convert.flush()
+
+  const events = ssePayloads(output)
+  const completed = events.find(e => e.type === 'response.completed')
+  const outputs = completed.response.output
+  assert.ok(outputs.some(o => o.type === 'message' && /\[Error\] Upstream returned incomplete tool call arguments for update_plan/.test(o.content[0].text)),
+    'should surface the truncated arguments as an error message')
+  assert.ok(!outputs.some(o => o.type === 'function_call'),
+    'should not emit the malformed function_call that would cascade into upstream rejection')
+})
+
 test('convertResponsesToChat preserves input_image as OpenAI vision content', () => {
   // Codex calls view_image and sends the image back as input_image content.
   // The gateway must keep the image (OpenAI vision format) instead of dropping it.

@@ -950,6 +950,7 @@ function chatToResponsesSSEFactory() {
   let fullText = ''
   let fullReasoning = ''
   let inputTokens = 0
+  let upstreamError = null
   const toolCalls = new Map()
   const outputItems = []
   let textOutputIndex = null
@@ -972,8 +973,43 @@ function chatToResponsesSSEFactory() {
     const outputTokens = 0
     let out = ''
 
-    // Detect empty upstream response (model received input but produced no content)
-    if (!fullText && toolCalls.size === 0 && inputTokens > 0) {
+    // Detect malformed (truncated) tool call arguments. A function_call with
+    // invalid JSON arguments breaks client-side parsing and gets echoed back in
+    // the next request, which upstream then rejects (e.g. MiMo "prefill failed:
+    // unexpected end of data"). Surface the problem as an error message instead
+    // of emitting a broken function_call that cascades into another failure.
+    let invalidToolCall = null
+    const invalidToolCalls = new Set()
+    for (const tool of toolCalls.values()) {
+      if (tool.done) continue
+      let valid = false
+      if (typeof tool.arguments === 'string' && tool.arguments.trim()) {
+        try {
+          JSON.parse(tool.arguments)
+          valid = true
+        } catch {
+          valid = false
+        }
+      }
+      if (!valid) {
+        invalidToolCalls.add(tool)
+        if (!invalidToolCall) {
+          invalidToolCall = { name: tool.name || '', arguments: tool.arguments || '' }
+        }
+      }
+    }
+
+    // Detect upstream errors delivered as SSE data lines (e.g. {"error": ...})
+    // that carry no choices. These used to be swallowed, producing a "successful"
+    // but empty response with zero usage and no model.
+    if (upstreamError) {
+      fullText = '[Error] Upstream model returned an error: ' + upstreamError
+    } else if (invalidToolCall) {
+      fullText = '[Error] Upstream returned incomplete tool call arguments for ' + invalidToolCall.name + ': ' + invalidToolCall.arguments
+    } else if (!fullText && toolCalls.size === 0) {
+      // Detect empty upstream response (no content and no tool calls). This also
+      // covers upstream failures where usage stays 0 (previously the detection
+      // only triggered when inputTokens > 0).
       fullText = `[Error] Upstream model returned empty response (input_tokens: ${inputTokens}, output_tokens: 0). This may indicate the prompt is too long, the model failed to generate content, or the request was rejected by the upstream provider.`
     }
 
@@ -1003,6 +1039,12 @@ function chatToResponsesSSEFactory() {
     for (const tool of toolCalls.values()) {
       if (tool.done) continue
       tool.done = true
+      if (invalidToolCalls.has(tool)) {
+        // Drop the in-progress placeholder so the malformed call never reaches
+        // the client output (the error message is emitted instead).
+        delete outputItems[tool.outputIndex]
+        continue
+      }
       const item = {
         id: tool.itemId,
         type: 'function_call',
@@ -1088,6 +1130,17 @@ function chatToResponsesSSEFactory() {
 
     try {
       const data = JSON.parse(line.slice(6))
+
+      // Upstream may deliver errors as SSE data lines (e.g. {"error": {...}})
+      // instead of choices. Record it so finishResponses can surface it instead
+      // of silently producing an empty "successful" response.
+      if (data.error) {
+        upstreamError = typeof data.error === 'string'
+          ? data.error
+          : (data.error.message || data.error.msg || JSON.stringify(data.error))
+        return ''
+      }
+
       const choice = data.choices?.[0]
       if (data.model) model = data.model
 
