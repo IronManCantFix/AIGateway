@@ -140,8 +140,8 @@ fn render_stats_icon_bitmap(count: &str, tokens: &str, running: bool) -> tauri::
     // 1x 位图在 Retina 屏上会被拉伸 2 倍导致数字发虚；2x 位图则像素一一对应、边缘锐利。
     const SCALE: usize = 2;
     const H: usize = 18 * SCALE;      // 36px，显示为 18pt
-    const LOGO_H: usize = 18 * SCALE; // logo 填满画布高度
-    const GAP: usize = 5 * SCALE;     // logo 与文字间距
+    const LOGO_H: usize = 15 * SCALE; // logo 填满画布高度
+    const GAP: usize = 4 * SCALE;     // logo 与文字间距
     const PITCH: usize = 6 * SCALE;   // 5px 字形 + 1px 间距，按 2x 放大
 
     let logo_bytes: &[u8] = if running {
@@ -301,8 +301,8 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
 
     const SCALE: usize = 2;
     const H: usize = 18 * SCALE;
-    const LOGO_H: usize = 18 * SCALE;
-    const GAP: usize = 5 * SCALE;
+    const LOGO_H: usize = 15 * SCALE;
+    const GAP: usize = 4 * SCALE;
 
     // 9pt（2x 像素 = 18px）等宽常规体，count 与 tokens 分两行显示；
     // 9pt 才能在 18pt 图标内为两行留出明显间距
