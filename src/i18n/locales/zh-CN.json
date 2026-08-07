@@ -13,7 +13,8 @@
   },
   "app": {
     "bootError": "代理自动启动失败：{msg}",
-    "dismissTip": "点击关闭"
+    "dismissTip": "点击关闭",
+    "updateAvailable": "发现新版本 v{version}，点击前往更新"
   },
   "nav": {
     "gateway": "网关",

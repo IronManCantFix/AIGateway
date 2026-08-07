@@ -13,7 +13,8 @@
   },
   "app": {
     "bootError": "Proxy auto-start failed: {msg}",
-    "dismissTip": "Click to dismiss"
+    "dismissTip": "Click to dismiss",
+    "updateAvailable": "New version v{version} available, click to update"
   },
   "nav": {
     "gateway": "Gateway",

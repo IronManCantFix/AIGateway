@@ -7,7 +7,7 @@ mod error;
 mod tray;
 
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
@@ -84,6 +84,36 @@ fn main() {
                             tray::update_tray_stats(&app_handle, &config_store, running);
                         }
                         std::thread::sleep(std::time::Duration::from_secs(60));
+                    }
+                });
+            }
+
+            // Auto check for updates: first pass ~10s after launch, then every 24h.
+            // When a newer version is found, emit "update-available" to the frontend.
+            {
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(10));
+                    let runtime = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("Auto update check runtime failed: {}", e);
+                            return;
+                        }
+                    };
+                    loop {
+                        match runtime.block_on(commands::check_for_updates(app_handle.clone())) {
+                            Ok(info) => {
+                                if info.has_update {
+                                    app_handle.emit("update-available", &info).ok();
+                                }
+                            }
+                            Err(e) => eprintln!("Auto update check failed: {:?}", e),
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
                     }
                 });
             }

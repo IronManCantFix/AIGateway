@@ -11,6 +11,7 @@ import iconUrl from '../../assets/icon.png'
 const { t } = useI18n()
 
 const navigate = inject('navigate')
+const autoUpdateInfo = inject('autoUpdateInfo')
 const themeSetting = inject('themeSetting')
 const setThemeSetting = inject('setThemeSetting')
 let unlistenProxySettings = null
@@ -277,6 +278,16 @@ onMounted(async () => {
     await loadSettings()
   })
 })
+
+// 后台自动检查发现新版本时，自动打开更新对话框
+// immediate：事件可能在进入设置页之前就已到达，挂载时需立即消费
+watch(autoUpdateInfo, (info) => {
+  if (info) {
+    updateInfo.value = info
+    openUpdateDialog(info)
+    autoUpdateInfo.value = null
+  }
+}, { immediate: true })
 
 onUnmounted(() => {
   unlistenProxySettings?.()
