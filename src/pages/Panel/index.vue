@@ -1,7 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../../api.js'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { LogicalSize } from '@tauri-apps/api/dpi'
 
 const { t } = useI18n()
 
@@ -80,9 +82,25 @@ function showToast(msg) {
 
 function onVisibility() {
   if (document.visibilityState === 'visible') {
-    loadAll().catch((e) => {
-      showToast(typeof e === 'string' ? e : (e?.message || JSON.stringify(e)))
-    })
+    loadAll()
+      .then(() => fitWindow())
+      .catch((e) => {
+        showToast(typeof e === 'string' ? e : (e?.message || JSON.stringify(e)))
+      })
+  }
+}
+
+// 模型列表 / 状态文案变化时重新按内容调整高度
+watch([recentModels, statusText], () => fitWindow())
+
+// 窗口高度按实际内容自适应（透明窗口圆角外不可见时直接量内容高度）
+async function fitWindow() {
+  await nextTick()
+  try {
+    const h = Math.ceil(document.documentElement.scrollHeight)
+    await getCurrentWindow().setSize(new LogicalSize(360, h))
+  } catch (e) {
+    /* ignore */
   }
 }
 
@@ -154,6 +172,7 @@ onMounted(async () => {
   } catch (e) {
     showToast(typeof e === 'string' ? e : (e?.message || JSON.stringify(e)))
   }
+  await fitWindow()
   unlisteners.push(await api.onStatusChange(async (payload) => {
     status.value = { ...(status.value || {}), ...payload }
   }))
@@ -248,7 +267,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .panel {
-  height: 100vh;
+  position: relative;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -481,6 +500,7 @@ onBeforeUnmount(() => {
 .panel-footer {
   display: flex;
   gap: 8px;
+  margin-top: auto;
 }
 
 .foot-btn {
@@ -542,3 +562,12 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 </style>
+<style>
+/* 面板窗口：body/#app 必须透明，否则全局背景色会盖住圆角 */
+body,
+#app {
+  background: transparent !important;
+  min-height: 0 !important;
+}
+</style>
+
