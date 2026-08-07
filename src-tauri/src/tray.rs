@@ -304,9 +304,10 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     const LOGO_H: usize = 18 * SCALE;
     const GAP: usize = 5 * SCALE;
 
-    // 8pt（2x 像素 = 16px）等宽常规体，两行数字在 18pt 图标内放下且不重叠
-    let font = core_text::font::new_from_name("Menlo", 8.0 * SCALE as f64)
-        .or_else(|_| core_text::font::new_from_name("Menlo-Bold", 8.0 * SCALE as f64))
+    // 9pt（2x 像素 = 18px）等宽常规体：18pt 图标高度下两行数字的极限字号，
+    // 不再预留上下边距（数字无下行笔画时两行正好相接）
+    let font = core_text::font::new_from_name("Menlo", 9.0 * SCALE as f64)
+        .or_else(|_| core_text::font::new_from_name("Menlo-Bold", 9.0 * SCALE as f64))
         .expect("Menlo font should exist on macOS");
     // SAFETY: kCTFontAttributeName 是 CoreText 导出的静态常量，读取其指针是安全的
     let font_attr = unsafe { CFString::wrap_under_get_rule(kCTFontAttributeName) };
@@ -341,9 +342,9 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     // CGBitmapContext 的像素第一行就是视觉顶部，identity 绘制即得到正立字形，
     // 无需翻转行序。行1（count）画在顶部、行2（tokens）画在底部。
     let x0 = LOGO_H + GAP;
-    ctx.set_text_position(x0 as CGFloat, H as CGFloat - 2.0 - ascent1);
+    ctx.set_text_position(x0 as CGFloat, H as CGFloat - ascent1);
     line1.draw(&ctx);
-    ctx.set_text_position(x0 as CGFloat, descent2 + 2.0);
+    ctx.set_text_position(x0 as CGFloat, descent2);
     line2.draw(&ctx);
 
     let mut rgba = ctx.data().to_vec();
