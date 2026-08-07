@@ -84,7 +84,7 @@ sudo xattr -r -d com.apple.quarantine /Applications/AIGateway.app
 勾选启用，点击「启动」代理。然后把你的工具指向 `http://127.0.0.1:9999` 即可。
 
 ![2.png](images/2.png)
-![1.png](images/1.png)
+
 ### 2️⃣ 在 Codex CLI或桌面端 中使用
 
 [Codex CLI](https://github.com/openai/codex) 原生支持 OpenAI API，只需设置环境变量指向 AIGateway 代理地址
@@ -129,6 +129,7 @@ wire_api = "responses"
 ### 📎 系统托盘
 
 关闭窗口时应用最小化到系统托盘。右键托盘图标可以快速启动/停止代理或退出应用。
+![1.png](images/1.png)
 
 ## 📊 日志与统计
 
@@ -138,7 +139,7 @@ wire_api = "responses"
 
 顶部展示三个核心指标：**总请求数**、**Token 消耗**（Prompt / Completion 明细）、**日均请求**。
 
-![3.png](images/3.png)
+![6.png](images/6.png)
 
 ### 趋势分析
 
@@ -162,6 +163,8 @@ wire_api = "responses"
 - 通过代理发出的请求会显示蓝色 `PROXY` 标签
 - 经过模型映射的请求会显示 `原始模型 → 映射后模型 | 提供商`
 - **404 路由未匹配请求**会额外记录：HTTP 方法、从请求体提取的 model、完整的请求/响应体（无需开启调试日志），便于排查客户端发错地址或参数
+
+![7.png](images/7.png)
 
 ### 调试日志
 
