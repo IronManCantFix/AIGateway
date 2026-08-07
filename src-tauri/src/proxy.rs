@@ -7,20 +7,13 @@ use std::thread;
 use std::os::windows::process::CommandExt;
 
 use tauri::{Emitter, Manager};
-use tauri::image::Image;
 use tauri::tray::TrayIcon;
 
 use crate::config::{ConfigStore, LogEntry};
 
 fn set_tray_icon(tray: &TrayIcon, running: bool) {
-    let bytes: &[u8] = if running {
-        include_bytes!("../icons/icon-running.png")
-    } else {
-        include_bytes!("../icons/icon-stopped.png")
-    };
-    if let Ok(img) = Image::from_bytes(bytes) {
-        tray.set_icon(Some(img)).ok();
-    }
+    // 与托盘状态图标统一使用裁边放大后的 2x logo（36px 画布、显示 18pt）
+    tray.set_icon(Some(crate::tray::logo_icon_2x(running))).ok();
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

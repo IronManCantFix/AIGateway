@@ -351,7 +351,7 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
 /// 生成 2x 分辨率的纯 logo 图标（36px 高、显示 18pt），与统计图标内的
 /// logo 完全同路径（裁边 → 放大到 36px 画布），保证启动/状态图标与
 /// 统计图标的大小、清晰度一致。
-fn logo_icon_2x(running: bool) -> tauri::image::Image<'static> {
+pub fn logo_icon_2x(running: bool) -> tauri::image::Image<'static> {
     // 正方形 36x36 画布：paste_resized_logo 按正方形目标缩放（dx 用 dst_h 迭代）
     const H: usize = 36; // 18pt @2x
     let logo = load_logo_cropped(running);
