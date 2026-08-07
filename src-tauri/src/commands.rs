@@ -634,7 +634,9 @@ pub fn get_app_version(app_handle: tauri::AppHandle) -> String {
 }
 
 #[tauri::command]
-pub fn restart_app(app_handle: tauri::AppHandle) {
+pub fn restart_app(app_handle: tauri::AppHandle, state: State<'_, AppState>) {
+    // 先同步停止 sidecar，释放代理端口，否则新实例启动时会因端口被占用而失败
+    state.proxy.stop_sync();
     app_handle.restart();
 }
 
@@ -778,7 +780,8 @@ pub async fn set_language(
 
 #[tauri::command]
 pub fn quit_app(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    state.proxy.stop().ok();
+    // 同步等待 sidecar 退出后再退出应用，避免残留进程占用端口
+    state.proxy.stop_sync();
     app_handle.exit(0);
     Ok(())
 }

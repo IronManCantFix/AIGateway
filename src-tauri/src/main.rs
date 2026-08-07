@@ -164,8 +164,17 @@ fn main() {
                 _ => {}
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // 兜底：无论以何种方式退出（重启、退出、系统关闭），
+            // 都同步清理 sidecar 子进程，防止残留占用代理端口
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    state.proxy.stop_sync();
+                }
+            }
+        });
 }
 
 
