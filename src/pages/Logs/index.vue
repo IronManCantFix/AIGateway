@@ -35,9 +35,19 @@ function buildLogFilter() {
   if (s.provider) filter.provider = s.provider
   if (s.model) filter.model = s.model
   if (s.statusCode) filter.statusClass = s.statusCode
-  if (s.dateFrom) filter.dateFrom = new Date(s.dateFrom).getTime()
-  if (s.dateTo) filter.dateTo = new Date(s.dateTo).getTime() + 86400000
+  // input[type=date] 的值是 YYYY-MM-DD，new Date(str) 会按 UTC 解析导致时区偏移，
+  // 这里按本地时区解析成当天 00:00，dateTo 取次日 00:00 以包含所选整天
+  if (s.dateFrom) filter.dateFrom = parseLocalDate(s.dateFrom).getTime()
+  if (s.dateTo) {
+    const d = parseLocalDate(s.dateTo)
+    filter.dateTo = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime()
+  }
   return Object.keys(filter).length ? filter : null
+}
+
+function parseLocalDate(s) {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, m - 1, d)
 }
 
 async function loadLogs() {
