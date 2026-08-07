@@ -53,8 +53,8 @@ pub fn fmt_tokens(n: u64) -> String {
 static LAST_TRAY_STATS: Mutex<Option<(u64, u64)>> = Mutex::new(None);
 
 fn set_status_icon(tray: &TrayIcon, running: bool) {
-    // 与统计图标使用同一套裁边放大后的 logo，保证两种状态图标大小一致
-    let img = load_logo_cropped(running);
+    // 与统计图标使用同一套 2x 放大 logo，保证两种状态图标大小一致
+    let img = logo_icon_2x(running);
     // Atomically swap back to the non-template status logo
     tray.set_icon_with_as_template(Some(img), false).ok();
 }
@@ -348,9 +348,23 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     tauri::image::Image::new_owned(rgba, w as u32, H as u32)
 }
 
-/// 启动时的托盘图标：裁边放大后的 logo（与运行时状态图标一致）。
+/// 生成 2x 分辨率的纯 logo 图标（36px 高、显示 18pt），与统计图标内的
+/// logo 完全同路径（裁边 → 放大到 36px 画布），保证启动/状态图标与
+/// 统计图标的大小、清晰度一致。
+fn logo_icon_2x(running: bool) -> tauri::image::Image<'static> {
+    // 正方形 36x36 画布：paste_resized_logo 按正方形目标缩放（dx 用 dst_h 迭代）
+    const H: usize = 36; // 18pt @2x
+    let logo = load_logo_cropped(running);
+    let src_w = logo.width() as usize;
+    let src_h = logo.height() as usize;
+    let mut rgba = vec![0u8; H * H * 4];
+    paste_resized_logo(&mut rgba, H, 0, logo.rgba(), src_w, src_h, H);
+    tauri::image::Image::new_owned(rgba, H as u32, H as u32)
+}
+
+/// 启动时的托盘图标：2x 大 logo（与运行时状态图标一致）。
 pub fn default_status_icon() -> tauri::image::Image<'static> {
-    load_logo_cropped(true)
+    logo_icon_2x(true)
 }
 
 /// 读取运行/停止 logo，并裁掉四周透明边距（源图 32x32 内容居中、四周透明，
