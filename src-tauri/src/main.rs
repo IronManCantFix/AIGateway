@@ -32,7 +32,7 @@ fn main() {
             let proxy_manager = ProxyManager::new(Arc::clone(&config_store), app.handle().clone());
 
             let tray = TrayIconBuilder::with_id("main")
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray::default_status_icon())
                 .tooltip("AIGateway")
                 .on_tray_icon_event(|tray, event| {
                     match event {

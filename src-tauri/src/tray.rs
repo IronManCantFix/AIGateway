@@ -348,6 +348,11 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     tauri::image::Image::new_owned(rgba, w as u32, H as u32)
 }
 
+/// 启动时的托盘图标：裁边放大后的 logo（与运行时状态图标一致）。
+pub fn default_status_icon() -> tauri::image::Image<'static> {
+    load_logo_cropped(true)
+}
+
 /// 读取运行/停止 logo，并裁掉四周透明边距（源图 32x32 内容居中、四周透明，
 /// 裁掉后图案按 LOGO_H 缩放时占满画布，显示更大更清晰）。
 fn load_logo_cropped(running: bool) -> tauri::image::Image<'static> {
