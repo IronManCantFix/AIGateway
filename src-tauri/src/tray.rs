@@ -135,15 +135,11 @@ fn render_stats_icon_bitmap(count: &str, tokens: &str, running: bool) -> tauri::
     // 1x 位图在 Retina 屏上会被拉伸 2 倍导致数字发虚；2x 位图则像素一一对应、边缘锐利。
     const SCALE: usize = 2;
     const H: usize = 18 * SCALE;      // 36px，显示为 18pt
-    const LOGO_H: usize = 15 * SCALE; // logo 填满画布高度
+    const LOGO_H: usize = 18 * SCALE; // logo 填满画布高度
     const GAP: usize = 4 * SCALE;     // logo 与文字间距
     const PITCH: usize = 6 * SCALE;   // 5px 字形 + 1px 间距，按 2x 放大
 
-    let logo_bytes: &[u8] = if running {
-        include_bytes!("../icons/icon-running.png")
-    } else {
-        include_bytes!("../icons/icon-stopped.png")
-    };
+    let logo = load_logo_cropped(running);
     let line1 = count.chars().map(|c| glyph(c).unwrap_or([0; 7])).collect::<Vec<_>>();
     let line2 = tokens.chars().map(|c| glyph(c).unwrap_or([0; 7])).collect::<Vec<_>>();
     let text_w1 = line1.len().saturating_mul(PITCH).saturating_sub(SCALE);
@@ -152,12 +148,10 @@ fn render_stats_icon_bitmap(count: &str, tokens: &str, running: bool) -> tauri::
     let w = LOGO_H + GAP + text_w;
     let mut rgba = vec![0u8; H * w * 4];
 
-    if let Ok(logo) = tauri::image::Image::from_bytes(logo_bytes) {
-        let lpx = logo.rgba();
-        let src_w = logo.width() as usize;
-        let src_h = logo.height() as usize;
-        paste_resized_logo(&mut rgba, w, 0, lpx, src_w, src_h, LOGO_H);
-    }
+    let lpx = logo.rgba();
+    let src_w = logo.width() as usize;
+    let src_h = logo.height() as usize;
+    paste_resized_logo(&mut rgba, w, 0, lpx, src_w, src_h, LOGO_H);
 
     if text_w == 0 { return tauri::image::Image::new_owned(rgba, w as u32, H as u32); }
 
