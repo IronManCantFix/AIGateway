@@ -594,15 +594,20 @@ pub async fn download_and_install_update(
                 .with_detail(format!("No .app found in mounted volume: {}", mount_point)))?;
 
         // Copy to /Applications (overwrite existing)
+        // 注意：不能用 `cp -Rf src dest` —— 当 dest（AIGateway.app）已存在时，
+        // cp 会把 src 复制成 dest/AIGateway.app 的嵌套目录，导致新版本没有真正
+        // 替换旧版，重启后仍是旧版本。改用 macOS 标准的 ditto 合并覆盖。
         let dest = std::path::PathBuf::from("/Applications").join(app_path.file_name().unwrap());
-        let cp_status = std::process::Command::new("cp")
-            .args(["-Rf", &app_path.to_string_lossy(), &dest.to_string_lossy()])
+        // 清理历史版本可能残留的嵌套目录（cp bug 产生的 dest/AIGateway.app）
+        let _ = std::fs::remove_dir_all(dest.join(app_path.file_name().unwrap()));
+        let cp_status = std::process::Command::new("ditto")
+            .args([app_path.to_string_lossy().as_ref(), dest.to_string_lossy().as_ref()])
             .status()
             .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
 
         if !cp_status.success() {
             return Err(crate::error::AppError::new("update.openFailed")
-                .with_detail("Failed to copy app to /Applications".to_string()));
+                .with_detail("Failed to install app to /Applications".to_string()));
         }
     }
 
