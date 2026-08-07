@@ -344,7 +344,7 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     let x0 = LOGO_H + GAP;
     ctx.set_text_position(x0 as CGFloat, H as CGFloat - ascent1 + 2.0);
     line1.draw(&ctx);
-    ctx.set_text_position(x0 as CGFloat, descent2);
+    ctx.set_text_position(x0 as CGFloat, descent2 - 2.0);
     line2.draw(&ctx);
 
     let mut rgba = ctx.data().to_vec();
