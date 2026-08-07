@@ -53,15 +53,10 @@ pub fn fmt_tokens(n: u64) -> String {
 static LAST_TRAY_STATS: Mutex<Option<(u64, u64)>> = Mutex::new(None);
 
 fn set_status_icon(tray: &TrayIcon, running: bool) {
-    let bytes: &[u8] = if running {
-        include_bytes!("../icons/icon-running.png")
-    } else {
-        include_bytes!("../icons/icon-stopped.png")
-    };
-    if let Ok(img) = tauri::image::Image::from_bytes(bytes) {
-        // Atomically swap back to the non-template status logo
-        tray.set_icon_with_as_template(Some(img), false).ok();
-    }
+    // 与统计图标使用同一套裁边放大后的 logo，保证两种状态图标大小一致
+    let img = load_logo_cropped(running);
+    // Atomically swap back to the non-template status logo
+    tray.set_icon_with_as_template(Some(img), false).ok();
 }
 
 /// 5x7 bitmap font (digits, K/M suffix, decimal dot) used for the compact
