@@ -213,7 +213,8 @@
       "portFreed": "Port {port} freed",
       "themeSaveFailed": "Failed to save theme",
       "updateDownloaded": "Download complete, opening installer…",
-      "updateDownloadFailed": "Download failed, please download manually from GitHub"
+      "updateDownloadFailed": "Download failed, please download manually from GitHub",
+      "updateAvailable": "New version v{version} available"
     },
     "chart": {
       "monthsShort": "Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec",

@@ -34,10 +34,10 @@ const profiles = ref([])
 let copyTimer = 0
 const copyMsg = ref({ text: '', type: 'success' })
 
-function showToast(text, type = 'success') {
+function showToast(text, type = 'success', duration = 3000) {
   copyMsg.value = { text, type }
   clearTimeout(copyTimer)
-  copyTimer = setTimeout(() => { copyMsg.value = { text: '', type: 'success' } }, 3000)
+  copyTimer = setTimeout(() => { copyMsg.value = { text: '', type: 'success' } }, duration)
 }
 
 const confirmState = ref({ visible: false, message: '', resolve: null })
@@ -198,6 +198,7 @@ async function autoCheckForUpdates() {
     saveAutoCheck({ date: today, hasUpdate: !!info?.has_update, latestVersion: info?.latest_version || '' })
     if (info?.has_update) {
       updateInfo.value = info
+      showToast(t('settings.toast.updateAvailable', { version: info.latest_version }), 'success', 6000)
     }
   } catch (e) {
     // 静默失败：不打扰用户，次日进入时再试
