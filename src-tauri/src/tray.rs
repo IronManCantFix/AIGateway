@@ -301,7 +301,7 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
 
     const SCALE: usize = 2;
     const H: usize = 18 * SCALE;
-    const LOGO_H: usize = 15 * SCALE;
+    const LOGO_H: usize = 18 * SCALE;
     const GAP: usize = 4 * SCALE;
 
     // 9pt（2x 像素 = 18px）等宽常规体，count 与 tokens 分两行显示；
@@ -349,20 +349,40 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
 
     let mut rgba = ctx.data().to_vec();
 
-    // 贴 logo（左侧，与文字不重叠）
-    let logo_bytes: &[u8] = if running {
+    // 贴 logo（左侧，与文字不重叠；先裁掉源图左侧透明边距，让图案更靠左）
+    let logo = load_logo_cropped(running);
+    let lpx = logo.rgba();
+    let src_w = logo.width() as usize;
+    let src_h = logo.height() as usize;
+    paste_resized_logo(&mut rgba, w, 0, lpx, src_w, src_h, LOGO_H);
+
+    tauri::image::Image::new_owned(rgba, w as u32, H as u32)
+}
+
+/// 读取运行/停止 logo，并裁掉左侧 3px 透明边距（源图 32x32 内容居中，
+/// 左右各有约 6px 透明；裁掉一半让图案更靠左，图标大小不变）。
+fn load_logo_cropped(running: bool) -> tauri::image::Image<'static> {
+    const CROP_LEFT: usize = 3;
+    let bytes: &[u8] = if running {
         include_bytes!("../icons/icon-running.png")
     } else {
         include_bytes!("../icons/icon-stopped.png")
     };
-    if let Ok(logo) = tauri::image::Image::from_bytes(logo_bytes) {
-        let lpx = logo.rgba();
-        let src_w = logo.width() as usize;
-        let src_h = logo.height() as usize;
-        paste_resized_logo(&mut rgba, w, 0, lpx, src_w, src_h, LOGO_H);
+    let img = tauri::image::Image::from_bytes(bytes).expect("logo png embedded");
+    let w = img.width() as usize;
+    let h = img.height() as usize;
+    if w <= CROP_LEFT {
+        return img;
     }
-
-    tauri::image::Image::new_owned(rgba, w as u32, H as u32)
+    let rgba = img.rgba();
+    let nw = w - CROP_LEFT;
+    let mut out = vec![0u8; nw * h * 4];
+    for y in 0..h {
+        let s = (y * w + CROP_LEFT) * 4;
+        let d = y * nw * 4;
+        out[d..d + nw * 4].copy_from_slice(&rgba[s..s + nw * 4]);
+    }
+    tauri::image::Image::new_owned(out, nw as u32, h as u32)
 }
 
 #[cfg(target_os = "macos")]
