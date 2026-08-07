@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, provide } from 'vue'
+import { computed, onMounted, ref, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from './api.js'
 import Home from './pages/Home/index.vue'
@@ -15,10 +15,7 @@ const { t } = useI18n()
 const route = ref('')
 const pagePayload = ref(null)
 const bootToast = ref('')
-const updateToast = ref('')
 let bootToastTimer = 0
-let updateToastTimer = 0
-let unlistenAutoUpdate = null
 
 function navigate(page, payload) {
   route.value = page
@@ -44,28 +41,10 @@ function dismissBootToast() {
   bootToast.value = ''
 }
 
-const autoUpdateInfo = ref(null)
-provide('autoUpdateInfo', autoUpdateInfo)
-
 onMounted(async () => {
   if (isPanel.value) return
 
   navigate('gateway')
-
-  // 后台自动检查更新：Rust 端每天检查一次，发现新版本时推送 update-available 事件
-  try {
-    const { listen } = await import('@tauri-apps/api/event')
-    unlistenAutoUpdate = await listen('update-available', (event) => {
-      const info = event.payload
-      if (!info?.has_update) return
-      autoUpdateInfo.value = info
-      updateToast.value = t('app.updateAvailable', { version: info.latest_version })
-      clearTimeout(updateToastTimer)
-      updateToastTimer = setTimeout(() => { updateToast.value = '' }, 15000)
-    })
-  } catch (e) {
-    console.error('Auto update listener failed:', e)
-  }
 
   try {
     const settings = await api.getSettings()
@@ -79,15 +58,6 @@ onMounted(async () => {
     console.error('Auto-start failed:', e)
   }
 })
-
-onUnmounted(() => {
-  unlistenAutoUpdate?.()
-})
-
-function goToUpdate() {
-  updateToast.value = ''
-  navigate('gw-set')
-}
 </script>
 
 <template>
@@ -148,10 +118,6 @@ function goToUpdate() {
   <!-- Boot Toast -->
   <Transition name="boot-fade">
     <div class="boot-toast" v-if="bootToast" @click="dismissBootToast" :title="$t('app.dismissTip')">{{ bootToast }}</div>
-  </Transition>
-  <!-- Auto Update Toast -->
-  <Transition name="boot-fade">
-    <div class="update-toast" v-if="updateToast" @click="goToUpdate">{{ updateToast }}</div>
   </Transition>
   </template>
 </template>
@@ -293,23 +259,4 @@ function goToUpdate() {
 .boot-fade-leave-active { transition: all .2s cubic-bezier(.4,0,.2,1); }
 .boot-fade-enter-from,
 .boot-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
-
-.update-toast {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 10px 22px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
-  cursor: pointer;
-  user-select: none;
-  z-index: 9999;
-  white-space: nowrap;
-}
-.update-toast:hover { opacity: .92; }
 </style>

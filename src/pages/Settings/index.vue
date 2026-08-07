@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, inject, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, inject, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listen } from '@tauri-apps/api/event'
 import { api } from '../../api.js'
@@ -11,7 +11,6 @@ import iconUrl from '../../assets/icon.png'
 const { t } = useI18n()
 
 const navigate = inject('navigate')
-const autoUpdateInfo = inject('autoUpdateInfo')
 const themeSetting = inject('themeSetting')
 const setThemeSetting = inject('setThemeSetting')
 let unlistenProxySettings = null
@@ -173,11 +172,45 @@ const updateDialog = ref({ visible: false, info: null })
 
 let unlistenProgress = null
 
+// --- 每天首次进入设置页时自动检查更新（静默，仅提示有新版本） ---
+const AUTO_CHECK_KEY = 'aigateway.autoCheckUpdate'
+
+function loadAutoCheck() {
+  try { return JSON.parse(localStorage.getItem(AUTO_CHECK_KEY)) || null } catch { return null }
+}
+
+function saveAutoCheck(rec) {
+  try { localStorage.setItem(AUTO_CHECK_KEY, JSON.stringify(rec)) } catch {}
+}
+
+async function autoCheckForUpdates() {
+  const today = new Date().toDateString()
+  const cached = loadAutoCheck()
+  if (cached && cached.date === today) {
+    // 今天已检查过：直接复用结果，不重复请求
+    if (cached.hasUpdate && cached.latestVersion) {
+      updateInfo.value = { has_update: true, latest_version: cached.latestVersion }
+    }
+    return
+  }
+  try {
+    const info = await api.checkForUpdates()
+    saveAutoCheck({ date: today, hasUpdate: !!info?.has_update, latestVersion: info?.latest_version || '' })
+    if (info?.has_update) {
+      updateInfo.value = info
+    }
+  } catch (e) {
+    // 静默失败：不打扰用户，次日进入时再试
+    console.error('Auto update check failed:', e)
+  }
+}
+
 async function checkForUpdates() {
   checkingUpdate.value = true
   try {
     const info = await api.checkForUpdates()
     updateInfo.value = info
+    saveAutoCheck({ date: new Date().toDateString(), hasUpdate: !!info.has_update, latestVersion: info.latest_version || '' })
     openUpdateDialog(info)
   } catch (e) {
     console.error('check_for_updates failed:', translateError(e))
@@ -274,20 +307,12 @@ onMounted(async () => {
   ])
   currentVersion.value = version
 
+  autoCheckForUpdates()
+
   unlistenProxySettings = await listen('proxy-settings-changed', async () => {
     await loadSettings()
   })
 })
-
-// 后台自动检查发现新版本时，自动打开更新对话框
-// immediate：事件可能在进入设置页之前就已到达，挂载时需立即消费
-watch(autoUpdateInfo, (info) => {
-  if (info) {
-    updateInfo.value = info
-    openUpdateDialog(info)
-    autoUpdateInfo.value = null
-  }
-}, { immediate: true })
 
 onUnmounted(() => {
   unlistenProxySettings?.()
