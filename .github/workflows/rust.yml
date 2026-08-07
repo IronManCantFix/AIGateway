@@ -244,5 +244,20 @@ jobs:
             gh pr edit "$PR_NUM" --title "$TITLE" --body "$BODY"
           else
             echo "创建 PR：$BRANCH -> main"
-            gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY" || echo "创建失败：可能分支间没有差异"
+            PR_NUM="$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY" --json number --jq '.number')" || { echo "创建失败：可能分支间没有差异"; exit 0; }
+            echo "已创建 PR #${PR_NUM}"
           fi
+
+          # 等待 PR 计算合并状态后自动合并（main 无分支保护，无需审批）
+          for i in $(seq 1 30); do
+            STATE="$(gh pr view "$PR_NUM" --json mergeable --jq '.mergeable')"
+            [ "$STATE" = "MERGEABLE" ] && break
+            [ "$STATE" = "CONFLICTING" ] && { echo "PR #${PR_NUM} 存在冲突，跳过自动合并"; exit 0; }
+            sleep 2
+          done
+          if [ "$STATE" != "MERGEABLE" ]; then
+            echo "PR #${PR_NUM} 合并状态未就绪，跳过自动合并"
+            exit 0
+          fi
+          gh pr merge "$PR_NUM" --merge --delete-branch=false
+          echo "PR #${PR_NUM} 已自动合并到 main"
