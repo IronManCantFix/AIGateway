@@ -155,6 +155,15 @@ async function copyModel(model) {
   }
 }
 
+async function copyAddr() {
+  try {
+    await api.copyText(addr.value)
+    showToast(t('home.toast.urlCopied'))
+  } catch (e) {
+    /* ignore clipboard errors */
+  }
+}
+
 async function openMain() {
   try { await api.showMainWindow() } catch (e) { /* ignore */ }
 }
@@ -193,7 +202,7 @@ onBeforeUnmount(() => {
     <header class="panel-header" data-tauri-drag-region>
       <span class="status-dot" :class="{ running: isRunning }"></span>
       <span class="status-text">{{ statusText }}</span>
-      <span class="addr" :title="addr">{{ addr }}</span>
+      <button class="addr" :title="$t('panel.copyAddrHint')" @click="copyAddr">{{ addr }}</button>
     </header>
 
     <section class="toggles">
@@ -315,6 +324,17 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  border: none;
+  background: transparent;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all 0.15s;
+  max-width: 55%;
+}
+.addr:hover {
+  color: var(--text-accent);
+  background: var(--accent-soft);
 }
 
 .toggles {
