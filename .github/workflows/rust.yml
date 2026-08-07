@@ -205,3 +205,44 @@ jobs:
             artifacts/**/*-setup.exe
             artifacts/**/*.deb
             artifacts/**/*.rpm
+
+  open-pr:
+    needs: [build, release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find release branch
+        id: release_branch
+        run: |
+          BRANCH=""
+          for b in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin --sort=-committerdate | grep -v '^origin/HEAD$'); do
+            if git merge-base --is-ancestor "$GITHUB_SHA" "$b" 2>/dev/null; then
+              BRANCH="${b#origin/}"
+              break
+            fi
+          done
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update PR to main
+        if: steps.release_branch.outputs.branch != '' && steps.release_branch.outputs.branch != 'main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="${{ steps.release_branch.outputs.branch }}"
+          TITLE="release: v${GITHUB_REF_NAME#v} 合并回 main"
+          BODY="由发布构建自动创建：https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+          PR_NUM="$(gh pr list --base main --head "$BRANCH" --json number --jq '.[0].number')"
+          if [ -n "$PR_NUM" ]; then
+            echo "已存在 PR #${PR_NUM}，更新标题与描述"
+            gh pr edit "$PR_NUM" --title "$TITLE" --body "$BODY"
+          else
+            echo "创建 PR：$BRANCH -> main"
+            gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY" || echo "创建失败：可能分支间没有差异"
+          fi
