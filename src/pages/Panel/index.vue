@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../../api.js'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -90,19 +90,15 @@ function onVisibility() {
   }
 }
 
-// 模型列表 / 状态文案变化时重新按内容调整高度
-watch([recentModels, statusText], () => fitWindow())
-
-// 窗口高度按实际内容自适应：直接量 .panel 的高度。
-// 不能用 documentElement.scrollHeight —— 它不会小于当前窗口高度，
-// 导致窗口只能变大、无法在内容变少时缩小（底部露出底色矩形）。
+// 测量实际内容高度，精确设置窗口大小，最大440px
+const MAX_HEIGHT = 520
 async function fitWindow() {
   await nextTick()
   try {
     const el = document.querySelector('.panel')
-    const h = el
-      ? Math.ceil(el.getBoundingClientRect().height)
-      : document.body.scrollHeight
+    if (!el) return
+    const natural = Math.ceil(el.scrollHeight) + 82 // border 1px * 2 + 80px padding
+    const h = Math.min(natural, MAX_HEIGHT)
     await getCurrentWindow().setSize(new LogicalSize(360, h))
   } catch (e) {
     /* ignore */
@@ -285,8 +281,9 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
   padding: 10px;
+  max-height: 520px;
   border-radius: 14px;
   background: var(--bg-base);
   border: 1px solid var(--border);
@@ -301,6 +298,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   padding: 2px 4px;
+  margin-bottom: 10px;
 }
 
 .status-dot {
@@ -346,6 +344,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-bottom: 10px;
 }
 
 .toggle-card {
@@ -414,6 +413,7 @@ onBeforeUnmount(() => {
 .stats {
   display: flex;
   gap: 8px;
+  margin-bottom: 10px;
 }
 
 .stat-card {
@@ -450,6 +450,8 @@ onBeforeUnmount(() => {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   padding: 10px 10px 8px;
+  flex-shrink: 0;
+  margin-bottom: 6px;
 }
 
 .recent-title {
@@ -517,7 +519,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 60px;
+  flex: 1;
   font-size: 12px;
   color: var(--text-muted);
 }
@@ -588,12 +590,24 @@ onBeforeUnmount(() => {
 }
 </style>
 <style>
-/* 面板窗口：body/#app 必须透明，否则全局背景色会盖住圆角 */
+/* 面板窗口：根元素透明，body 可滚动但隐藏滚动条 */
 html,
 body,
 #app {
   background: transparent !important;
   min-height: 0 !important;
 }
+
+body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  clip-path: inset(0 round 14px);
+}
+
+body::-webkit-scrollbar {
+  display: none;
+}
+
 </style>
 
