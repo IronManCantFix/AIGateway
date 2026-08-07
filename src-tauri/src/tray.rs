@@ -359,10 +359,9 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     tauri::image::Image::new_owned(rgba, w as u32, H as u32)
 }
 
-/// 读取运行/停止 logo，并裁掉左侧 3px 透明边距（源图 32x32 内容居中，
-/// 左右各有约 6px 透明；裁掉一半让图案更靠左，图标大小不变）。
+/// 读取运行/停止 logo，并裁掉四周透明边距（源图 32x32 内容居中、四周透明，
+/// 裁掉后图案按 LOGO_H 缩放时占满画布，显示更大更清晰）。
 fn load_logo_cropped(running: bool) -> tauri::image::Image<'static> {
-    const CROP_LEFT: usize = 3;
     let bytes: &[u8] = if running {
         include_bytes!("../icons/icon-running.png")
     } else {
@@ -371,18 +370,29 @@ fn load_logo_cropped(running: bool) -> tauri::image::Image<'static> {
     let img = tauri::image::Image::from_bytes(bytes).expect("logo png embedded");
     let w = img.width() as usize;
     let h = img.height() as usize;
-    if w <= CROP_LEFT {
+    let rgba = img.rgba();
+    // 计算不透明内容的包围盒
+    let mut min_x = w; let mut min_y = h; let mut max_x = 0usize; let mut max_y = 0usize;
+    for y in 0..h {
+        for x in 0..w {
+            if rgba[(y * w + x) * 4 + 3] > 0 {
+                min_x = min_x.min(x); min_y = min_y.min(y);
+                max_x = max_x.max(x); max_y = max_y.max(y);
+            }
+        }
+    }
+    if max_x <= min_x || max_y <= min_y {
         return img;
     }
-    let rgba = img.rgba();
-    let nw = w - CROP_LEFT;
-    let mut out = vec![0u8; nw * h * 4];
-    for y in 0..h {
-        let s = (y * w + CROP_LEFT) * 4;
+    let nw = max_x - min_x + 1;
+    let nh = max_y - min_y + 1;
+    let mut out = vec![0u8; nw * nh * 4];
+    for y in 0..nh {
+        let s = ((min_y + y) * w + min_x) * 4;
         let d = y * nw * 4;
         out[d..d + nw * 4].copy_from_slice(&rgba[s..s + nw * 4]);
     }
-    tauri::image::Image::new_owned(out, nw as u32, h as u32)
+    tauri::image::Image::new_owned(out, nw as u32, nh as u32)
 }
 
 #[cfg(target_os = "macos")]
