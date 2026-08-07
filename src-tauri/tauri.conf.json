@@ -23,7 +23,7 @@
         "label": "panel",
         "title": "AIGateway",
         "width": 360,
-        "height": 560,
+        "height": 440,
         "resizable": false,
         "decorations": false,
         "transparent": true,

@@ -400,8 +400,6 @@ onBeforeUnmount(() => {
 }
 
 .recent {
-  flex: 1;
-  min-height: 0;
   display: flex;
   flex-direction: column;
   border-radius: var(--radius-md);
@@ -420,9 +418,6 @@ onBeforeUnmount(() => {
 }
 
 .recent-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
@@ -475,10 +470,10 @@ onBeforeUnmount(() => {
 }
 
 .recent-empty {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 60px;
   font-size: 12px;
   color: var(--text-muted);
 }
