@@ -18,6 +18,19 @@
         "minWidth": 600,
         "minHeight": 400,
         "center": true
+      },
+      {
+        "label": "panel",
+        "title": "AIGateway",
+        "width": 360,
+        "height": 560,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "shadow": true
       }
     ],
     "security": {},
@@ -33,6 +46,8 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/proxy-server"]
+    "externalBin": [
+      "binaries/proxy-server"
+    ]
   }
 }

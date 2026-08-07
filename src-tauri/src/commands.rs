@@ -734,7 +734,7 @@ pub fn kill_process(pid: u32) -> Result<(), String> {
     }
 }
 
-/// Update the user's language preference, persist it, and rebuild the tray menu.
+/// Update the user's language preference and persist it.
 ///
 /// No proxy reload needed: language is UI-only and doesn't affect proxy behavior.
 #[tauri::command]
@@ -749,13 +749,32 @@ pub async fn set_language(
     state.config.set_settings(&settings)
         .map_err(|e| crate::error::AppError::new("settings.saveFailed").with_detail(e))?;
 
-    // Rebuild tray menu with the new language
-    let menu = crate::tray::build_tray_menu(&app, &state.config, &state.proxy);
-    if let Some(tray) = app.tray_by_id("main") {
-        tray.set_menu(Some(menu))
-            .map_err(|e| crate::error::AppError::new("tray.setMenuFailed").with_detail(e.to_string()))?;
-    }
+    // Refresh tray stats tooltip with the new language
     let running = state.proxy.get_status().status == "running";
     crate::tray::update_tray_stats(&app, &state.config, running);
+    Ok(())
+}
+
+// --- Window control ---
+
+#[tauri::command]
+pub fn quit_app(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.proxy.stop().ok();
+    app_handle.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_panel_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    crate::tray::toggle_panel_window(&app_handle);
     Ok(())
 }

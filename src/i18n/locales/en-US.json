@@ -307,5 +307,25 @@
     "tray": {
       "setMenuFailed": "Failed to rebuild tray menu"
     }
+  },
+  "panel": {
+    "proxy": "Proxy",
+    "httpProxy": "HTTP Proxy",
+    "on": "On",
+    "off": "Off",
+    "todayCalls": "Today Calls",
+    "todayTokens": "Today Tokens",
+    "recentModels": "Recent Models",
+    "emptyModels": "No calls yet",
+    "copyHint": "Click to copy model name",
+    "openMain": "Open Main Window",
+    "quit": "Quit",
+    "copied": "Copied: {model}",
+    "relative": {
+      "justNow": "just now",
+      "minutesAgo": "{n}m ago",
+      "hoursAgo": "{n}h ago",
+      "daysAgo": "{n}d ago"
+    }
   }
 }

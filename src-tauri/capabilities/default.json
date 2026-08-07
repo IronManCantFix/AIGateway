@@ -2,7 +2,10 @@
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
   "identifier": "default",
   "description": "默认权限配置",
-  "windows": ["main"],
+  "windows": [
+    "main",
+    "panel"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-hide",

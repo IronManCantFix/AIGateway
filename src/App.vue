@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, provide } from 'vue'
+import { computed, onMounted, ref, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from './api.js'
 import Home from './pages/Home/index.vue'
@@ -7,6 +7,7 @@ import ProfileEdit from './pages/ProfileEdit/index.vue'
 import Settings from './pages/Settings/index.vue'
 import Stats from './pages/Stats/index.vue'
 import Logs from './pages/Logs/index.vue'
+import Panel from './pages/Panel/index.vue'
 import { theme, themeSetting, setThemeSetting, cycleTheme } from './theme.js'
 import iconUrl from './assets/icon.png'
 
@@ -28,6 +29,8 @@ provide('themeSetting', themeSetting)
 provide('setThemeSetting', setThemeSetting)
 provide('cycleTheme', cycleTheme)
 
+const isPanel = computed(() => window.location.hash.startsWith('#/panel'))
+
 function showBootToast(msg) {
   bootToast.value = msg
   clearTimeout(bootToastTimer)
@@ -39,6 +42,8 @@ function dismissBootToast() {
 }
 
 onMounted(async () => {
+  if (isPanel.value) return
+
   navigate('gateway')
 
   try {
@@ -56,6 +61,8 @@ onMounted(async () => {
 </script>
 
 <template>
+  <Panel v-if="isPanel" />
+  <template v-else>
   <!-- Top Navigation Bar -->
   <nav class="topbar">
     <div class="topbar-left">
@@ -112,6 +119,7 @@ onMounted(async () => {
   <Transition name="boot-fade">
     <div class="boot-toast" v-if="bootToast" @click="dismissBootToast" :title="$t('app.dismissTip')">{{ bootToast }}</div>
   </Transition>
+  </template>
 </template>
 
 <style scoped>
