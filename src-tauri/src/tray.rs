@@ -304,10 +304,9 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     const LOGO_H: usize = 18 * SCALE;
     const GAP: usize = 5 * SCALE;
 
-    // 11pt（2x 像素 = 22px）等宽常规体：18pt 图标高度下采用单行显示
-    // （count 与 tokens 同一行），保证数字够大且垂直居中
-    let font = core_text::font::new_from_name("Menlo", 11.0 * SCALE as f64)
-        .or_else(|_| core_text::font::new_from_name("Menlo-Bold", 11.0 * SCALE as f64))
+    // 10pt（2x 像素 = 20px）等宽常规体，count 与 tokens 分两行显示
+    let font = core_text::font::new_from_name("Menlo", 10.0 * SCALE as f64)
+        .or_else(|_| core_text::font::new_from_name("Menlo-Bold", 10.0 * SCALE as f64))
         .expect("Menlo font should exist on macOS");
     // SAFETY: kCTFontAttributeName 是 CoreText 导出的静态常量，读取其指针是安全的
     let font_attr = unsafe { CFString::wrap_under_get_rule(kCTFontAttributeName) };
@@ -324,9 +323,11 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
         let b = line.get_typographic_bounds();
         (line, b.width, b.ascent, b.descent)
     };
-    let text = format!("{} {}", count, tokens);
-    let (line, text_w, ascent, descent) = make_line(&text);
-    let w = LOGO_H + GAP + text_w as usize;
+    let (line1, w1, ascent1, _) = make_line(count);
+    let (line2, w2, _, descent2) = make_line(tokens);
+
+    let text_w = w1.max(w2) as usize;
+    let w = LOGO_H + GAP + text_w;
     let mut ctx = CGContext::create_bitmap_context(
         None,
         w as usize,
@@ -338,11 +339,12 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     );
 
     // CGBitmapContext 的像素第一行就是视觉顶部，identity 绘制即得到正立字形，
-    // 无需翻转行序。基线按垂直居中计算。
+    // 无需翻转行序。行1（count）画在顶部、行2（tokens）画在底部。
     let x0 = LOGO_H + GAP;
-    let baseline = H as CGFloat / 2.0 - (ascent - descent) / 2.0;
-    ctx.set_text_position(x0 as CGFloat, baseline);
-    line.draw(&ctx);
+    ctx.set_text_position(x0 as CGFloat, H as CGFloat - ascent1);
+    line1.draw(&ctx);
+    ctx.set_text_position(x0 as CGFloat, descent2);
+    line2.draw(&ctx);
 
     let mut rgba = ctx.data().to_vec();
 
