@@ -150,6 +150,8 @@ pub fn set_settings(app_handle: tauri::AppHandle, state: State<'_, AppState>, se
     }
     let running = state.proxy.get_status().status == "running";
     crate::tray::update_tray_stats(&app_handle, &state.config, running);
+    // 通知所有窗口（主窗口设置页 / 面板）刷新设置
+    app_handle.emit("proxy-settings-changed", ()).ok();
     Ok(s)
 }
 

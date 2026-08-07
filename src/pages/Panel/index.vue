@@ -78,6 +78,14 @@ function showToast(msg) {
   toastTimer = setTimeout(() => { toast.value = '' }, 2500)
 }
 
+function onVisibility() {
+  if (document.visibilityState === 'visible') {
+    loadAll().catch((e) => {
+      showToast(typeof e === 'string' ? e : (e?.message || JSON.stringify(e)))
+    })
+  }
+}
+
 async function loadAll() {
   const [s, st, agg, lg] = await Promise.all([
     api.getSettings(),
@@ -138,6 +146,9 @@ async function quit() {
 }
 
 onMounted(async () => {
+  // 窗口重新可见时刷新数据（面板隐藏期间统计可能过期）
+  document.addEventListener('visibilitychange', onVisibility)
+
   try {
     await loadAll()
   } catch (e) {
@@ -152,6 +163,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibility)
   clearTimeout(toastTimer)
   unlisteners.forEach((fn) => { try { fn() } catch (e) { /* ignore */ } })
 })

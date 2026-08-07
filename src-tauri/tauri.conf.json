@@ -30,7 +30,8 @@
         "alwaysOnTop": true,
         "visible": false,
         "skipTaskbar": true,
-        "shadow": true
+        "shadow": true,
+        "url": "index.html#/panel"
       }
     ],
     "security": {},
