@@ -323,8 +323,8 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
         let b = line.get_typographic_bounds();
         (line, b.width, b.ascent, b.descent)
     };
-    let (line1, w1, _, descent1) = make_line(count);
-    let (line2, w2, ascent2, _) = make_line(tokens);
+    let (line1, w1, ascent1, _) = make_line(count);
+    let (line2, w2, _, descent2) = make_line(tokens);
 
     let text_w = w1.max(w2) as usize;
     let w = LOGO_H + GAP + text_w;
@@ -338,24 +338,15 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
         core_graphics::base::kCGImageAlphaPremultipliedLast,
     );
 
-    // CoreText 在 CGBitmapContext 中绘制的字形是上下颠倒的（y 轴与屏幕相反），
-    // 因此：绘制时把 line2 画在顶部、line1 画在底部，绘制完成后整体垂直翻转
-    // 位图行序 —— 翻转后字形正立，且 count 回到顶部、tokens 回到底部。
+    // CGBitmapContext 的像素第一行就是视觉顶部，identity 绘制即得到正立字形，
+    // 无需翻转行序。行1（count）画在顶部、行2（tokens）画在底部。
     let x0 = LOGO_H + GAP;
-    ctx.set_text_position(x0 as CGFloat, H as CGFloat - 2.0 - ascent2);
-    line2.draw(&ctx);
-    ctx.set_text_position(x0 as CGFloat, descent1 + 2.0);
+    ctx.set_text_position(x0 as CGFloat, H as CGFloat - 2.0 - ascent1);
     line1.draw(&ctx);
+    ctx.set_text_position(x0 as CGFloat, descent2 + 2.0);
+    line2.draw(&ctx);
 
     let mut rgba = ctx.data().to_vec();
-    // 垂直翻转（交换上下对称的行），使内存行序与视觉一致
-    let row_bytes = w * 4;
-    for row in 0..(H / 2) {
-        let top = row * row_bytes;
-        let bottom = (H - 1 - row) * row_bytes;
-        let (upper, lower) = rgba.split_at_mut(bottom);
-        upper[top..top + row_bytes].swap_with_slice(&mut lower[..row_bytes]);
-    }
 
     // 贴 logo（左侧，与文字不重叠）
     let logo_bytes: &[u8] = if running {
