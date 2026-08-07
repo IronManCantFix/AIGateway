@@ -226,7 +226,8 @@ pub fn update_tray_stats(app: &tauri::AppHandle, config_store: &ConfigStore, run
     tray.set_tooltip(Some(tooltip)).ok();
 }
 
-/// 显示/隐藏面板窗口；显示时定位到主显示器右上角（菜单栏下方）。
+/// 显示/隐藏面板窗口；显示时定位在托盘图标正下方，取不到图标位置时退化为
+/// 主显示器右上角（菜单栏下方）。
 pub fn toggle_panel_window(app: &tauri::AppHandle) {
     use tauri::Manager;
     let Some(window) = app.get_webview_window("panel") else { return };
@@ -234,18 +235,44 @@ pub fn toggle_panel_window(app: &tauri::AppHandle) {
         let _ = window.hide();
         return;
     }
-    if let Some(monitor) = app.primary_monitor().ok().flatten() {
-        let size = monitor.size();
-        let scale = monitor.scale_factor();
-        let win_w = window
-            .outer_size()
-            .unwrap_or(tauri::PhysicalSize::new(360, 560))
-            .width;
-        let margin = (16.0 * scale) as i32;
-        let x = size.width as i32 - win_w as i32 - margin;
-        let y = (30.0 * scale) as i32; // 菜单栏下方
-        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    let outer = window
+        .outer_size()
+        .unwrap_or(tauri::PhysicalSize::new(360, 560));
+    let win_w = outer.width as i32;
+
+    let mut target: Option<(i32, i32)> = None;
+    if let Some(tray) = app.tray_by_id("main") {
+        if let Ok(Some(rect)) = tray.rect() {
+            if let (tauri::Position::Physical(pos), tauri::Size::Physical(sz)) =
+                (rect.position, rect.size)
+            {
+                // Linux 上 rect() 可能返回全屏区域，需排除；仅 macOS/Windows 使用图标矩形
+                if sz.width < 800 && sz.height < 800 {
+                    target = Some((
+                        pos.x + sz.width as i32 / 2 - win_w / 2,
+                        pos.y + sz.height as i32 + 4,
+                    ));
+                }
+            }
+        }
     }
+    let (x, y) = match target {
+        Some((x, y)) => (x, y),
+        None => {
+            if let Some(monitor) = app.primary_monitor().ok().flatten() {
+                let size = monitor.size();
+                let scale = monitor.scale_factor();
+                let margin = (16.0 * scale) as i32;
+                (
+                    size.width as i32 - win_w - margin,
+                    (30.0 * scale) as i32, // 菜单栏下方
+                )
+            } else {
+                (0, 0)
+            }
+        }
+    };
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     let _ = window.show();
     let _ = window.set_focus();
 }

@@ -67,7 +67,7 @@ const recentModels = computed(() => {
     if (!m || m === '-' || seen.has(m)) continue
     seen.add(m)
     out.push({ model: m, provider: e.provider || '-', time: e.timestamp })
-    if (out.length >= 8) break
+    if (out.length >= 3) break
   }
   return out
 })
