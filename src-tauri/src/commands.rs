@@ -24,6 +24,7 @@ pub struct UpdateInfo {
     pub download_url: String,
     pub download_asset_url: String,
     pub asset_name: String,
+    pub release_notes: String,
 }
 
 #[derive(serde::Serialize)]
@@ -422,6 +423,11 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
         .unwrap_or("")
         .to_string();
 
+    let release_notes = body.get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
     if latest_version.is_empty() {
         return Err(crate::error::AppError::new("update.noVersionTag"));
     }
@@ -443,6 +449,7 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
         download_url,
         download_asset_url,
         asset_name,
+        release_notes,
     })
 }
 
@@ -627,7 +634,9 @@ pub fn get_app_version(app_handle: tauri::AppHandle) -> String {
 }
 
 #[tauri::command]
-pub fn restart_app(app_handle: tauri::AppHandle) {
+pub fn restart_app(app_handle: tauri::AppHandle, state: State<'_, AppState>) {
+    // 先同步停止 sidecar，释放代理端口，否则新实例启动时会因端口被占用而失败
+    state.proxy.stop_sync();
     app_handle.restart();
 }
 
@@ -771,7 +780,8 @@ pub async fn set_language(
 
 #[tauri::command]
 pub fn quit_app(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    state.proxy.stop().ok();
+    // 同步等待 sidecar 退出后再退出应用，避免残留进程占用端口
+    state.proxy.stop_sync();
     app_handle.exit(0);
     Ok(())
 }

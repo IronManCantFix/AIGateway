@@ -331,6 +331,57 @@ impl ProxyManager {
         Ok(())
     }
 
+    /// 同步停止 sidecar 并等待其完全退出。
+    /// 用于应用重启/退出前的清理，避免旧 sidecar 残留占用端口，
+    /// 导致新实例启动代理失败。
+    pub fn stop_sync(&self) {
+        let (child, stdin) = {
+            let mut guard = self.inner.lock().unwrap();
+            guard.stopping = true;
+            guard.status = "stopping".to_string();
+            let stdin = guard.stdin.lock().unwrap().take();
+            (guard.child.take(), stdin)
+        };
+        if let Some(mut child) = child {
+            // 优先走 IPC 优雅关闭，随后关闭 stdin 管道并发送 SIGTERM 兜底
+            if let Some(mut s) = stdin {
+                let msg = serde_json::json!({ "type": "shutdown" });
+                let line = serde_json::to_string(&msg).expect("json serialization");
+                s.write_all(line.as_bytes()).ok();
+                s.write_all(b"\n").ok();
+                s.flush().ok();
+                drop(s);
+            }
+            #[cfg(unix)]
+            {
+                // SAFETY: pid comes from a successfully spawned process.
+                unsafe { libc::kill(child.id() as i32, libc::SIGTERM); }
+            }
+            #[cfg(not(unix))]
+            {
+                child.kill().ok();
+            }
+            // 等待最多 2s 优雅退出，超时强制 kill
+            let deadline = std::time::Instant::now();
+            let mut exited = false;
+            while deadline.elapsed() < std::time::Duration::from_secs(2) {
+                match child.try_wait() {
+                    Ok(Some(_)) => { exited = true; break; }
+                    Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                    Err(_) => break,
+                }
+            }
+            if !exited {
+                child.kill().ok();
+                let _ = child.wait();
+            }
+        }
+        let mut guard = self.inner.lock().unwrap();
+        guard.child = None;
+        guard.status = "stopped".to_string();
+        guard.stopping = false;
+    }
+
     pub fn reload(&self) -> Result<(), String> {
         let guard = self.inner.lock().unwrap();
         let mut stdin_guard = guard.stdin.lock().unwrap();

@@ -690,15 +690,10 @@ impl ConfigStore {
     pub fn get_stats(&self) -> serde_json::Value {
         let stats: AggregatedStats = self.read_json("aggregated-stats.json");
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        let day_ms: u64 = 86400000;
+        let today = chrono::Local::now().date_naive();
         let mut trend = Vec::new();
         for i in (0..30).rev() {
-            let day_end = now - i * day_ms;
-            let date = chrono_date(day_end);
+            let date = (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string();
             let count = stats.daily_counts.get(&date).copied().unwrap_or(0);
             let tokens = stats.daily_tokens.get(&date).copied().unwrap_or(0);
             trend.push(serde_json::json!({ "date": date, "count": count, "tokens": tokens }));
@@ -779,6 +774,7 @@ impl ConfigStore {
 fn chrono_date(ts_ms: u64) -> String {
     let secs = (ts_ms / 1000) as i64;
     let dt = chrono::DateTime::from_timestamp(secs, 0)
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .with_timezone(&chrono::Local);
     dt.format("%Y-%m-%d").to_string()
 }

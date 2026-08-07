@@ -153,6 +153,7 @@
       "latestRelease": "Latest stable: {version}",
       "updateAvailable": "Version {version} available",
       "upToDate": "You are on the latest version",
+      "upToDateWithVersion": "You are on the latest version v{version}",
       "authors": "Made by Claude Code & DeepSeek v4 Pro & mimo-v2.5-pro",
       "todayRequests": "Calls today",
       "todayTokens": "Tokens today",
@@ -173,9 +174,20 @@
       "nextPage": "Next",
       "checking": "Checking…",
       "checkUpdate": "Check for updates",
+      "manualUpdate": "Manual update",
+      "goToRelease": "View Releases",
+      "installUpdate": "Download & Install",
       "download": "Download",
       "downloading": "Downloading…",
       "devTools": "Developer Console"
+    },
+    "updateDialog": {
+      "title": "New version v{version} available",
+      "upToDate": "You are up to date (v{version})",
+      "currentVersion": "Current v{version}",
+      "latestVersion": "Latest v{version}",
+      "releaseNotes": "Release Notes",
+      "noReleaseNotes": "No release notes provided for this version"
     },
     "placeholder": {
       "optional": "Optional",
