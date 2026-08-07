@@ -133,10 +133,13 @@ fn paste_resized_logo(dst: &mut [u8], dst_w: usize, dst_x: usize, src: &[u8], sr
 /// thin 1px strokes on an 18px-tall canvas (displayed at 18pt), so the text
 /// stays the same size but looks finer than a 2x-scaled pixel font.
 fn render_stats_icon(count: &str, tokens: &str, running: bool) -> tauri::image::Image<'static> {
-    const H: usize = 18;   // canvas height == displayed points (menu bar height)
-    const LOGO_H: usize = 18; // logo resized to fill the canvas height
-    const GAP: usize = 5;  // gap between logo and text
-    const PITCH: usize = 6; // 5px glyph + 1px tracking
+    // 以 2x 渲染（36px 高、18pt 显示）：tray-icon 在 macOS 上会把图标缩放到 18pt，
+    // 1x 位图在 Retina 屏上会被拉伸 2 倍导致数字发虚；2x 位图则像素一一对应、边缘锐利。
+    const SCALE: usize = 2;
+    const H: usize = 18 * SCALE;      // 36px，显示为 18pt
+    const LOGO_H: usize = 18 * SCALE; // logo 填满画布高度
+    const GAP: usize = 5 * SCALE;     // logo 与文字间距
+    const PITCH: usize = 6 * SCALE;   // 5px 字形 + 1px 间距，按 2x 放大
 
     let logo_bytes: &[u8] = if running {
         include_bytes!("../icons/icon-running.png")
@@ -145,8 +148,8 @@ fn render_stats_icon(count: &str, tokens: &str, running: bool) -> tauri::image::
     };
     let line1 = count.chars().map(|c| glyph(c).unwrap_or([0; 7])).collect::<Vec<_>>();
     let line2 = tokens.chars().map(|c| glyph(c).unwrap_or([0; 7])).collect::<Vec<_>>();
-    let text_w1 = line1.len().saturating_mul(PITCH).saturating_sub(1);
-    let text_w2 = line2.len().saturating_mul(PITCH).saturating_sub(1);
+    let text_w1 = line1.len().saturating_mul(PITCH).saturating_sub(SCALE);
+    let text_w2 = line2.len().saturating_mul(PITCH).saturating_sub(SCALE);
     let text_w = text_w1.max(text_w2);
     let w = LOGO_H + GAP + text_w;
     let mut rgba = vec![0u8; H * w * 4];
@@ -162,7 +165,7 @@ fn render_stats_icon(count: &str, tokens: &str, running: bool) -> tauri::image::
 
     let text_x0 = LOGO_H + GAP;
 
-    // Draw a left-aligned line of 5x7 glyphs (1x, thin strokes) in solid black.
+    // Draw a left-aligned line of 5x7 glyphs scaled by SCALE in solid black.
     let draw_line = |rgba: &mut [u8], glyphs: &[[u8; 7]], y_top: usize| {
         let x_base = text_x0;
         for (gi, g) in glyphs.iter().enumerate() {
@@ -170,22 +173,26 @@ fn render_stats_icon(count: &str, tokens: &str, running: bool) -> tauri::image::
                 let bits = g[row];
                 for col in 0..5 {
                     if bits & (1 << (4 - col)) == 0 { continue; }
-                    let x = x_base + gi * PITCH + col;
-                    let y = y_top + row;
-                    if x < w && y < H {
-                        let idx = (y * w + x) * 4;
-                        rgba[idx] = 0;
-                        rgba[idx + 1] = 0;
-                        rgba[idx + 2] = 0;
-                        rgba[idx + 3] = 255;
+                    for dy in 0..SCALE {
+                        let y = y_top + row * SCALE + dy;
+                        if y >= H { continue; }
+                        for dx in 0..SCALE {
+                            let x = x_base + gi * PITCH + col * SCALE + dx;
+                            if x >= w { continue; }
+                            let idx = (y * w + x) * 4;
+                            rgba[idx] = 0;
+                            rgba[idx + 1] = 0;
+                            rgba[idx + 2] = 0;
+                            rgba[idx + 3] = 255;
+                        }
                     }
                 }
             }
         }
     };
 
-    draw_line(&mut rgba, &line1, 1);  // rows 1..7
-    draw_line(&mut rgba, &line2, 10); // rows 10..16 (2px gap between lines)
+    draw_line(&mut rgba, &line1, SCALE);       // rows 2..16
+    draw_line(&mut rgba, &line2, 10 * SCALE);  // rows 20..34（4px 行间距）
 
     tauri::image::Image::new_owned(rgba, w as u32, H as u32)
 }
