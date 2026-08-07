@@ -93,11 +93,16 @@ function onVisibility() {
 // 模型列表 / 状态文案变化时重新按内容调整高度
 watch([recentModels, statusText], () => fitWindow())
 
-// 窗口高度按实际内容自适应（透明窗口圆角外不可见时直接量内容高度）
+// 窗口高度按实际内容自适应：直接量 .panel 的高度。
+// 不能用 documentElement.scrollHeight —— 它不会小于当前窗口高度，
+// 导致窗口只能变大、无法在内容变少时缩小（底部露出底色矩形）。
 async function fitWindow() {
   await nextTick()
   try {
-    const h = Math.ceil(document.documentElement.scrollHeight)
+    const el = document.querySelector('.panel')
+    const h = el
+      ? Math.ceil(el.getBoundingClientRect().height)
+      : document.body.scrollHeight
     await getCurrentWindow().setSize(new LogicalSize(360, h))
   } catch (e) {
     /* ignore */
@@ -584,6 +589,7 @@ onBeforeUnmount(() => {
 </style>
 <style>
 /* 面板窗口：body/#app 必须透明，否则全局背景色会盖住圆角 */
+html,
 body,
 #app {
   background: transparent !important;
