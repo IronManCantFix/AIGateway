@@ -304,9 +304,9 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     const LOGO_H: usize = 18 * SCALE;
     const GAP: usize = 5 * SCALE;
 
-    // 8pt（2x 像素 = 16px）等宽粗体，两行数字在 18pt 图标内刚好放下
-    let font = core_text::font::new_from_name("Menlo-Bold", 8.0 * SCALE as f64)
-        .or_else(|_| core_text::font::new_from_name("Menlo", 8.0 * SCALE as f64))
+    // 7pt（2x 像素 = 14px）等宽粗体，两行数字在 18pt 图标内放下且不重叠
+    let font = core_text::font::new_from_name("Menlo-Bold", 7.0 * SCALE as f64)
+        .or_else(|_| core_text::font::new_from_name("Menlo", 7.0 * SCALE as f64))
         .expect("Menlo font should exist on macOS");
     // SAFETY: kCTFontAttributeName 是 CoreText 导出的静态常量，读取其指针是安全的
     let font_attr = unsafe { CFString::wrap_under_get_rule(kCTFontAttributeName) };
@@ -323,8 +323,8 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
         let b = line.get_typographic_bounds();
         (line, b.width, b.ascent, b.descent)
     };
-    let (line1, w1, ascent1, _) = make_line(count);
-    let (line2, w2, _, descent2) = make_line(tokens);
+    let (line1, w1, _, descent1) = make_line(count);
+    let (line2, w2, ascent2, _) = make_line(tokens);
 
     let text_w = w1.max(w2) as usize;
     let w = LOGO_H + GAP + text_w;
@@ -338,15 +338,14 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
         core_graphics::base::kCGImageAlphaPremultipliedLast,
     );
 
-    // 注意：不要翻转 text matrix，否则字形会上下颠倒。
-    // CGBitmapContext 默认坐标系 y 向上（原点左下），因此基线 y 从底部计算；
-    // 绘制完成后把位图行序垂直翻转，得到顶部行在前、文字正立的像素。
+    // CoreText 在 CGBitmapContext 中绘制的字形是上下颠倒的（y 轴与屏幕相反），
+    // 因此：绘制时把 line2 画在顶部、line1 画在底部，绘制完成后整体垂直翻转
+    // 位图行序 —— 翻转后字形正立，且 count 回到顶部、tokens 回到底部。
     let x0 = LOGO_H + GAP;
-    // 行1 基线（距顶部 2px = 距底部 H-2-ascent）、行2 基线（距底部 descent+2）
-    ctx.set_text_position(x0 as CGFloat, H as CGFloat - 2.0 - ascent1);
-    line1.draw(&ctx);
-    ctx.set_text_position(x0 as CGFloat, descent2 + 2.0);
+    ctx.set_text_position(x0 as CGFloat, H as CGFloat - 2.0 - ascent2);
     line2.draw(&ctx);
+    ctx.set_text_position(x0 as CGFloat, descent1 + 2.0);
+    line1.draw(&ctx);
 
     let mut rgba = ctx.data().to_vec();
     // 垂直翻转（交换上下对称的行），使内存行序与视觉一致
