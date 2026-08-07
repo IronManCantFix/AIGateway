@@ -229,7 +229,8 @@ async function startDownload() {
     }
   } catch (e) {
     console.error('Download failed:', e)
-    copyMsg.value = t('settings.toast.updateDownloadFailed')
+    // 显示具体错误（错误码有翻译则显示翻译，否则显示原始 code）
+    copyMsg.value = translateError(e)
     clearTimeout(copyTimer)
     copyTimer = setTimeout(() => { copyMsg.value = '' }, 3000)
   } finally {

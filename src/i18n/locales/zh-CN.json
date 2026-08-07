@@ -299,7 +299,13 @@
     "update": {
       "requestFailed": "检查更新失败",
       "githubError": "GitHub API 返回错误 ({status})",
-      "noVersionTag": "无法获取最新版本号"
+      "noVersionTag": "无法获取最新版本号",
+      "noDownloadUrl": "未找到下载地址",
+      "invalidUrl": "下载地址无效",
+      "downloadFailed": "下载失败（网络或服务器错误）",
+      "fileCreateFailed": "无法创建下载文件",
+      "fileWriteFailed": "写入下载文件失败",
+      "openFailed": "打开或安装下载文件失败"
     },
     "settings": {
       "saveFailed": "保存设置失败"
@@ -307,5 +313,26 @@
     "tray": {
       "setMenuFailed": "重建托盘菜单失败"
     }
+  },
+  "panel": {
+    "proxy": "代理",
+    "httpProxy": "HTTP 代理",
+    "on": "已开启",
+    "off": "已关闭",
+    "todayCalls": "今日调用",
+    "todayTokens": "今日 Token",
+    "recentModels": "最近调用的模型",
+    "emptyModels": "暂无调用记录",
+    "copyHint": "点击复制模型名",
+    "openMain": "打开主窗口",
+    "quit": "退出",
+    "copied": "已复制: {model}",
+    "relative": {
+      "justNow": "刚刚",
+      "minutesAgo": "{n} 分钟前",
+      "hoursAgo": "{n} 小时前",
+      "daysAgo": "{n} 天前"
+    },
+    "copyAddrHint": "点击复制代理地址"
   }
 }

@@ -150,6 +150,8 @@ pub fn set_settings(app_handle: tauri::AppHandle, state: State<'_, AppState>, se
     }
     let running = state.proxy.get_status().status == "running";
     crate::tray::update_tray_stats(&app_handle, &state.config, running);
+    // 通知所有窗口（主窗口设置页 / 面板）刷新设置
+    app_handle.emit("proxy-settings-changed", ()).ok();
     Ok(s)
 }
 
@@ -539,8 +541,9 @@ pub async fn download_and_install_update(
     #[cfg(target_os = "macos")]
     {
         // Mount DMG silently (no Finder window, no sidebar entry)
+        // 注意：不能加 -quiet，否则 stdout 为空、无法解析挂载点
         let mount_output = std::process::Command::new("hdiutil")
-            .args(["attach", "-nobrowse", "-quiet", &file_path.to_string_lossy()])
+            .args(["attach", "-nobrowse", &file_path.to_string_lossy()])
             .output()
             .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
 
@@ -549,14 +552,28 @@ pub async fn download_and_install_update(
                 .with_detail(format!("hdiutil attach failed: {}", String::from_utf8_lossy(&mount_output.stderr))));
         }
 
-        // Parse mount point from stdout (last line: /dev/diskN  /Volumes/XXX)
+        // Parse mount point from stdout (last line: /dev/diskN  /Volumes/XXX)。
+        // 注意：卷名被占用时 hdiutil 会自动编号为 "AIGateway 1"，挂载点含空格，
+        // 不能按空白切分取最后一段；改为取 "/Volumes/" 起的完整路径。
         let mount_stdout = String::from_utf8_lossy(&mount_output.stdout);
         let mount_point = mount_stdout.lines().last()
-            .and_then(|line| line.split_whitespace().last())
-            .ok_or_else(|| crate::error::AppError::new("update.openFailed").with_detail("Cannot parse mount point".to_string()))?;
+            .and_then(|line| line.find("/Volumes/").map(|i| line[i..].trim().to_string()))
+            .ok_or_else(|| crate::error::AppError::new("update.openFailed")
+                .with_detail(format!("Cannot parse mount point from: {}", mount_stdout)))?;
+
+        // 无论后续成功失败，函数退出时都卸载 DMG（防止残留挂载占用卷名）
+        struct DmgMountGuard(String);
+        impl Drop for DmgMountGuard {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("hdiutil")
+                    .args(["detach", "-quiet", &self.0])
+                    .status();
+            }
+        }
+        let _mount_guard = DmgMountGuard(mount_point.clone());
 
         // Find .app bundle in the mounted volume
-        let app_path = std::fs::read_dir(mount_point)
+        let app_path = std::fs::read_dir(&mount_point)
             .ok()
             .and_then(|entries| {
                 entries
@@ -575,11 +592,6 @@ pub async fn download_and_install_update(
             .args(["-Rf", &app_path.to_string_lossy(), &dest.to_string_lossy()])
             .status()
             .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
-
-        // Unmount DMG
-        let _ = std::process::Command::new("hdiutil")
-            .args(["detach", "-quiet", mount_point])
-            .status();
 
         if !cp_status.success() {
             return Err(crate::error::AppError::new("update.openFailed")
@@ -734,7 +746,7 @@ pub fn kill_process(pid: u32) -> Result<(), String> {
     }
 }
 
-/// Update the user's language preference, persist it, and rebuild the tray menu.
+/// Update the user's language preference and persist it.
 ///
 /// No proxy reload needed: language is UI-only and doesn't affect proxy behavior.
 #[tauri::command]
@@ -749,13 +761,32 @@ pub async fn set_language(
     state.config.set_settings(&settings)
         .map_err(|e| crate::error::AppError::new("settings.saveFailed").with_detail(e))?;
 
-    // Rebuild tray menu with the new language
-    let menu = crate::tray::build_tray_menu(&app, &state.config, &state.proxy);
-    if let Some(tray) = app.tray_by_id("main") {
-        tray.set_menu(Some(menu))
-            .map_err(|e| crate::error::AppError::new("tray.setMenuFailed").with_detail(e.to_string()))?;
-    }
+    // Refresh tray stats tooltip with the new language
     let running = state.proxy.get_status().status == "running";
     crate::tray::update_tray_stats(&app, &state.config, running);
+    Ok(())
+}
+
+// --- Window control ---
+
+#[tauri::command]
+pub fn quit_app(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.proxy.stop().ok();
+    app_handle.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_panel_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    crate::tray::toggle_panel_window(&app_handle);
     Ok(())
 }

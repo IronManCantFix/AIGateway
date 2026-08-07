@@ -7,13 +7,12 @@ mod error;
 mod tray;
 
 use std::sync::Arc;
-use tauri::{Emitter, Listener, Manager};
+use tauri::Manager;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_autostart::MacosLauncher;
-use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use commands::AppState;
-use config::{ConfigStore, HttpProxyConfig};
+use config::ConfigStore;
 use proxy::ProxyManager;
 
 fn main() {
@@ -32,118 +31,20 @@ fn main() {
             let config_store = Arc::new(ConfigStore::new());
             let proxy_manager = ProxyManager::new(Arc::clone(&config_store), app.handle().clone());
 
-            // Build initial tray menu
-            let menu = tray::build_tray_menu(app.handle(), &config_store, &proxy_manager);
-
-            let tray = TrayIconBuilder::with_id("main")
-                .icon(app.default_window_icon().unwrap().clone())
+            TrayIconBuilder::with_id("main")
+                .icon(tray::default_status_icon())
                 .tooltip("AIGateway")
-                .menu(&menu)
-                .on_menu_event(move |app, event| {
-                    let event_id = event.id().as_ref();
-                    let state = app.state::<AppState>();
-
-                    match event_id {
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                window.show().ok();
-                                window.set_focus().ok();
-                            }
-                        }
-                        "quit" => {
-                            state.proxy.stop().ok();
-                            app.exit(0);
-                        }
-                        "toggle_proxy" => {
-                            let status = state.proxy.get_status();
-                            if status.status == "running" {
-                                state.proxy.stop().ok();
-                            } else {
-                                state.proxy.start().ok();
-                            }
-                            // Rebuild menu to update state
-                            rebuild_tray_menu(app, &state);
-                        }
-                        "toggle_autostart" => {
-                            let mut settings = state.config.get_settings();
-                            settings.auto_start = !settings.auto_start;
-                            state.config.set_settings(&settings).ok();
-                            // Enable/disable autostart using plugin
-                            use tauri_plugin_autostart::ManagerExt;
-                            let autostart_manager = app.autolaunch();
-                            if settings.auto_start {
-                                autostart_manager.enable().ok();
-                            } else {
-                                autostart_manager.disable().ok();
-                            }
-                            // Rebuild menu to update state
-                            rebuild_tray_menu(app, &state);
-                        }
-                        "toggle_http_proxy" => {
-                            let mut settings = state.config.get_settings();
-                            if let Some(ref mut proxy) = settings.http_proxy {
-                                proxy.enabled = !proxy.enabled;
-                            } else {
-                                settings.http_proxy = Some(HttpProxyConfig {
-                                    enabled: true,
-                                    url: String::new(),
-                                    username: None,
-                                    password: None,
-                                    exclude_profiles: vec![],
-                                });
-                            }
-                            state.config.set_settings(&settings).ok();
-                            // 如果代理正在运行，重新加载配置
-                            if state.proxy.get_status().status == "running" {
-                                state.proxy.reload().ok();
-                            }
-                            // 重建菜单
-                            rebuild_tray_menu(app, &state);
-                            // 通知前端刷新
-                            app.emit("proxy-settings-changed", ()).ok();
-                        }
-                        "address" => {
-                            let status = state.proxy.get_status();
-                            let addr = format!("http://127.0.0.1:{}", status.port);
-                            // Use clipboard plugin
-                            app.clipboard().write_text(addr).ok();
-                        }
-                        id if id.starts_with("profile_") => {
-                            let profile_id = &id[8..]; // Remove "profile_" prefix
-                            let active_ids = state.config.get_active_profiles();
-                            let is_active = active_ids.contains(&profile_id.to_string());
-                            let mut new_ids = active_ids;
-                            if is_active {
-                                new_ids.retain(|i| i != profile_id);
-                            } else {
-                                new_ids.push(profile_id.to_string());
-                            }
-                            state.config.set_active_profiles(&new_ids).ok();
-                            // Reload proxy if running
-                            if state.proxy.get_status().status == "running" {
-                                state.proxy.reload().ok();
-                            }
-                            // Rebuild menu to update state
-                            rebuild_tray_menu(app, &state);
-                            // Notify frontend to refresh data
-                            app.emit("refresh-data", ()).ok();
-                        }
-                        id if id.starts_with("model_") => {
-                            let model_id = &id[6..]; // Remove "model_" prefix
-                            app.clipboard().write_text(model_id.to_string()).ok();
-                            // Notify frontend to show toast
-                            let settings = state.config.get_settings();
-                            let lang = tray::resolve_language(&settings.language);
-                            let prefix = tray::lookup(&lang, "toast.modelCopied.prefix");
-                            app.emit("show-toast", format!("{}{}", prefix, model_id)).ok();
-                        }
-                        _ => {}
-                    }
-                })
                 .on_tray_icon_event(|tray, event| {
                     match event {
                         TrayIconEvent::Click {
                             button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } => {
+                            tray::toggle_panel_window(tray.app_handle());
+                        }
+                        TrayIconEvent::Click {
+                            button: MouseButton::Right,
                             button_state: MouseButtonState::Up,
                             ..
                         } => {
@@ -156,10 +57,8 @@ fn main() {
                         _ => {}
                     }
                 })
-                .show_menu_on_left_click(true)
                 .build(app)?;
 
-            proxy_manager.set_tray(tray);
 
             app.manage(AppState {
                 config: Arc::clone(&config_store),
@@ -188,20 +87,6 @@ fn main() {
                     }
                 });
             }
-
-            // Listen for proxy status changes and rebuild tray menu
-            let app_handle = app.handle().clone();
-            app.listen("proxy-status-changed", move |_event| {
-                let state = app_handle.state::<AppState>();
-                rebuild_tray_menu(&app_handle, &state);
-            });
-
-            // Listen for tray menu update events (provider/profile changes)
-            let app_handle = app.handle().clone();
-            app.listen("tray-menu-update", move |_event| {
-                let state = app_handle.state::<AppState>();
-                rebuild_tray_menu(&app_handle, &state);
-            });
 
             // Auto-start proxy if configured
             let settings = config_store.get_settings();
@@ -262,24 +147,27 @@ fn main() {
             commands::set_language,
             commands::check_port,
             commands::kill_process,
+            commands::quit_app,
+            commands::show_main_window,
+            commands::toggle_panel_window,
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Hide to tray instead of closing
-                window.hide().ok();
-                api.prevent_close();
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // Hide to tray instead of closing
+                    window.hide().ok();
+                    api.prevent_close();
+                }
+                tauri::WindowEvent::Focused(false) if window.label() == "panel" => {
+                    window.hide().ok();
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
-fn rebuild_tray_menu(app: &tauri::AppHandle, state: &AppState) {
-    let menu = tray::build_tray_menu(app, &state.config, &state.proxy);
-    if let Some(tray) = app.tray_by_id("main") {
-        tray.set_menu(Some(menu)).ok();
-    }
-}
 
 /// Clean up old update installers from temp directory
 fn cleanup_old_installers() {

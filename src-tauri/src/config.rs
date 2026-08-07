@@ -431,11 +431,6 @@ impl ConfigStore {
         out
     }
 
-    /// Returns model name strings only (backward-compatible helper).
-    pub fn get_models(&self) -> Vec<String> {
-        self.get_model_entries().into_iter().map(|e| e.name).collect()
-    }
-
     /// Loads per-model strategies from model-strategies.json (independent of
     /// models.json so strategies work for any model, including profile-only ones).
     pub fn get_model_strategies(&self) -> std::collections::HashMap<String, String> {

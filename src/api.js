@@ -71,4 +71,11 @@ export const api = {
   onStatusChange: (fn) => {
     return listen('proxy-status-changed', (event) => fn(event.payload))
   },
+  onSettingsChange: (fn) => {
+    return listen('proxy-settings-changed', () => fn())
+  },
+
+  // --- Window control ---
+  showMainWindow: () => invoke('show_main_window'),
+  quitApp: () => invoke('quit_app'),
 }
