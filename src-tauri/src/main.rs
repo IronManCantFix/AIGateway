@@ -31,7 +31,7 @@ fn main() {
             let config_store = Arc::new(ConfigStore::new());
             let proxy_manager = ProxyManager::new(Arc::clone(&config_store), app.handle().clone());
 
-            let tray = TrayIconBuilder::with_id("main")
+            TrayIconBuilder::with_id("main")
                 .icon(tray::default_status_icon())
                 .tooltip("AIGateway")
                 .on_tray_icon_event(|tray, event| {
@@ -59,7 +59,6 @@ fn main() {
                 })
                 .build(app)?;
 
-            proxy_manager.set_tray(tray);
 
             app.manage(AppState {
                 config: Arc::clone(&config_store),

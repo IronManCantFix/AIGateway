@@ -50,7 +50,8 @@ pub fn fmt_tokens(n: u64) -> String {
 }
 
 /// Last stats rendered into the tray icon, used to skip redundant rebuilds.
-static LAST_TRAY_STATS: Mutex<Option<(u64, u64)>> = Mutex::new(None);
+/// 包含 running 状态：代理启停时即使数字没变也要重渲染（更新 logo 颜色）。
+static LAST_TRAY_STATS: Mutex<Option<(u64, u64, bool)>> = Mutex::new(None);
 
 fn set_status_icon(tray: &TrayIcon, running: bool) {
     // 与统计图标使用同一套 2x 放大 logo，保证两种状态图标大小一致
@@ -208,8 +209,8 @@ pub fn update_tray_stats(app: &tauri::AppHandle, config_store: &ConfigStore, run
     let (count, tokens) = config_store.get_today_stats();
     {
         let mut last = LAST_TRAY_STATS.lock().unwrap();
-        if *last == Some((count, tokens)) { return; }
-        *last = Some((count, tokens));
+        if *last == Some((count, tokens, running)) { return; }
+        *last = Some((count, tokens, running));
     }
     let lang = resolve_language(&settings.language);
     let count_str = count.to_string();

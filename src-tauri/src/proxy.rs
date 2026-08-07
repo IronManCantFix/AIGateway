@@ -7,14 +7,8 @@ use std::thread;
 use std::os::windows::process::CommandExt;
 
 use tauri::{Emitter, Manager};
-use tauri::tray::TrayIcon;
 
 use crate::config::{ConfigStore, LogEntry};
-
-fn set_tray_icon(tray: &TrayIcon, running: bool) {
-    // 与托盘状态图标统一使用裁边放大后的 2x logo（36px 画布、显示 18pt）
-    tray.set_icon(Some(crate::tray::logo_icon_2x(running))).ok();
-}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ProxyStatus {
@@ -35,7 +29,6 @@ pub struct ProxyManager {
     inner: Arc<Mutex<ProxyInner>>,
     config_store: Arc<ConfigStore>,
     app_handle: tauri::AppHandle,
-    tray: Arc<Mutex<Option<TrayIcon>>>,
 }
 
 impl Clone for ProxyManager {
@@ -44,7 +37,6 @@ impl Clone for ProxyManager {
             inner: Arc::clone(&self.inner),
             config_store: Arc::clone(&self.config_store),
             app_handle: self.app_handle.clone(),
-            tray: Arc::clone(&self.tray),
         }
     }
 }
@@ -62,12 +54,7 @@ impl ProxyManager {
             })),
             config_store,
             app_handle,
-            tray: Arc::new(Mutex::new(None)),
         }
-    }
-
-    pub fn set_tray(&self, tray: TrayIcon) {
-        *self.tray.lock().unwrap() = Some(tray);
     }
 
     pub fn get_status(&self) -> ProxyStatus {
@@ -187,7 +174,6 @@ impl ProxyManager {
         let inner_clone = Arc::clone(&self.inner);
         let config_store_clone = Arc::clone(&self.config_store);
         let app_handle_clone = self.app_handle.clone();
-        let tray_clone = Arc::clone(&self.tray);
 
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
@@ -209,9 +195,6 @@ impl ProxyManager {
                             }
                         }
                         inner_clone.lock().unwrap().status = "running".to_string();
-                        if let Some(tray) = tray_clone.lock().unwrap().as_ref() {
-                            set_tray_icon(tray, true);
-                        }
                         crate::tray::update_tray_stats(&app_handle_clone, &config_store_clone, true);
                         app_handle_clone
                             .emit("proxy-status-changed", serde_json::json!({"status": "running"}))
@@ -258,9 +241,7 @@ impl ProxyManager {
                                     child.kill().ok();
                                 }
                             }
-                            if let Some(tray) = tray_clone.lock().unwrap().as_ref() {
-                                set_tray_icon(tray, false);
-                            }
+                            crate::tray::update_tray_stats(&app_handle_clone, &config_store_clone, false);
                             app_handle_clone
                                 .emit("proxy-status-changed", serde_json::json!({
                                     "status": "stopped",
@@ -281,11 +262,6 @@ impl ProxyManager {
                 guard.child = None;
                 crashed
             };
-            // set_tray_icon may block on macOS (AppKit main-thread requirement),
-            // so call it AFTER releasing the inner lock to avoid deadlocking the stop thread.
-            if let Some(tray) = tray_clone.lock().unwrap().as_ref() {
-                set_tray_icon(tray, false);
-            }
             crate::tray::update_tray_stats(&app_handle_clone, &config_store_clone, false);
 
             if crashed {
@@ -321,7 +297,8 @@ impl ProxyManager {
         };
 
         let inner = Arc::clone(&self.inner);
-        let tray = Arc::clone(&self.tray);
+        let app_handle = self.app_handle.clone();
+        let config_store = Arc::clone(&self.config_store);
         thread::spawn(move || {
             if let Some((mut child, pid, mut stdin)) = child_info {
                 // send shutdown via stdin
@@ -348,9 +325,8 @@ impl ProxyManager {
                 guard.status = "stopped".to_string();
                 guard.stopping = false;
             }
-            if let Some(tray) = tray.lock().unwrap().as_ref() {
-                set_tray_icon(tray, false);
-            }
+            // 统一走统计图标刷新：代理停止后恢复显示今日统计（或纯状态 logo）
+            crate::tray::update_tray_stats(&app_handle, &config_store, false);
         });
         Ok(())
     }
