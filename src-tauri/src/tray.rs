@@ -65,7 +65,9 @@ fn set_status_icon(tray: &TrayIcon, running: bool) {
 }
 
 /// 5x7 bitmap font (digits, K/M suffix, decimal dot) used for the compact
-/// two-line tray icon. Each entry is 5 columns x 7 rows packed as bytes.
+/// two-line tray icon on non-macOS platforms. Each entry is 5 columns x 7 rows
+/// packed as bytes.
+#[cfg(not(target_os = "macos"))]
 fn glyph(c: char) -> Option<[u8; 7]> {
     match c {
         '0' => Some([0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110]),
@@ -132,7 +134,8 @@ fn paste_resized_logo(dst: &mut [u8], dst_w: usize, dst_x: usize, src: &[u8], sr
 /// call count, bottom line = tokens. The 5x7 bitmap glyphs are drawn at 1x with
 /// thin 1px strokes on an 18px-tall canvas (displayed at 18pt), so the text
 /// stays the same size but looks finer than a 2x-scaled pixel font.
-fn render_stats_icon(count: &str, tokens: &str, running: bool) -> tauri::image::Image<'static> {
+#[cfg(not(target_os = "macos"))]
+fn render_stats_icon_bitmap(count: &str, tokens: &str, running: bool) -> tauri::image::Image<'static> {
     // 以 2x 渲染（36px 高、18pt 显示）：tray-icon 在 macOS 上会把图标缩放到 18pt，
     // 1x 位图在 Retina 屏上会被拉伸 2 倍导致数字发虚；2x 位图则像素一一对应、边缘锐利。
     const SCALE: usize = 2;
@@ -282,4 +285,102 @@ pub fn toggle_panel_window(app: &tauri::AppHandle) {
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     let _ = window.show();
     let _ = window.set_focus();
+}
+
+/// macOS：用系统等宽字体（Menlo Bold）抗锯齿渲染数字，Retina 下边缘平滑无锯齿。
+#[cfg(target_os = "macos")]
+fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::image::Image<'static> {
+    use core_foundation::attributed_string::{CFAttributedStringRef, CFMutableAttributedString};
+    use core_foundation::base::{CFIndex, CFRange, TCFType};
+    use core_foundation::string::CFString;
+    use core_graphics::base::CGFloat;
+    use core_graphics::color_space::CGColorSpace;
+    use core_graphics::context::CGContext;
+    use core_graphics::geometry::CGAffineTransform;
+    use core_text::line::CTLine;
+    use core_text::string_attributes::kCTFontAttributeName;
+
+    const SCALE: usize = 2;
+    const H: usize = 18 * SCALE;
+    const LOGO_H: usize = 18 * SCALE;
+    const GAP: usize = 5 * SCALE;
+
+    // 8pt（2x 像素 = 16px）等宽粗体，两行数字在 18pt 图标内刚好放下
+    let font = core_text::font::new_from_name("Menlo-Bold", 8.0 * SCALE as f64)
+        .or_else(|_| core_text::font::new_from_name("Menlo", 8.0 * SCALE as f64))
+        .expect("Menlo font should exist on macOS");
+    // SAFETY: kCTFontAttributeName 是 CoreText 导出的静态常量，读取其指针是安全的
+    let font_attr = unsafe { CFString::wrap_under_get_rule(kCTFontAttributeName) };
+
+    let make_line = |text: &str| -> (CTLine, f64, f64, f64) {
+        let mut attr = CFMutableAttributedString::new();
+        attr.replace_str(&CFString::new(text), CFRange::init(0, 0));
+        attr.set_attribute(
+            CFRange::init(0, text.len() as CFIndex),
+            font_attr.as_concrete_TypeRef(),
+            &font,
+        );
+        let line = CTLine::new_with_attributed_string(attr.as_concrete_TypeRef() as CFAttributedStringRef);
+        let b = line.get_typographic_bounds();
+        (line, b.width, b.ascent, b.descent)
+    };
+    let (line1, w1, ascent1, _) = make_line(count);
+    let (line2, w2, _, descent2) = make_line(tokens);
+
+    let text_w = w1.max(w2) as usize;
+    let w = LOGO_H + GAP + text_w;
+    let mut ctx = CGContext::create_bitmap_context(
+        None,
+        w as usize,
+        H,
+        8,
+        w * 4,
+        &CGColorSpace::create_device_rgb(),
+        core_graphics::base::kCGImageAlphaPremultipliedLast,
+    );
+
+    // 原点移到左上角、y 轴向下，基线按位图行序计算
+    ctx.set_text_matrix(&CGAffineTransform {
+        a: 1.0,
+        b: 0.0,
+        c: 0.0,
+        d: -1.0,
+        tx: 0.0,
+        ty: H as CGFloat,
+    });
+
+    let x0 = LOGO_H + GAP;
+    // 行1 基线（顶部留 2px）、行2 基线（底部留 2px）
+    ctx.set_text_position(x0 as CGFloat, 2.0 + ascent1);
+    line1.draw(&ctx);
+    ctx.set_text_position(x0 as CGFloat, H as CGFloat - 2.0 - descent2);
+    line2.draw(&ctx);
+
+    let mut rgba = vec![0u8; w * H * 4];
+    rgba.copy_from_slice(ctx.data());
+
+    // 贴 logo（左侧，与文字不重叠）
+    let logo_bytes: &[u8] = if running {
+        include_bytes!("../icons/icon-running.png")
+    } else {
+        include_bytes!("../icons/icon-stopped.png")
+    };
+    if let Ok(logo) = tauri::image::Image::from_bytes(logo_bytes) {
+        let lpx = logo.rgba();
+        let src_w = logo.width() as usize;
+        let src_h = logo.height() as usize;
+        paste_resized_logo(&mut rgba, w, 0, lpx, src_w, src_h, LOGO_H);
+    }
+
+    tauri::image::Image::new_owned(rgba, w as u32, H as u32)
+}
+
+#[cfg(target_os = "macos")]
+fn render_stats_icon(count: &str, tokens: &str, running: bool) -> tauri::image::Image<'static> {
+    render_stats_icon_system(count, tokens, running)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn render_stats_icon(count: &str, tokens: &str, running: bool) -> tauri::image::Image<'static> {
+    render_stats_icon_bitmap(count, tokens, running)
 }
