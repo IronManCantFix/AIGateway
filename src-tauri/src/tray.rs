@@ -296,7 +296,6 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     use core_graphics::base::CGFloat;
     use core_graphics::color_space::CGColorSpace;
     use core_graphics::context::CGContext;
-    use core_graphics::geometry::CGAffineTransform;
     use core_text::line::CTLine;
     use core_text::string_attributes::kCTFontAttributeName;
 
@@ -339,25 +338,25 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
         core_graphics::base::kCGImageAlphaPremultipliedLast,
     );
 
-    // 原点移到左上角、y 轴向下，基线按位图行序计算
-    ctx.set_text_matrix(&CGAffineTransform {
-        a: 1.0,
-        b: 0.0,
-        c: 0.0,
-        d: -1.0,
-        tx: 0.0,
-        ty: H as CGFloat,
-    });
-
+    // 注意：不要翻转 text matrix，否则字形会上下颠倒。
+    // CGBitmapContext 默认坐标系 y 向上（原点左下），因此基线 y 从底部计算；
+    // 绘制完成后把位图行序垂直翻转，得到顶部行在前、文字正立的像素。
     let x0 = LOGO_H + GAP;
-    // 行1 基线（顶部留 2px）、行2 基线（底部留 2px）
-    ctx.set_text_position(x0 as CGFloat, 2.0 + ascent1);
+    // 行1 基线（距顶部 2px = 距底部 H-2-ascent）、行2 基线（距底部 descent+2）
+    ctx.set_text_position(x0 as CGFloat, H as CGFloat - 2.0 - ascent1);
     line1.draw(&ctx);
-    ctx.set_text_position(x0 as CGFloat, H as CGFloat - 2.0 - descent2);
+    ctx.set_text_position(x0 as CGFloat, descent2 + 2.0);
     line2.draw(&ctx);
 
-    let mut rgba = vec![0u8; w * H * 4];
-    rgba.copy_from_slice(ctx.data());
+    let mut rgba = ctx.data().to_vec();
+    // 垂直翻转（交换上下对称的行），使内存行序与视觉一致
+    let row_bytes = w * 4;
+    for row in 0..(H / 2) {
+        let top = row * row_bytes;
+        let bottom = (H - 1 - row) * row_bytes;
+        let (upper, lower) = rgba.split_at_mut(bottom);
+        upper[top..top + row_bytes].swap_with_slice(&mut lower[..row_bytes]);
+    }
 
     // 贴 logo（左侧，与文字不重叠）
     let logo_bytes: &[u8] = if running {
