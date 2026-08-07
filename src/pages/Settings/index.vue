@@ -32,7 +32,13 @@ const showProxyAuth = ref(false)
 const profiles = ref([])
 
 let copyTimer = 0
-const copyMsg = ref('')
+const copyMsg = ref({ text: '', type: 'success' })
+
+function showToast(text, type = 'success') {
+  copyMsg.value = { text, type }
+  clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => { copyMsg.value = { text: '', type: 'success' } }, 3000)
+}
 
 const confirmState = ref({ visible: false, message: '', resolve: null })
 function showConfirm(message) {
@@ -78,9 +84,7 @@ async function saveSettings() {
       excludeProfiles: httpProxyExcludeProfiles.value
     }
   })
-  copyMsg.value = '✓ ' + t('settings.label.saved')
-  clearTimeout(copyTimer)
-  copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
+  showToast('✓ ' + t('settings.label.saved'))
 }
 
 async function saveProxySettings() {
@@ -116,16 +120,14 @@ async function killPortProcess() {
     const result = await api.checkPort(n)
     if (result.available) {
       portConflict.value = null
-      copyMsg.value = t('settings.toast.portFreed', { port: n })
+      showToast(t('settings.toast.portFreed', { port: n }))
     } else {
       portConflict.value = null
     }
   } catch (e) {
-    copyMsg.value = t('settings.toast.processKillFailed', { msg: String(e) })
+    showToast(t('settings.toast.processKillFailed', { msg: String(e) }), 'error')
     portConflict.value = null
   }
-  clearTimeout(copyTimer)
-  copyTimer = setTimeout(() => { copyMsg.value = '' }, 2500)
 }
 
 function dismissPortConflict() {
@@ -140,9 +142,7 @@ async function onThemeChange() {
     await api.setSettings({ ...current, theme: prev })
   } catch (e) {
     console.error('Failed to save theme:', e)
-    copyMsg.value = t('settings.toast.themeSaveFailed')
-    clearTimeout(copyTimer)
-    copyTimer = setTimeout(() => { copyMsg.value = '' }, 2500)
+    showToast(t('settings.toast.themeSaveFailed'), 'error')
   }
 }
 
@@ -155,14 +155,10 @@ async function onLanguageChange() {
       const current = await api.getSettings()
       await api.setSettings({ ...current, language: 'auto' })
     }
-    copyMsg.value = t('settings.language.changed')
-    clearTimeout(copyTimer)
-    copyTimer = setTimeout(() => { copyMsg.value = '' }, 1500)
+    showToast(t('settings.language.changed'))
   } catch (e) {
     console.error('Failed to change language:', e)
-    copyMsg.value = t('settings.language.changeFailed')
-    clearTimeout(copyTimer)
-    copyTimer = setTimeout(() => { copyMsg.value = '' }, 2500)
+    showToast(t('settings.language.changeFailed'), 'error')
   }
 }
 
@@ -172,6 +168,7 @@ const downloading = ref(false)
 const downloadProgress = ref(0)
 const currentVersion = ref('')
 const isDev = import.meta.env.DEV
+const updateDialog = ref({ visible: false, info: null })
 
 let unlistenProgress = null
 
@@ -180,15 +177,26 @@ async function checkForUpdates() {
   try {
     const info = await api.checkForUpdates()
     updateInfo.value = info
-    if (!isDev && info.has_update) {
-      const ok = await showConfirm(t('settings.confirm.downloadUpdate', { version: info.latest_version }))
-      if (ok) await startDownload()
-    }
+    openUpdateDialog(info)
   } catch (e) {
     console.error('check_for_updates failed:', translateError(e))
+    showToast(translateError(e), 'error')
   } finally {
     checkingUpdate.value = false
   }
+}
+
+function openUpdateDialog(info) {
+  updateDialog.value = { visible: true, info }
+}
+
+function closeUpdateDialog() {
+  updateDialog.value = { visible: false, info: null }
+}
+
+async function installUpdate() {
+  closeUpdateDialog()
+  await startDownload()
 }
 
 async function startDownload() {
@@ -223,16 +231,12 @@ async function startDownload() {
       }
     } else {
       // Windows/Linux: installer was launched
-      copyMsg.value = t('settings.toast.updateDownloaded')
-      clearTimeout(copyTimer)
-      copyTimer = setTimeout(() => { copyMsg.value = '' }, 3000)
+      showToast(t('settings.toast.updateDownloaded'))
     }
   } catch (e) {
     console.error('Download failed:', e)
     // 显示具体错误（错误码有翻译则显示翻译，否则显示原始 code）
-    copyMsg.value = translateError(e)
-    clearTimeout(copyTimer)
-    copyTimer = setTimeout(() => { copyMsg.value = '' }, 3000)
+    showToast(translateError(e), 'error')
   } finally {
     downloading.value = false
     downloadProgress.value = 0
@@ -247,6 +251,10 @@ function openDownloadPage() {
   if (updateInfo.value?.download_url) {
     openUrl(updateInfo.value.download_url).catch(e => console.error('openUrl failed:', e))
   }
+}
+
+function openReleasePage() {
+  openUrl('https://github.com/IronManCantFix/AIGateway/releases').catch(e => console.error('openUrl failed:', e))
 }
 
 function openGithub() {
@@ -279,7 +287,7 @@ onUnmounted(() => {
 <template>
   <div class="settings">
     <Transition name="fade">
-      <div class="copy-toast" v-if="copyMsg">{{ copyMsg }}</div>
+      <div class="copy-toast" :class="{ error: copyMsg.type === 'error' }" v-if="copyMsg.text">{{ copyMsg.text }}</div>
     </Transition>
     <div class="page-header">
       <h2>{{ $t('settings.title') }}</h2>
@@ -406,6 +414,7 @@ onUnmounted(() => {
         <button class="check-update-btn" @click="checkForUpdates" :disabled="checkingUpdate || downloading">
           {{ checkingUpdate ? $t('settings.button.checking') : (downloading ? $t('settings.button.downloading') : $t('settings.button.checkUpdate')) }}
         </button>
+        <button class="check-update-btn" @click="openReleasePage" :disabled="downloading">{{ $t('settings.button.manualUpdate') }}</button>
       </p>
       <!-- 下载进度条 -->
       <div class="download-progress" v-if="downloading">
@@ -414,9 +423,8 @@ onUnmounted(() => {
         </div>
         <span class="progress-text">{{ downloadProgress }}%</span>
       </div>
-      <p class="about-update-hint" v-if="isDev && updateInfo">{{ $t('settings.label.latestRelease', { version: updateInfo.latest_version }) }}</p>
-      <p class="about-update-hint" v-else-if="updateInfo?.has_update && !downloading">{{ $t('settings.label.updateAvailable', { version: updateInfo.latest_version }) }}</p>
-      <p class="about-update-hint up-to-date" v-else-if="updateInfo && !downloading">{{ $t('settings.label.upToDate') }}</p>
+      <p class="about-update-hint" v-if="updateInfo && !downloading && updateInfo.has_update">{{ $t('settings.label.updateAvailable', { version: updateInfo.latest_version }) }}</p>
+      <p class="about-update-hint up-to-date" v-else-if="updateInfo && !downloading">{{ $t('settings.label.upToDateWithVersion', { version: updateInfo.latest_version }) }}</p>
       <p>{{ $t('settings.label.authors') }}</p>
       <p>
         <span class="github-link" @click="openGithub"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg> GitHub</span>
@@ -433,6 +441,34 @@ onUnmounted(() => {
         <div class="confirm-actions">
           <button class="confirm-cancel" @click="confirmCancel">{{ $t('common.cancel') }}</button>
           <button class="confirm-ok" @click="confirmOk">{{ $t('common.ok') }}</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- 更新详情弹窗 -->
+  <Teleport to="body">
+    <div class="confirm-overlay" v-if="updateDialog.visible && updateDialog.info" @click.self="closeUpdateDialog">
+      <div class="confirm-dialog update-dialog">
+        <p class="update-dialog-title" :class="{ 'has-update': updateDialog.info?.has_update }">
+          {{ updateDialog.info?.has_update
+            ? $t('settings.updateDialog.title', { version: updateDialog.info?.latest_version })
+            : $t('settings.updateDialog.upToDate', { version: updateDialog.info?.latest_version }) }}
+        </p>
+        <p class="update-dialog-version">
+          {{ $t('settings.updateDialog.currentVersion', { version: updateDialog.info?.current_version }) }}
+          <span class="update-arrow">→</span>
+          {{ $t('settings.updateDialog.latestVersion', { version: updateDialog.info?.latest_version }) }}
+        </p>
+        <div class="update-notes">
+          <div class="update-notes-title">{{ $t('settings.updateDialog.releaseNotes') }}</div>
+          <pre v-if="updateDialog.info?.release_notes">{{ updateDialog.info.release_notes }}</pre>
+          <p v-else class="update-notes-empty">{{ $t('settings.updateDialog.noReleaseNotes') }}</p>
+        </div>
+        <div class="confirm-actions">
+          <button class="confirm-cancel" @click="closeUpdateDialog">{{ $t('common.cancel') }}</button>
+          <button class="update-link-btn" @click="openReleasePage">{{ $t('settings.button.goToRelease') }}</button>
+          <button v-if="updateDialog.info?.has_update" class="update-install-btn" @click="installUpdate">{{ $t('settings.button.installUpdate') }}</button>
         </div>
       </div>
     </div>
@@ -515,6 +551,7 @@ label.toggle-row { cursor: pointer; margin: 0; }
 .progress-text { font-size: 12px; color: var(--accent); font-weight: 500; min-width: 36px; text-align: left; }
 
 .copy-toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 999; padding: 8px 20px; border-radius: var(--radius-md); font-size: 13px; font-weight: 500; color: var(--success); background: var(--success-soft); border: 1px solid rgba(52,211,153,.2); box-shadow: var(--shadow-md); pointer-events: none; }
+.copy-toast.error { color: var(--danger); background: var(--danger-soft); border-color: rgba(248,113,113,.2); }
 .fade-enter-active { transition: all .25s cubic-bezier(.4,0,.2,1); }
 .fade-leave-active { transition: all .2s cubic-bezier(.4,0,.2,1); }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
@@ -528,4 +565,19 @@ label.toggle-row { cursor: pointer; margin: 0; }
 .confirm-cancel:hover { background: var(--accent-soft); border-color: var(--border-hover); }
 .confirm-ok { padding: 8px 20px; border: none; border-radius: var(--radius-sm); background: var(--danger); font-size: 14px; color: #fff; font-weight: 500; cursor: pointer; transition: all .15s; }
 .confirm-ok:hover { background: #ef4444; box-shadow: 0 0 12px rgba(248,113,113,.3); }
+
+/* Update dialog */
+.update-dialog { min-width: 380px; max-width: 500px; }
+.update-dialog-title { font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px; text-align: center; }
+.update-dialog-title.has-update { color: var(--accent); }
+.update-dialog-version { font-size: 12px; color: var(--text-secondary); text-align: center; margin: 0 0 14px; font-family: 'SF Mono', monospace; }
+.update-arrow { margin: 0 6px; color: var(--text-muted); }
+.update-notes { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-input); padding: 12px 14px; max-height: 280px; overflow-y: auto; text-align: left; margin-bottom: 20px; }
+.update-notes-title { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 8px; }
+.update-notes pre { margin: 0; font-size: 12px; line-height: 1.7; color: var(--text-secondary); font-family: inherit; white-space: pre-wrap; word-break: break-word; }
+.update-notes-empty { margin: 0; font-size: 12px; color: var(--text-muted); }
+.update-link-btn { padding: 8px 20px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; font-size: 14px; color: var(--accent); cursor: pointer; transition: all .15s; }
+.update-link-btn:hover { background: var(--accent-soft); border-color: var(--border-hover); }
+.update-install-btn { padding: 8px 20px; border: none; border-radius: var(--radius-sm); background: var(--accent); font-size: 14px; color: #fff; font-weight: 500; cursor: pointer; transition: all .15s; }
+.update-install-btn:hover { background: var(--accent-hover); box-shadow: var(--shadow-sm); }
 </style>

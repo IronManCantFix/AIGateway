@@ -24,6 +24,7 @@ pub struct UpdateInfo {
     pub download_url: String,
     pub download_asset_url: String,
     pub asset_name: String,
+    pub release_notes: String,
 }
 
 #[derive(serde::Serialize)]
@@ -422,6 +423,11 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
         .unwrap_or("")
         .to_string();
 
+    let release_notes = body.get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
     if latest_version.is_empty() {
         return Err(crate::error::AppError::new("update.noVersionTag"));
     }
@@ -443,6 +449,7 @@ pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInf
         download_url,
         download_asset_url,
         asset_name,
+        release_notes,
     })
 }
 
