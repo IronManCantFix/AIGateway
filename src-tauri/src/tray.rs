@@ -304,9 +304,10 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     const LOGO_H: usize = 18 * SCALE;
     const GAP: usize = 5 * SCALE;
 
-    // 10pt（2x 像素 = 20px）等宽常规体，count 与 tokens 分两行显示
-    let font = core_text::font::new_from_name("Menlo", 10.0 * SCALE as f64)
-        .or_else(|_| core_text::font::new_from_name("Menlo-Bold", 10.0 * SCALE as f64))
+    // 9pt（2x 像素 = 18px）等宽常规体，count 与 tokens 分两行显示；
+    // 9pt 才能在 18pt 图标内为两行留出明显间距
+    let font = core_text::font::new_from_name("Menlo", 9.0 * SCALE as f64)
+        .or_else(|_| core_text::font::new_from_name("Menlo-Bold", 9.0 * SCALE as f64))
         .expect("Menlo font should exist on macOS");
     // SAFETY: kCTFontAttributeName 是 CoreText 导出的静态常量，读取其指针是安全的
     let font_attr = unsafe { CFString::wrap_under_get_rule(kCTFontAttributeName) };
@@ -341,7 +342,7 @@ fn render_stats_icon_system(count: &str, tokens: &str, running: bool) -> tauri::
     // CGBitmapContext 的像素第一行就是视觉顶部，identity 绘制即得到正立字形，
     // 无需翻转行序。行1（count）画在顶部、行2（tokens）画在底部。
     let x0 = LOGO_H + GAP;
-    ctx.set_text_position(x0 as CGFloat, H as CGFloat - ascent1);
+    ctx.set_text_position(x0 as CGFloat, H as CGFloat - ascent1 + 2.0);
     line1.draw(&ctx);
     ctx.set_text_position(x0 as CGFloat, descent2);
     line2.draw(&ctx);
