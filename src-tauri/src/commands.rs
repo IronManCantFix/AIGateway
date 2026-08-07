@@ -541,8 +541,9 @@ pub async fn download_and_install_update(
     #[cfg(target_os = "macos")]
     {
         // Mount DMG silently (no Finder window, no sidebar entry)
+        // 注意：不能加 -quiet，否则 stdout 为空、无法解析挂载点
         let mount_output = std::process::Command::new("hdiutil")
-            .args(["attach", "-nobrowse", "-quiet", &file_path.to_string_lossy()])
+            .args(["attach", "-nobrowse", &file_path.to_string_lossy()])
             .output()
             .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
 
@@ -551,14 +552,28 @@ pub async fn download_and_install_update(
                 .with_detail(format!("hdiutil attach failed: {}", String::from_utf8_lossy(&mount_output.stderr))));
         }
 
-        // Parse mount point from stdout (last line: /dev/diskN  /Volumes/XXX)
+        // Parse mount point from stdout (last line: /dev/diskN  /Volumes/XXX)。
+        // 注意：卷名被占用时 hdiutil 会自动编号为 "AIGateway 1"，挂载点含空格，
+        // 不能按空白切分取最后一段；改为取 "/Volumes/" 起的完整路径。
         let mount_stdout = String::from_utf8_lossy(&mount_output.stdout);
         let mount_point = mount_stdout.lines().last()
-            .and_then(|line| line.split_whitespace().last())
-            .ok_or_else(|| crate::error::AppError::new("update.openFailed").with_detail("Cannot parse mount point".to_string()))?;
+            .and_then(|line| line.find("/Volumes/").map(|i| line[i..].trim().to_string()))
+            .ok_or_else(|| crate::error::AppError::new("update.openFailed")
+                .with_detail(format!("Cannot parse mount point from: {}", mount_stdout)))?;
+
+        // 无论后续成功失败，函数退出时都卸载 DMG（防止残留挂载占用卷名）
+        struct DmgMountGuard(String);
+        impl Drop for DmgMountGuard {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("hdiutil")
+                    .args(["detach", "-quiet", &self.0])
+                    .status();
+            }
+        }
+        let _mount_guard = DmgMountGuard(mount_point.clone());
 
         // Find .app bundle in the mounted volume
-        let app_path = std::fs::read_dir(mount_point)
+        let app_path = std::fs::read_dir(&mount_point)
             .ok()
             .and_then(|entries| {
                 entries
@@ -577,11 +592,6 @@ pub async fn download_and_install_update(
             .args(["-Rf", &app_path.to_string_lossy(), &dest.to_string_lossy()])
             .status()
             .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
-
-        // Unmount DMG
-        let _ = std::process::Command::new("hdiutil")
-            .args(["detach", "-quiet", mount_point])
-            .status();
 
         if !cp_status.success() {
             return Err(crate::error::AppError::new("update.openFailed")

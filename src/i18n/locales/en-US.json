@@ -299,7 +299,13 @@
     "update": {
       "requestFailed": "Update check failed",
       "githubError": "GitHub API error ({status})",
-      "noVersionTag": "Could not fetch latest version"
+      "noVersionTag": "Could not fetch latest version",
+      "noDownloadUrl": "No download URL found",
+      "invalidUrl": "Invalid download URL",
+      "downloadFailed": "Download failed (network or server error)",
+      "fileCreateFailed": "Cannot create download file",
+      "fileWriteFailed": "Failed to write download file",
+      "openFailed": "Failed to open or install the downloaded file"
     },
     "settings": {
       "saveFailed": "Failed to save settings"

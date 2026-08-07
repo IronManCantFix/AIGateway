@@ -299,7 +299,13 @@
     "update": {
       "requestFailed": "检查更新失败",
       "githubError": "GitHub API 返回错误 ({status})",
-      "noVersionTag": "无法获取最新版本号"
+      "noVersionTag": "无法获取最新版本号",
+      "noDownloadUrl": "未找到下载地址",
+      "invalidUrl": "下载地址无效",
+      "downloadFailed": "下载失败（网络或服务器错误）",
+      "fileCreateFailed": "无法创建下载文件",
+      "fileWriteFailed": "写入下载文件失败",
+      "openFailed": "打开或安装下载文件失败"
     },
     "settings": {
       "saveFailed": "保存设置失败"
