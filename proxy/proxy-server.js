@@ -836,6 +836,58 @@ function selectRoundRobinForModel(requestedModel, profiles) {
   return profiles[idx]
 }
 
+// 调用 Anthropic 原生上游的 /v1/messages/count_tokens 获取精确计数。
+// 仅当 profile 上游为 Anthropic Messages 协议时可用，失败时由调用方回退本地估算。
+function countTokensUpstream(profile, body) {
+  return new Promise((resolve, reject) => {
+    const meta = PROVIDER_META[profile.providerType]
+    const baseUrl = (profile.baseUrl || '').replace(/\/+$/, '').replace(/\/v1$/, '')
+    const parsed = new URL(`${baseUrl}/v1/messages/count_tokens`)
+    const isHttps = parsed.protocol === 'https:'
+    const transport = isHttps ? https : http
+    const proxyConfig = currentConfig?.settings?.httpProxy
+    const agent = createProxyAgent(proxyConfig, isHttps, profile.id)
+    const bodyBuf = Buffer.from(JSON.stringify(body))
+    const options = {
+      hostname: parsed.hostname,
+      port: parsed.port || (isHttps ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      agent,
+      timeout: 5000,
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': bodyBuf.length,
+        'anthropic-version': '2023-06-01',
+        ...(meta.authType === 'x-api-key'
+          ? { 'x-api-key': profile.apiKey }
+          : { 'Authorization': `Bearer ${profile.apiKey}` })
+      }
+    }
+    const upstreamReq = transport.request(options, (upstreamRes) => {
+      const chunks = []
+      upstreamRes.on('data', (c) => chunks.push(c))
+      upstreamRes.on('end', () => {
+        if (upstreamRes.statusCode !== 200) {
+          reject(new Error(`upstream count_tokens status ${upstreamRes.statusCode}`))
+          return
+        }
+        try {
+          const data = JSON.parse(Buffer.concat(chunks).toString())
+          if (typeof data.input_tokens === 'number') resolve(data.input_tokens)
+          else reject(new Error('upstream count_tokens missing input_tokens'))
+        } catch (e) {
+          reject(e)
+        }
+      })
+    })
+    upstreamReq.on('timeout', () => upstreamReq.destroy(new Error('count_tokens timeout')))
+    upstreamReq.on('error', reject)
+    upstreamReq.write(bodyBuf)
+    upstreamReq.end()
+  })
+}
+
 // --- Route: /v1/models ---
 
 // In-flight "please give me the freshest config" requests to the parent
@@ -1336,11 +1388,25 @@ const server = http.createServer(async (req, res) => {
       })
       return
     } else if (urlPath === '/v1/messages/count_tokens') {
-      // Anthropic token counting endpoint — return estimated count since upstream providers don't support it
+      // Anthropic token counting endpoint
       rawBody = await readBody(req)
       model = (rawBody && rawBody.model) || '-'
-      // 上游不支持精确计数，按语言加权估算：CJK 约 1 token/字，其余约 1 token/4 字符
-      const inputTokens = estimateRequestTokens(rawBody)
+      // 优先使用上游真实计数：Anthropic 原生上游支持 count_tokens 端点；
+      // 非 Anthropic 上游或调用失败时，回退到本地估算（接口返回为空才函数计算）
+      let inputTokens = null
+      if (rawBody && currentConfig && Array.isArray(currentConfig.profiles)) {
+        const candidates = model ? getProfilesForModel(model, 'messages') : []
+        const profile = candidates[0]
+        if (profile && PROVIDER_META[profile.providerType]?.target === 'messages') {
+          try {
+            inputTokens = await countTokensUpstream(profile, rawBody)
+          } catch {}
+        }
+      }
+      if (inputTokens == null) {
+        // 按语言加权估算：CJK 约 1 token/字，其余约 1 token/4 字符
+        inputTokens = estimateRequestTokens(rawBody)
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ input_tokens: inputTokens }))
       logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-', { method: req.method })
