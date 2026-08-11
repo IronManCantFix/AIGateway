@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseUsageFromResponse, normalizeUsage } from './token-usage.js'
+import { parseUsageFromResponse, normalizeUsage, estimateTokens, estimateRequestTokens } from './token-usage.js'
 
 test('parses OpenAI Chat non-streaming JSON usage', () => {
   const body = JSON.stringify({
@@ -142,4 +142,54 @@ test('normalizeUsage handles OpenAI cached_tokens without double counting', () =
     completion_tokens: 5,
     total_tokens: 105
   })
+})
+
+test('estimateTokens: empty and non-string input', () => {
+  assert.equal(estimateTokens(''), 0)
+  assert.equal(estimateTokens(null), 0)
+  assert.equal(estimateTokens(undefined), 0)
+})
+
+test('estimateTokens: English text ~4 chars per token', () => {
+  // 40 个英文字符 → 10 tokens
+  assert.equal(estimateTokens('a'.repeat(40)), 10)
+  assert.equal(estimateTokens('hello world this is a test'), 7) // 26 chars → ceil(26/4)
+})
+
+test('estimateTokens: CJK text ~1 token per char', () => {
+  assert.equal(estimateTokens('中文测试'), 4)
+  assert.equal(estimateTokens('日本語のテスト'), 7)
+  assert.equal(estimateTokens('한국어 테스트'), 7)
+  // 中文标点与全角字符也按 CJK 计
+  assert.equal(estimateTokens('你好，世界！'), 6)
+})
+
+test('estimateTokens: mixed CJK and Latin', () => {
+  const text = '你好 world 测试 1234'
+  // CJK 4 字（你好测试）+ 12 个其他字符（含空格与数字）→ ceil(12/4)=3
+  assert.equal(estimateTokens(text), 7)
+})
+
+test('estimateRequestTokens: collects all string fields', () => {
+  const body = {
+    model: 'claude-test',
+    system: '你是助手。',
+    messages: [
+      { role: 'user', content: '你好，请帮我写代码。' },
+      { role: 'assistant', content: [{ type: 'text', text: '好的。' }] }
+    ],
+    tools: [{ type: 'function', function: { name: 'lookup', description: '查询数据' } }]
+  }
+  // 递归收集 body 中全部字符串（含 model/role/type/name 等短字段），
+  // 内容文本按 CJK/英文权重估算
+  const expected = [
+    'claude-test', '你是助手。', 'user', '你好，请帮我写代码。',
+    'assistant', 'text', '好的。', 'function', 'lookup', '查询数据'
+  ].reduce((sum, s) => sum + estimateTokens(s), 0)
+  assert.equal(estimateRequestTokens(body), expected)
+})
+
+test('estimateRequestTokens: empty body', () => {
+  assert.equal(estimateRequestTokens(null), 0)
+  assert.equal(estimateRequestTokens({}), 0)
 })

@@ -23,7 +23,7 @@ import {
   setReasoningCache
 } from './protocol-converters.js'
 import { parseMultipartFields } from './multipart-scanner.js'
-import { normalizeUsage, parseUsageFromResponse } from './token-usage.js'
+import { normalizeUsage, parseUsageFromResponse, estimateRequestTokens } from './token-usage.js'
 
 
 // --- State ---
@@ -1165,7 +1165,10 @@ async function handleApiRequest(req, res) {
   }
 
   const needStream = req.headers.accept?.includes('text/event-stream') || body.stream
-  let sseConverter = needStream ? createSSEConverter(source, meta.target) : null
+  // 仅当客户端为 Anthropic、上游为 Chat 时需要估算输入 token，
+  // 用于 message_start 的 usage（OpenAI 上游流式末尾才返回真实 usage）
+  const estimatedInputTokens = source === 'messages' && meta.target === 'chat_completions' ? estimateRequestTokens(body) : 0
+  let sseConverter = needStream ? createSSEConverter(source, meta.target, estimatedInputTokens) : null
   // Same-format chat_completions: convert reasoning_details / <think> tags
   // to reasoning_content for client compatibility (e.g. CherryStudio).
   // Do NOT inject reasoning_split automatically — it's provider-specific
@@ -1336,9 +1339,8 @@ const server = http.createServer(async (req, res) => {
       // Anthropic token counting endpoint — return estimated count since upstream providers don't support it
       rawBody = await readBody(req)
       model = (rawBody && rawBody.model) || '-'
-      // Rough estimate: ~4 chars per token for English, ~2 chars per token for CJK
-      const bodyStr = JSON.stringify(rawBody.messages || [])
-      const inputTokens = Math.ceil(bodyStr.length / 3)
+      // 上游不支持精确计数，按语言加权估算：CJK 约 1 token/字，其余约 1 token/4 字符
+      const inputTokens = estimateRequestTokens(rawBody)
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ input_tokens: inputTokens }))
       logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-', { method: req.method })

@@ -74,3 +74,45 @@ export function parseUsageFromResponse(responseBody) {
     return null
   }
 }
+
+// 粗略估算文本 token 数（无上游 usage 时的兜底）：
+// - CJK 字符（中文/日文假名/韩文/扩展区）约 1 字符/token
+// - 其余字符（英文/数字/符号/空白）约 4 字符/token
+export function estimateTokens(text) {
+  if (!text) return 0
+  let cjk = 0
+  let other = 0
+  for (const ch of text) {
+    const code = ch.codePointAt(0)
+    const isCjk = (code >= 0x4e00 && code <= 0x9fff) ||   // CJK 统一表意文字
+      (code >= 0x3400 && code <= 0x4dbf) ||               // CJK 扩展 A
+      (code >= 0x3040 && code <= 0x30ff) ||               // 日文假名
+      (code >= 0xac00 && code <= 0xd7af) ||               // 韩文
+      (code >= 0xf900 && code <= 0xfaff) ||               // CJK 兼容表意文字
+      (code >= 0x3000 && code <= 0x303f) ||               // CJK 符号和标点
+      (code >= 0xff00 && code <= 0xffef)                  // 全角字符
+    if (isCjk) cjk++
+    else other++
+  }
+  return cjk + Math.ceil(other / 4)
+}
+
+// 递归收集请求体中的全部字符串并估算 token 消耗，
+// 覆盖 system / messages / tools 等字段（含多模态 content 数组）。
+export function estimateRequestTokens(body) {
+  if (!body) return 0
+  const collect = (value, parts) => {
+    if (typeof value === 'string') {
+      parts.push(value)
+    } else if (Array.isArray(value)) {
+      for (const v of value) collect(v, parts)
+    } else if (value && typeof value === 'object') {
+      for (const key of Object.keys(value)) collect(value[key], parts)
+    }
+  }
+  const parts = []
+  collect(body, parts)
+  let total = 0
+  for (const p of parts) total += estimateTokens(p)
+  return total
+}

@@ -247,6 +247,15 @@ test('streams Anthropic Messages events into Chat Completions SSE chunks', () =>
   assert.equal(chunks.at(-1).choices[0].finish_reason, 'tool_calls')
 })
 
+test('chat to messages: fills message_start input_tokens with estimated count', () => {
+  // createSSEConverter 参数为 (客户端格式, 上游格式)
+  const convert = createSSEConverter('messages', 'chat_completions', 1234)
+  const out = convert('data: {"id":"1","choices":[{"delta":{"role":"assistant","content":"hi"}}]}')
+  const chunks = ssePayloads(out)
+  assert.equal(chunks[0].type, 'message_start')
+  assert.equal(chunks[0].message.usage.input_tokens, 1234)
+})
+
 test('streams Anthropic Messages events into Responses function_call events', () => {
   const convert = createSSEConverter('responses', 'messages')
   const output = [

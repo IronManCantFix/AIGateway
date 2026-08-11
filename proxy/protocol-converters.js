@@ -665,7 +665,7 @@ function mapFinishReason(reason) {
 
 // === SSE Converters (factory functions — each returns (line) => string) ===
 
-function chatToMessagesSSEFactory() {
+function chatToMessagesSSEFactory(estimatedInputTokens = 0) {
   let started = false
   let thinkingStarted = false
   let thinkingClosed = false
@@ -684,7 +684,9 @@ function chatToMessagesSSEFactory() {
     if (started) return ''
     started = true
     const role = choice?.delta?.role || choice?.message?.role || 'assistant'
-    return fmtAnthropicSSE('message_start', { type: 'message_start', message: { id: messageId, type: 'message', role, model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } })
+    // OpenAI 上游只在流末尾返回 usage，message_start 必须先发出，
+    // 这里填入基于请求体估算的输入 token，让 Anthropic 客户端能拿到上下文长度
+    return fmtAnthropicSSE('message_start', { type: 'message_start', message: { id: messageId, type: 'message', role, model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: estimatedInputTokens, output_tokens: 0 } } })
   }
 
   function startThinking() {
@@ -2052,10 +2054,10 @@ function getResponseBodyConverter(source, target) {
   return converters[key] ? converters[key].responseBody : null
 }
 
-function createSSEConverter(source, target) {
+function createSSEConverter(source, target, estimatedInputTokens = 0) {
   if (source === target) return null
   const key = `${target}->${source}`
-  return converters[key] ? converters[key].sseFactory() : null
+  return converters[key] ? converters[key].sseFactory(estimatedInputTokens) : null
 }
 
 export {
