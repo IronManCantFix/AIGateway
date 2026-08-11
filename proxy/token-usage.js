@@ -16,7 +16,12 @@ export function normalizeUsage(usage) {
   return {
     prompt_tokens: prompt,
     completion_tokens: completion,
-    total_tokens: usage.total_tokens || (prompt + completion)
+    total_tokens: usage.total_tokens || (prompt + completion),
+    // 接口返回的缓存命中数：Anthropic cache_read / OpenAI cached_tokens
+    cached_tokens: usage.cache_read_input_tokens ||
+      usage.prompt_tokens_details?.cached_tokens ||
+      usage.input_tokens_details?.cached_tokens ||
+      0
   }
 }
 
@@ -33,12 +38,16 @@ export function parseUsageFromResponse(responseBody) {
     // SSE 流式：逐事件解析，聚合输入与输出
     let inputTokens = 0
     let outputTokens = 0
+    let cachedTokens = 0
     const applyUsage = (u) => {
       if (!u || typeof u !== 'object') return
       if (u.prompt_tokens != null) inputTokens = u.prompt_tokens || 0
       if (u.input_tokens != null) inputTokens = u.input_tokens || 0
       if (u.completion_tokens != null) outputTokens = u.completion_tokens || 0
       if (u.output_tokens != null) outputTokens = u.output_tokens || 0
+      if (u.cache_read_input_tokens != null) cachedTokens = u.cache_read_input_tokens || 0
+      if (u.prompt_tokens_details?.cached_tokens != null) cachedTokens = u.prompt_tokens_details.cached_tokens || 0
+      if (u.input_tokens_details?.cached_tokens != null) cachedTokens = u.input_tokens_details.cached_tokens || 0
       // 部分中转会把 Anthropic 缓存字段透传在 OpenAI 格式 usage 中
       inputTokens += u.cache_creation_input_tokens || 0
       inputTokens += u.cache_read_input_tokens || 0
@@ -56,6 +65,7 @@ export function parseUsageFromResponse(responseBody) {
       if (parsed.type === 'message_start' && parsed.message?.usage) {
         const u = parsed.message.usage
         inputTokens = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0)
+        cachedTokens = u.cache_read_input_tokens || 0
         continue
       }
       // Anthropic message_delta：output_tokens 为流内累计值
@@ -69,7 +79,12 @@ export function parseUsageFromResponse(responseBody) {
       applyUsage(parsed.response?.usage)
     }
     if (inputTokens > 0 || outputTokens > 0) {
-      return { prompt_tokens: inputTokens, completion_tokens: outputTokens, total_tokens: inputTokens + outputTokens }
+      return {
+        prompt_tokens: inputTokens,
+        completion_tokens: outputTokens,
+        total_tokens: inputTokens + outputTokens,
+        cached_tokens: cachedTokens
+      }
     }
     return null
   }

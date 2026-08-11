@@ -952,6 +952,7 @@ function chatToResponsesSSEFactory() {
   let fullText = ''
   let fullReasoning = ''
   let inputTokens = 0
+  let cachedTokens = 0
   let upstreamError = null
   const toolCalls = new Map()
   const outputItems = []
@@ -1065,7 +1066,7 @@ function chatToResponsesSSEFactory() {
       out += fmtResponsesSSE('response.output_item.done', { type: 'response.output_item.done', output_index: tool.outputIndex, item })
       outputItems[tool.outputIndex] = item
     }
-    out += fmtResponsesSSE('response.completed', { type: 'response.completed', response: makeResponse({ status: 'completed', output: outputItems.filter(Boolean), usage: { input_tokens: inputTokens, output_tokens: outputTokens, total_tokens: inputTokens + outputTokens } }) })
+    out += fmtResponsesSSE('response.completed', { type: 'response.completed', response: makeResponse({ status: 'completed', output: outputItems.filter(Boolean), usage: { input_tokens: inputTokens, input_tokens_details: { cached_tokens: cachedTokens }, output_tokens: outputTokens, total_tokens: inputTokens + outputTokens } }) })
     return out
   }
 
@@ -1149,9 +1150,11 @@ function chatToResponsesSSEFactory() {
       // Extract usage from data-level or choice-level
       if (data.usage) {
         inputTokens = data.usage.prompt_tokens || inputTokens
+        cachedTokens = data.usage.prompt_tokens_details?.cached_tokens || cachedTokens
       }
       if (choice?.usage) {
         inputTokens = choice.usage.prompt_tokens || data.usage?.prompt_tokens || 0
+        cachedTokens = choice.usage.prompt_tokens_details?.cached_tokens || cachedTokens
       }
 
       // Handle empty choices (metadata-only chunks from providers like MiniMax)
@@ -1330,6 +1333,7 @@ function messagesToResponsesSSEFactory() {
   let completed = false
   let fullText = ''
   let inputTokens = 0
+  let cachedTokens = 0
   let textOutputIndex = null
   const contentBlocks = new Map()
   const outputItems = []
@@ -1366,7 +1370,7 @@ function messagesToResponsesSSEFactory() {
       out += fmtResponsesSSE('response.output_item.done', { type: 'response.output_item.done', output_index: block.outputIndex, item })
       outputItems[block.outputIndex] = item
     }
-    out += fmtResponsesSSE('response.completed', { type: 'response.completed', response: makeResponse({ status: 'completed', output: outputItems.filter(Boolean), usage: { input_tokens: inputTokens, output_tokens: outputTokens, total_tokens: inputTokens + outputTokens } }) })
+    out += fmtResponsesSSE('response.completed', { type: 'response.completed', response: makeResponse({ status: 'completed', output: outputItems.filter(Boolean), usage: { input_tokens: inputTokens, input_tokens_details: { cached_tokens: cachedTokens }, output_tokens: outputTokens, total_tokens: inputTokens + outputTokens } }) })
     return out
   }
 
@@ -1408,6 +1412,7 @@ function messagesToResponsesSSEFactory() {
       if (data.type === 'message_start') {
         model = data.message?.model || model
         inputTokens = data.message?.usage?.input_tokens || 0
+        cachedTokens = data.message?.usage?.cache_read_input_tokens || 0
         return ensureStarted()
       }
 
@@ -1489,6 +1494,7 @@ function responsesToMessagesSSEFactory() {
   let completed = false
   let fullText = ''
   let inputTokens = 0
+  let cachedTokens = 0
   let textBlockIndex = null
   let contentBlockIndex = 0
   const toolBlocks = new Map()
@@ -1496,7 +1502,7 @@ function responsesToMessagesSSEFactory() {
   function ensureStarted() {
     if (started) return ''
     started = true
-    return fmtAnthropicSSE('message_start', { type: 'message_start', message: { id: messageId, type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: inputTokens, output_tokens: 0 } } })
+    return fmtAnthropicSSE('message_start', { type: 'message_start', message: { id: messageId, type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: inputTokens, output_tokens: 0, cache_read_input_tokens: cachedTokens } } })
   }
 
   function ensureTextStarted() {
@@ -1538,6 +1544,7 @@ function responsesToMessagesSSEFactory() {
       if (data.type === 'response.created') {
         model = data.response?.model || model
         inputTokens = data.response?.usage?.input_tokens || 0
+        cachedTokens = data.response?.usage?.input_tokens_details?.cached_tokens || 0
         return ensureStarted()
       }
 
@@ -1743,7 +1750,8 @@ function convertChatResponseToMessages(data) {
     stop_sequence: null,
     usage: {
       input_tokens: data.usage?.prompt_tokens || 0,
-      output_tokens: data.usage?.completion_tokens || 0
+      output_tokens: data.usage?.completion_tokens || 0,
+      cache_read_input_tokens: data.usage?.prompt_tokens_details?.cached_tokens || 0
     }
   }
 }
@@ -1784,7 +1792,8 @@ function convertMessagesResponseToChat(data) {
     usage: {
       prompt_tokens: data.usage?.input_tokens || 0,
       completion_tokens: data.usage?.output_tokens || 0,
-      total_tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0)
+      total_tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
+      prompt_tokens_details: { cached_tokens: data.usage?.cache_read_input_tokens || 0 }
     }
   }
 }
@@ -1828,7 +1837,8 @@ function convertResponsesResponseToMessages(data) {
     stop_sequence: null,
     usage: {
       input_tokens: data.usage?.input_tokens || 0,
-      output_tokens: data.usage?.output_tokens || 0
+      output_tokens: data.usage?.output_tokens || 0,
+      cache_read_input_tokens: data.usage?.input_tokens_details?.cached_tokens || 0
     }
   }
 }
@@ -1899,7 +1909,7 @@ function convertMessagesResponseToResponses(data) {
     truncation: 'disabled',
     usage: {
       input_tokens: data.usage?.input_tokens || 0,
-      input_tokens_details: { cached_tokens: 0 },
+      input_tokens_details: { cached_tokens: data.usage?.cache_read_input_tokens || 0 },
       output_tokens: data.usage?.output_tokens || 0,
       output_tokens_details: { reasoning_tokens: 0 },
       total_tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0)
@@ -1976,7 +1986,7 @@ function convertChatResponseToResponses(data) {
     truncation: 'disabled',
     usage: {
       input_tokens: data.usage?.prompt_tokens || 0,
-      input_tokens_details: { cached_tokens: 0 },
+      input_tokens_details: { cached_tokens: data.usage?.prompt_tokens_details?.cached_tokens || 0 },
       output_tokens: data.usage?.completion_tokens || 0,
       output_tokens_details: { reasoning_tokens: 0 },
       total_tokens: data.usage?.total_tokens || 0
@@ -2028,7 +2038,8 @@ function convertResponsesResponseToChat(data) {
     usage: {
       prompt_tokens: data.usage?.input_tokens || 0,
       completion_tokens: data.usage?.output_tokens || 0,
-      total_tokens: data.usage?.total_tokens || 0
+      total_tokens: data.usage?.total_tokens || 0,
+      prompt_tokens_details: { cached_tokens: data.usage?.input_tokens_details?.cached_tokens || 0 }
     }
   }
 }

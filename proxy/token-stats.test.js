@@ -12,7 +12,8 @@ test('parses OpenAI Chat non-streaming JSON usage', () => {
   assert.deepEqual(parseUsageFromResponse(body), {
     prompt_tokens: 120,
     completion_tokens: 30,
-    total_tokens: 150
+    total_tokens: 150,
+    cached_tokens: 0
   })
 })
 
@@ -21,7 +22,8 @@ test('parses usage_total fallback for non-streaming responses', () => {
   assert.deepEqual(parseUsageFromResponse(body), {
     prompt_tokens: 10,
     completion_tokens: 2,
-    total_tokens: 12
+    total_tokens: 12,
+    cached_tokens: 0
   })
 })
 
@@ -35,7 +37,48 @@ test('parses OpenAI Chat streaming SSE usage from final chunk', () => {
   assert.deepEqual(parseUsageFromResponse(body), {
     prompt_tokens: 500,
     completion_tokens: 80,
-    total_tokens: 580
+    total_tokens: 580,
+    cached_tokens: 0
+  })
+})
+
+test('parses cached_tokens from OpenAI Chat streaming usage', () => {
+  const body = [
+    'data: {"id":"1","choices":[{"delta":{"content":"a"}}]}',
+    'data: {"id":"1","choices":[],"usage":{"prompt_tokens":500,"completion_tokens":80,"total_tokens":580,"prompt_tokens_details":{"cached_tokens":400}}}',
+    'data: [DONE]'
+  ].join('\n\n') + '\n\n'
+  assert.deepEqual(parseUsageFromResponse(body), {
+    prompt_tokens: 500,
+    completion_tokens: 80,
+    total_tokens: 580,
+    cached_tokens: 400
+  })
+})
+
+test('parses cached_tokens from OpenAI Responses streaming usage', () => {
+  const body = [
+    'data: {"type":"response.created","response":{"id":"r1"}}',
+    'data: {"type":"response.completed","response":{"id":"r1","usage":{"input_tokens":999,"output_tokens":42,"total_tokens":1041,"input_tokens_details":{"cached_tokens":700}}}}'
+  ].join('\n\n') + '\n\n'
+  assert.deepEqual(parseUsageFromResponse(body), {
+    prompt_tokens: 999,
+    completion_tokens: 42,
+    total_tokens: 1041,
+    cached_tokens: 700
+  })
+})
+
+test('extracts Anthropic cache_read from streaming message_start', () => {
+  const body = [
+    'data: {"type":"message_start","message":{"id":"m1","usage":{"input_tokens":100,"cache_read_input_tokens":80,"output_tokens":0}}}',
+    'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":20}}'
+  ].join('\n\n') + '\n\n'
+  assert.deepEqual(parseUsageFromResponse(body), {
+    prompt_tokens: 180,
+    completion_tokens: 20,
+    total_tokens: 200,
+    cached_tokens: 80
   })
 })
 
@@ -47,7 +90,8 @@ test('parses OpenAI Responses streaming usage from response.completed', () => {
   assert.deepEqual(parseUsageFromResponse(body), {
     prompt_tokens: 999,
     completion_tokens: 42,
-    total_tokens: 1041
+    total_tokens: 1041,
+    cached_tokens: 0
   })
 })
 
@@ -68,7 +112,8 @@ test('parses Anthropic streaming input from message_start (not zero)', () => {
   assert.deepEqual(parseUsageFromResponse(body), {
     prompt_tokens: 1234,
     completion_tokens: 56,
-    total_tokens: 1290
+    total_tokens: 1290,
+    cached_tokens: 0
   })
 })
 
@@ -80,7 +125,8 @@ test('includes Anthropic cache tokens in prompt count', () => {
   assert.deepEqual(parseUsageFromResponse(body), {
     prompt_tokens: 600,
     completion_tokens: 50,
-    total_tokens: 650
+    total_tokens: 650,
+    cached_tokens: 300
   })
 })
 
@@ -93,7 +139,8 @@ test('parses Anthropic non-streaming JSON with cache tokens', () => {
   assert.deepEqual(parseUsageFromResponse(body), {
     prompt_tokens: 1480,
     completion_tokens: 10,
-    total_tokens: 1490
+    total_tokens: 1490,
+    cached_tokens: 900
   })
 })
 
@@ -107,7 +154,8 @@ test('takes cumulative output from last Anthropic message_delta', () => {
   assert.deepEqual(parseUsageFromResponse(body), {
     prompt_tokens: 50,
     completion_tokens: 25,
-    total_tokens: 75
+    total_tokens: 75,
+    cached_tokens: 0
   })
 })
 
@@ -119,7 +167,8 @@ test('keeps prompt when a chunk only reports completion tokens', () => {
   assert.deepEqual(parseUsageFromResponse(body), {
     prompt_tokens: 0,
     completion_tokens: 7,
-    total_tokens: 7
+    total_tokens: 7,
+    cached_tokens: 0
   })
 })
 
@@ -140,7 +189,8 @@ test('normalizeUsage handles OpenAI cached_tokens without double counting', () =
   assert.deepEqual(normalizeUsage(usage), {
     prompt_tokens: 100,
     completion_tokens: 5,
-    total_tokens: 105
+    total_tokens: 105,
+    cached_tokens: 60
   })
 })
 

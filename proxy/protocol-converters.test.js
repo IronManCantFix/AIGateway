@@ -11,6 +11,8 @@ import {
   convertChatResponseToMessages,
   convertMessagesResponseToChat,
   convertChatResponseToResponses,
+  convertMessagesResponseToResponses,
+  convertResponsesResponseToMessages,
   convertResponsesResponseToChat,
   createSSEConverter
 } from './protocol-converters.js'
@@ -228,6 +230,106 @@ test('converts non-streaming response bodies across formats with tool calls', ()
   })
   assert.equal(chatFromResponses.choices[0].finish_reason, 'tool_calls')
   assert.equal(chatFromResponses.choices[0].message.tool_calls[0].id, 'call_5')
+})
+
+test('passes through cached tokens across non-streaming conversions', () => {
+  // Chat → Messages: cached_tokens 映射为 cache_read_input_tokens
+  const anthropic = convertChatResponseToMessages({
+    id: 'chatcmpl_1',
+    model: 'gpt-test',
+    choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'hi' } }],
+    usage: { prompt_tokens: 100, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 70 } }
+  })
+  assert.equal(anthropic.usage.cache_read_input_tokens, 70)
+
+  // Messages → Chat: cache_read_input_tokens 映射回 prompt_tokens_details.cached_tokens
+  const chat = convertMessagesResponseToChat({
+    id: 'msg_1',
+    type: 'message',
+    role: 'assistant',
+    model: 'claude-test',
+    content: [{ type: 'text', text: 'hi' }],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 80 }
+  })
+  assert.equal(chat.usage.prompt_tokens_details.cached_tokens, 80)
+
+  // Messages → Responses
+  const responses = convertMessagesResponseToResponses({
+    id: 'msg_1',
+    type: 'message',
+    role: 'assistant',
+    model: 'claude-test',
+    content: [{ type: 'text', text: 'hi' }],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 90 }
+  })
+  assert.equal(responses.usage.input_tokens_details.cached_tokens, 90)
+
+  // Chat → Responses
+  const responsesFromChat = convertChatResponseToResponses({
+    id: 'chatcmpl_2',
+    model: 'gpt-test',
+    choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'hi' } }],
+    usage: { prompt_tokens: 100, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 60 } }
+  })
+  assert.equal(responsesFromChat.usage.input_tokens_details.cached_tokens, 60)
+
+  // Responses → Chat
+  const chatFromResponses = convertResponsesResponseToChat({
+    id: 'resp_1',
+    status: 'completed',
+    model: 'gpt-test',
+    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hi', annotations: [] }] }],
+    usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110, input_tokens_details: { cached_tokens: 50 } }
+  })
+  assert.equal(chatFromResponses.usage.prompt_tokens_details.cached_tokens, 50)
+
+  // Responses → Messages
+  const messagesFromResponses = convertResponsesResponseToMessages({
+    id: 'resp_2',
+    status: 'completed',
+    model: 'gpt-test',
+    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hi', annotations: [] }] }],
+    usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110, input_tokens_details: { cached_tokens: 40 } }
+  })
+  assert.equal(messagesFromResponses.usage.cache_read_input_tokens, 40)
+})
+
+test('passes through cached tokens in streaming Responses conversions', () => {
+  // Chat 流式 → Responses：response.completed 携带 cached_tokens
+  const convertChat = createSSEConverter('responses', 'chat_completions')
+  const chatOut = [
+    convertChat('data: {"id":"1","object":"chat.completion.chunk","choices":[{"delta":{"content":"a"}}]}'),
+    convertChat('data: {"id":"1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":70}}}'),
+    convertChat('data: [DONE]')
+  ].join('')
+  const chatChunks = ssePayloads(chatOut)
+  const completed = chatChunks.find(c => c.type === 'response.completed')
+  assert.equal(completed.response.usage.input_tokens_details.cached_tokens, 70)
+
+  // Anthropic 流式 → Responses：response.completed 携带 cache_read
+  const convertMessages = createSSEConverter('responses', 'messages')
+  const msgOut = [
+    convertMessages('data: {"type":"message_start","message":{"id":"m1","model":"claude-test","usage":{"input_tokens":100,"cache_read_input_tokens":80,"output_tokens":0}}}'),
+    convertMessages('data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}'),
+    convertMessages('data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}'),
+    convertMessages('data: {"type":"message_stop"}')
+  ].join('')
+  const msgChunks = ssePayloads(msgOut)
+  const msgCompleted = msgChunks.find(c => c.type === 'response.completed')
+  assert.equal(msgCompleted.response.usage.input_tokens_details.cached_tokens, 80)
+
+  // Responses 流式 → Anthropic：message_start 携带 cache_read_input_tokens
+  const convertResponses = createSSEConverter('messages', 'responses')
+  const respOut = [
+    convertResponses('data: {"type":"response.created","response":{"id":"r1","model":"gpt-test","usage":{"input_tokens":100,"output_tokens":0,"input_tokens_details":{"cached_tokens":60}}}}'),
+    convertResponses('data: {"type":"response.output_item.added","item":{"id":"msg_1","type":"message","role":"assistant","content":[]}}'),
+    convertResponses('data: {"type":"response.completed","response":{"id":"r1","model":"gpt-test","output":[],"usage":{"input_tokens":100,"output_tokens":10,"input_tokens_details":{"cached_tokens":60}}}}')
+  ].join('')
+  const respChunks = ssePayloads(respOut)
+  const msgStart = respChunks.find(c => c.type === 'message_start')
+  assert.equal(msgStart.message.usage.cache_read_input_tokens, 60)
 })
 
 test('streams Anthropic Messages events into Chat Completions SSE chunks', () => {

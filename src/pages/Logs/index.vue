@@ -279,6 +279,7 @@ onMounted(async () => {
               <span v-else>{{ l.model }}</span>
               <span class="log-dur">{{ l.duration }}ms</span>
               <span class="log-tokens" v-if="l.totalTokens">P {{ fmtTok(l.promptTokens) }} / C {{ fmtTok(l.completionTokens) }} / T {{ fmtTok(l.totalTokens) }}</span>
+              <span class="log-cache" v-if="l.cachedTokens">缓存 {{ fmtTok(l.cachedTokens) }}<template v-if="l.cacheHitRate"> · 命中 {{ l.cacheHitRate }}%</template></span>
               <span class="log-body-size" v-if="l.bodySizeBefore">Body {{ fmtSize(l.bodySizeBefore) }} → {{ fmtSize(l.bodySizeAfter) }}</span>
             </div>
             <div class="log-err" v-if="l.error">{{ l.error }}</div>
@@ -375,6 +376,7 @@ onMounted(async () => {
 .log-meta { display: flex; gap: 12px; margin-top: 3px; font-size: 12px; color: var(--text-secondary); }
 .log-dur { font-family: 'SF Mono',monospace; }
 .log-tokens { font-family: 'SF Mono',monospace; color: var(--accent); }
+.log-cache { font-family: 'SF Mono',monospace; color: #34d399; }
 .log-body-size { font-family: 'SF Mono',monospace; color: #f59e0b; font-size: 11px; }
 .log-mapping { font-family: 'SF Mono',monospace; color: #8b5cf6; font-size: 11px; }
 .log-err { font-size: 12px; color: var(--danger); margin-top: 3px; }

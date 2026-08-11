@@ -1345,6 +1345,11 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
         data.promptTokens = usage.prompt_tokens
         data.completionTokens = usage.completion_tokens
         data.totalTokens = usage.total_tokens
+        data.cachedTokens = usage.cached_tokens || 0
+        // 缓存命中率 = 缓存命中数 / 总输入 token，保留一位小数
+        data.cacheHitRate = usage.prompt_tokens > 0
+          ? Math.round((usage.cached_tokens / usage.prompt_tokens) * 1000) / 10
+          : 0
       }
     } catch {}
   }

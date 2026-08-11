@@ -127,6 +127,10 @@ pub struct LogEntry {
     pub completion_tokens: Option<u64>,
     #[serde(rename = "totalTokens", default)]
     pub total_tokens: Option<u64>,
+    #[serde(rename = "cachedTokens", default)]
+    pub cached_tokens: Option<u64>,
+    #[serde(rename = "cacheHitRate", default)]
+    pub cache_hit_rate: Option<f64>,
     #[serde(rename = "upstreamUrl", default)]
     pub upstream_url: Option<String>,
     #[serde(default)]
