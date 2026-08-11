@@ -146,6 +146,12 @@ function fmtSize(bytes) {
   return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${units[i]}`
 }
 
+// 生成速度：completion tokens / 耗时（秒）
+function genSpeed(l) {
+  if (!l.completionTokens || !l.duration) return null
+  return Math.round((l.completionTokens / (l.duration / 1000)) * 10) / 10
+}
+
 let copyTimer = 0
 const copyMsg = ref('')
 async function copyText(text, label) {
@@ -269,18 +275,23 @@ onMounted(async () => {
               <span class="log-badge" :class="statusLabel(l.statusCode)">{{ l.statusCode }}</span>
               <span class="log-badge log-method" v-if="l.method">{{ l.method }}</span>
               <span class="log-badge log-proxy" v-if="l.proxy">PROXY</span>
-              <span class="log-ep">{{ endpointLabel(l.endpoint) }}</span>
+              <span class="log-ep" :title="l.endpoint">{{ endpointLabel(l.endpoint) }}</span>
               <span class="log-upstream" v-if="l.upstreamUrl" :title="l.upstreamUrl">{{ shortUrl(l.upstreamUrl) }}</span>
               <span class="log-time">{{ fmtTime(l.timestamp) }}</span>
             </div>
             <div class="log-meta">
-              <span>{{ l.provider || '-' }}</span>
-              <span v-if="l.originalModel && l.originalModel !== l.model" class="log-mapping">{{ l.originalModel }} → {{ l.model }}</span>
-              <span v-else>{{ l.model }}</span>
+              <span class="log-id">
+                <span class="log-provider" :title="l.provider">{{ l.provider || '-' }}</span>
+                <span v-if="l.originalModel && l.originalModel !== l.model" class="log-mapping" :title="l.originalModel + ' → ' + l.model">{{ l.originalModel }} → {{ l.model }}</span>
+                <span v-else class="log-model" :title="l.model">{{ l.model }}</span>
+              </span>
               <span class="log-dur">{{ l.duration }}ms</span>
+            </div>
+            <div class="log-data">
               <span class="log-tokens" v-if="l.totalTokens">P {{ fmtTok(l.promptTokens) }} / C {{ fmtTok(l.completionTokens) }} / T {{ fmtTok(l.totalTokens) }}</span>
               <span class="log-cache" v-if="l.cachedTokens">缓存 {{ fmtTok(l.cachedTokens) }}<template v-if="l.cacheHitRate"> · 命中 {{ l.cacheHitRate }}%</template></span>
               <span class="log-body-size" v-if="l.bodySizeBefore">Body {{ fmtSize(l.bodySizeBefore) }} → {{ fmtSize(l.bodySizeAfter) }}</span>
+              <span class="log-speed" v-if="genSpeed(l) != null">速度 {{ genSpeed(l) }} tok/s</span>
             </div>
             <div class="log-err" v-if="l.error">{{ l.error }}</div>
             <details class="log-detail" v-if="l.requestBody || l.responseBody">
@@ -363,21 +374,29 @@ onMounted(async () => {
 
 .log-item { padding: 10px 16px; border-top: 1px solid var(--border-subtle); }
 .log-item:first-child { border-top: none; }
-.log-top { display: flex; align-items: center; gap: 8px; }
+.log-top { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
+.log-top > * { white-space: nowrap; flex-shrink: 0; }
 .log-badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; font-family: 'SF Mono',monospace; }
 .log-badge.success { background: var(--success-soft); color: var(--success); }
 .log-badge.warn { background: var(--warning-soft); color: var(--warning); }
 .log-badge.error { background: var(--danger-soft); color: var(--danger); }
 .log-proxy { background: rgba(59,130,246,.12); color: #60a5fa; font-size: 10px; }
 .log-method { background: var(--accent-soft); color: var(--text-secondary); font-size: 10px; letter-spacing: .3px; }
-.log-upstream { font-size: 11px; color: var(--text-muted); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.log-ep { font-size: 13px; color: var(--text-secondary); }
+.log-ep { font-size: 13px; color: var(--text-secondary); min-width: 0; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
+.log-upstream { font-size: 11px; color: var(--text-muted); max-width: 320px; min-width: 0; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-time { font-size: 11px; color: var(--text-muted); margin-left: auto; }
-.log-meta { display: flex; gap: 12px; margin-top: 3px; font-size: 12px; color: var(--text-secondary); }
+.log-meta { display: flex; align-items: center; gap: 10px; margin-top: 3px; font-size: 12px; color: var(--text-secondary); flex-wrap: nowrap; min-width: 0; }
+.log-id { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex-shrink: 1; overflow: hidden; }
+.log-id > * { white-space: nowrap; }
+.log-provider, .log-model, .log-mapping { overflow: hidden; text-overflow: ellipsis; }
 .log-dur { font-family: 'SF Mono',monospace; }
+.log-dur { flex-shrink: 0; }
+.log-data { display: flex; align-items: center; gap: 12px; margin-top: 2px; font-size: 11px; flex-wrap: nowrap; min-width: 0; }
+.log-data > * { white-space: nowrap; flex-shrink: 0; }
 .log-tokens { font-family: 'SF Mono',monospace; color: var(--accent); }
 .log-cache { font-family: 'SF Mono',monospace; color: #34d399; }
 .log-body-size { font-family: 'SF Mono',monospace; color: #f59e0b; font-size: 11px; }
+.log-speed { font-family: 'SF Mono',monospace; color: #38bdf8; }
 .log-mapping { font-family: 'SF Mono',monospace; color: #8b5cf6; font-size: 11px; }
 .log-err { font-size: 12px; color: var(--danger); margin-top: 3px; }
 .log-detail { margin-top: 6px; }
