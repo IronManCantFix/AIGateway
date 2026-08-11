@@ -131,6 +131,7 @@
       "avgPerDay": "Avg per day",
       "requests30d": "30-day requests",
       "tokens30d": "30-day tokens",
+      "cached30d": "30-day cached",
       "empty": "No data",
       "colModel": "Model",
       "colCount": "Calls",

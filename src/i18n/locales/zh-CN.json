@@ -131,6 +131,7 @@
       "avgPerDay": "日均请求",
       "requests30d": "30 天请求",
       "tokens30d": "30 天 Token",
+      "cached30d": "30 天缓存",
       "empty": "暂无数据",
       "colModel": "模型",
       "colCount": "调用次数",
