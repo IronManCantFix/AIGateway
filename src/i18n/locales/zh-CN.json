@@ -131,6 +131,7 @@
       "avgPerDay": "日均请求",
       "requests30d": "30 天请求",
       "tokens30d": "30 天 Token",
+      "cached30d": "30 天缓存",
       "empty": "暂无数据",
       "colModel": "模型",
       "colCount": "调用次数",
@@ -213,7 +214,8 @@
       "portFreed": "端口 {port} 已释放",
       "themeSaveFailed": "主题保存失败",
       "updateDownloaded": "下载完成，正在打开安装…",
-      "updateDownloadFailed": "下载失败，请前往 GitHub 手动下载"
+      "updateDownloadFailed": "下载失败，请前往 GitHub 手动下载",
+      "updateAvailable": "发现新版本 v{version} 可用"
     },
     "chart": {
       "monthsShort": "1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月",

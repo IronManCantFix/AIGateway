@@ -131,6 +131,7 @@
       "avgPerDay": "Avg per day",
       "requests30d": "30-day requests",
       "tokens30d": "30-day tokens",
+      "cached30d": "30-day cached",
       "empty": "No data",
       "colModel": "Model",
       "colCount": "Calls",
@@ -213,7 +214,8 @@
       "portFreed": "Port {port} freed",
       "themeSaveFailed": "Failed to save theme",
       "updateDownloaded": "Download complete, opening installer…",
-      "updateDownloadFailed": "Download failed, please download manually from GitHub"
+      "updateDownloadFailed": "Download failed, please download manually from GitHub",
+      "updateAvailable": "New version v{version} available"
     },
     "chart": {
       "monthsShort": "Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec",

@@ -127,6 +127,10 @@ pub struct LogEntry {
     pub completion_tokens: Option<u64>,
     #[serde(rename = "totalTokens", default)]
     pub total_tokens: Option<u64>,
+    #[serde(rename = "cachedTokens", default)]
+    pub cached_tokens: Option<u64>,
+    #[serde(rename = "cacheHitRate", default)]
+    pub cache_hit_rate: Option<f64>,
     #[serde(rename = "upstreamUrl", default)]
     pub upstream_url: Option<String>,
     #[serde(default)]
@@ -234,6 +238,8 @@ pub struct AggregatedStats {
     pub daily_counts: std::collections::HashMap<String, u64>,
     #[serde(default)]
     pub daily_tokens: std::collections::HashMap<String, u64>,
+    #[serde(default)]
+    pub daily_cached_tokens: std::collections::HashMap<String, u64>,
 }
 
 // --- Config Store ---
@@ -613,7 +619,8 @@ impl ConfigStore {
 
         let date = chrono_date(entry.timestamp);
         *stats.daily_counts.entry(date.clone()).or_insert(0) += 1;
-        *stats.daily_tokens.entry(date).or_insert(0) += entry.total_tokens.unwrap_or(0);
+        *stats.daily_tokens.entry(date.clone()).or_insert(0) += entry.total_tokens.unwrap_or(0);
+        *stats.daily_cached_tokens.entry(date).or_insert(0) += entry.cached_tokens.unwrap_or(0);
 
         self.write_json("aggregated-stats.json", &stats)
     }
@@ -696,7 +703,8 @@ impl ConfigStore {
             let date = (today - chrono::Duration::days(i)).format("%Y-%m-%d").to_string();
             let count = stats.daily_counts.get(&date).copied().unwrap_or(0);
             let tokens = stats.daily_tokens.get(&date).copied().unwrap_or(0);
-            trend.push(serde_json::json!({ "date": date, "count": count, "tokens": tokens }));
+            let cached = stats.daily_cached_tokens.get(&date).copied().unwrap_or(0);
+            trend.push(serde_json::json!({ "date": date, "count": count, "tokens": tokens, "cached": cached }));
         }
 
         let by_provider_model: Vec<serde_json::Value> = stats.provider_model_counts.iter().map(|(provider, models)| {
@@ -737,6 +745,7 @@ impl ConfigStore {
             "trend": trend,
             "yearMap": stats.daily_counts,
             "yearMapTokens": stats.daily_tokens,
+            "yearMapCachedTokens": stats.daily_cached_tokens,
             "byProviderModel": by_provider_model,
             "byProviderTokens": by_provider_tokens,
             "byModel": by_model,

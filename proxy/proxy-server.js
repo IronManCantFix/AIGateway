@@ -23,6 +23,7 @@ import {
   setReasoningCache
 } from './protocol-converters.js'
 import { parseMultipartFields } from './multipart-scanner.js'
+import { normalizeUsage, parseUsageFromResponse, estimateRequestTokens } from './token-usage.js'
 
 
 // --- State ---
@@ -835,6 +836,58 @@ function selectRoundRobinForModel(requestedModel, profiles) {
   return profiles[idx]
 }
 
+// 调用 Anthropic 原生上游的 /v1/messages/count_tokens 获取精确计数。
+// 仅当 profile 上游为 Anthropic Messages 协议时可用，失败时由调用方回退本地估算。
+function countTokensUpstream(profile, body) {
+  return new Promise((resolve, reject) => {
+    const meta = PROVIDER_META[profile.providerType]
+    const baseUrl = (profile.baseUrl || '').replace(/\/+$/, '').replace(/\/v1$/, '')
+    const parsed = new URL(`${baseUrl}/v1/messages/count_tokens`)
+    const isHttps = parsed.protocol === 'https:'
+    const transport = isHttps ? https : http
+    const proxyConfig = currentConfig?.settings?.httpProxy
+    const agent = createProxyAgent(proxyConfig, isHttps, profile.id)
+    const bodyBuf = Buffer.from(JSON.stringify(body))
+    const options = {
+      hostname: parsed.hostname,
+      port: parsed.port || (isHttps ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      agent,
+      timeout: 5000,
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': bodyBuf.length,
+        'anthropic-version': '2023-06-01',
+        ...(meta.authType === 'x-api-key'
+          ? { 'x-api-key': profile.apiKey }
+          : { 'Authorization': `Bearer ${profile.apiKey}` })
+      }
+    }
+    const upstreamReq = transport.request(options, (upstreamRes) => {
+      const chunks = []
+      upstreamRes.on('data', (c) => chunks.push(c))
+      upstreamRes.on('end', () => {
+        if (upstreamRes.statusCode !== 200) {
+          reject(new Error(`upstream count_tokens status ${upstreamRes.statusCode}`))
+          return
+        }
+        try {
+          const data = JSON.parse(Buffer.concat(chunks).toString())
+          if (typeof data.input_tokens === 'number') resolve(data.input_tokens)
+          else reject(new Error('upstream count_tokens missing input_tokens'))
+        } catch (e) {
+          reject(e)
+        }
+      })
+    })
+    upstreamReq.on('timeout', () => upstreamReq.destroy(new Error('count_tokens timeout')))
+    upstreamReq.on('error', reject)
+    upstreamReq.write(bodyBuf)
+    upstreamReq.end()
+  })
+}
+
 // --- Route: /v1/models ---
 
 // In-flight "please give me the freshest config" requests to the parent
@@ -1164,7 +1217,10 @@ async function handleApiRequest(req, res) {
   }
 
   const needStream = req.headers.accept?.includes('text/event-stream') || body.stream
-  let sseConverter = needStream ? createSSEConverter(source, meta.target) : null
+  // 仅当客户端为 Anthropic、上游为 Chat 时需要估算输入 token，
+  // 用于 message_start 的 usage（OpenAI 上游流式末尾才返回真实 usage）
+  const estimatedInputTokens = source === 'messages' && meta.target === 'chat_completions' ? estimateRequestTokens(body) : 0
+  let sseConverter = needStream ? createSSEConverter(source, meta.target, estimatedInputTokens) : null
   // Same-format chat_completions: convert reasoning_details / <think> tags
   // to reasoning_content for client compatibility (e.g. CherryStudio).
   // Do NOT inject reasoning_split automatically — it's provider-specific
@@ -1284,67 +1340,16 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
   // 解析 token 使用量（无论 logEnabled 状态，优先解析）
   if (responseBody) {
     try {
-      let usage = null
-      // 尝试直接解析 JSON（非流式响应）
-      try {
-        const parsed = JSON.parse(responseBody)
-        usage = parsed.usage || parsed.usage_total
-      } catch {
-        // 如果不是 JSON，尝试解析 SSE 格式
-        // SSE 格式：data: {"usage": {...}}\n\n
-        const lines = responseBody.split('\n')
-        // 从后向前查找包含 usage 的最后一个事件
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const line = lines[i].trim()
-          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-            try {
-              const parsed = JSON.parse(line.slice(6))
-              if (parsed.usage) {
-                usage = parsed.usage
-                break
-              }
-              // Anthropic message_delta 格式
-              if (parsed.type === 'message_delta' && parsed.usage) {
-                usage = parsed.usage
-                break
-              }
-            } catch {}
-          }
-        }
-        // 如果还没找到，尝试从多个事件中聚合 token
-        if (!usage) {
-          let inputTokens = 0
-          let outputTokens = 0
-          for (const line of lines) {
-            const trimmed = line.trim()
-            if (trimmed.startsWith('data: ') && trimmed !== 'data: [DONE]') {
-              try {
-                const parsed = JSON.parse(trimmed.slice(6))
-                // Anthropic message_start
-                if (parsed.type === 'message_start' && parsed.message?.usage) {
-                  inputTokens = parsed.message.usage.input_tokens || 0
-                }
-                // Anthropic message_delta
-                if (parsed.type === 'message_delta' && parsed.usage) {
-                  outputTokens = parsed.usage.output_tokens || 0
-                }
-                // OpenAI chunk 格式
-                if (parsed.usage) {
-                  inputTokens = parsed.usage.prompt_tokens || parsed.usage.input_tokens || inputTokens
-                  outputTokens = parsed.usage.completion_tokens || parsed.usage.output_tokens || outputTokens
-                }
-              } catch {}
-            }
-          }
-          if (inputTokens > 0 || outputTokens > 0) {
-            usage = { prompt_tokens: inputTokens, completion_tokens: outputTokens, total_tokens: inputTokens + outputTokens }
-          }
-        }
-      }
+      const usage = parseUsageFromResponse(responseBody)
       if (usage) {
-        data.promptTokens = usage.prompt_tokens || usage.input_tokens || 0
-        data.completionTokens = usage.completion_tokens || usage.output_tokens || 0
-        data.totalTokens = usage.total_tokens || (data.promptTokens + data.completionTokens)
+        data.promptTokens = usage.prompt_tokens
+        data.completionTokens = usage.completion_tokens
+        data.totalTokens = usage.total_tokens
+        data.cachedTokens = usage.cached_tokens || 0
+        // 缓存命中率 = 缓存命中数 / 总输入 token，保留一位小数
+        data.cacheHitRate = usage.prompt_tokens > 0
+          ? Math.round((usage.cached_tokens / usage.prompt_tokens) * 1000) / 10
+          : 0
       }
     } catch {}
   }
@@ -1388,12 +1393,25 @@ const server = http.createServer(async (req, res) => {
       })
       return
     } else if (urlPath === '/v1/messages/count_tokens') {
-      // Anthropic token counting endpoint — return estimated count since upstream providers don't support it
+      // Anthropic token counting endpoint
       rawBody = await readBody(req)
       model = (rawBody && rawBody.model) || '-'
-      // Rough estimate: ~4 chars per token for English, ~2 chars per token for CJK
-      const bodyStr = JSON.stringify(rawBody.messages || [])
-      const inputTokens = Math.ceil(bodyStr.length / 3)
+      // 优先使用上游真实计数：Anthropic 原生上游支持 count_tokens 端点；
+      // 非 Anthropic 上游或调用失败时，回退到本地估算（接口返回为空才函数计算）
+      let inputTokens = null
+      if (rawBody && currentConfig && Array.isArray(currentConfig.profiles)) {
+        const candidates = model ? getProfilesForModel(model, 'messages') : []
+        const profile = candidates[0]
+        if (profile && PROVIDER_META[profile.providerType]?.target === 'messages') {
+          try {
+            inputTokens = await countTokensUpstream(profile, rawBody)
+          } catch {}
+        }
+      }
+      if (inputTokens == null) {
+        // 按语言加权估算：CJK 约 1 token/字，其余约 1 token/4 字符
+        inputTokens = estimateRequestTokens(rawBody)
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ input_tokens: inputTokens }))
       logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-', { method: req.method })

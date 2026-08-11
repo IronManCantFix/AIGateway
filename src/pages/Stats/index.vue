@@ -120,7 +120,7 @@ function niceMax(v) {
 }
 
 const trendData = computed(() => {
-  if (!stats.value||!stats.value.trend.length) return {reqPath:'',reqFill:'',tokPath:'',tokFill:'',circles:[],tokCircles:[],maxCount:1,maxTokens:1,total:0,totalTokens:0,yTicks:[],yTicksTok:[]}
+  if (!stats.value||!stats.value.trend.length) return {reqPath:'',reqFill:'',tokPath:'',tokFill:'',circles:[],tokCircles:[],maxCount:1,maxTokens:1,total:0,totalTokens:0,totalCached:0,yTicks:[],yTicksTok:[]}
   const d=stats.value.trend
   const rawMc=Math.max(...d.map(x=>x.count),1)
   const rawMt=Math.max(...d.map(x=>x.tokens),1)
@@ -129,11 +129,12 @@ const trendData = computed(() => {
   const w=CHART_W-PAD_L-PAD_R; const h=CHART_H-PAD_T-PAD_B
   const total=d.reduce((s,x)=>s+x.count,0)
   const totalTokens=d.reduce((s,x)=>s+x.tokens,0)
+  const totalCached=d.reduce((s,x)=>s+(x.cached||0),0)
 
   const reqPts=d.map((x,i)=>({
     x:PAD_L+(i/Math.max(d.length-1,1))*w,
     y:PAD_T+h-(x.count/mc)*h,
-    count:x.count,tokens:x.tokens,date:x.date
+    count:x.count,tokens:x.tokens,cached:x.cached||0,date:x.date
   }))
   const reqPath=smoothPath(reqPts)
   const reqFill=reqPath+` L${reqPts[reqPts.length-1].x},${CHART_H-PAD_B} L${reqPts[0].x},${CHART_H-PAD_B} Z`
@@ -141,14 +142,14 @@ const trendData = computed(() => {
   const tokPts=d.map((x,i)=>({
     x:PAD_L+(i/Math.max(d.length-1,1))*w,
     y:PAD_T+h-(x.tokens/mt)*h,
-    count:x.count,tokens:x.tokens,date:x.date
+    count:x.count,tokens:x.tokens,cached:x.cached||0,date:x.date
   }))
   const tokPath=smoothPath(tokPts)
   const tokFill=tokPath+` L${tokPts[tokPts.length-1].x},${CHART_H-PAD_B} L${tokPts[0].x},${CHART_H-PAD_B} Z`
 
   const yTicks=[0,Math.round(mc/2),mc]
   const yTicksTok=[0,Math.round(mt/2),mt]
-  return {reqPath,reqFill,tokPath,tokFill,circles:reqPts,tokCircles:tokPts,maxCount:mc,maxTokens:mt,total,totalTokens,yTicks,yTicksTok}
+  return {reqPath,reqFill,tokPath,tokFill,circles:reqPts,tokCircles:tokPts,maxCount:mc,maxTokens:mt,total,totalTokens,totalCached,yTicks,yTicksTok}
 })
 
 const providerTokenMap = computed(() => {
@@ -259,7 +260,7 @@ onMounted(() => {
                 <template v-for="col in heatmapData.columns" :key="col[0].date">
                   <span v-for="day in col" :key="day.date"
                     class="heat-cell" :style="{ background: day.color }"
-                    @mouseenter="heatHover = (() => { const r = $event.target.getBoundingClientRect(); return { date: day.date, count: day.count, mode: heatMode, left: r.left + r.width / 2, top: r.top } })()"
+                    @mouseenter="heatHover = (() => { const r = $event.target.getBoundingClientRect(); return { date: day.date, count: day.count, cached: (stats.yearMapCachedTokens || {})[day.date] || 0, mode: heatMode, left: r.left + r.width / 2, top: r.top } })()"
                     @mouseleave="heatHover = null"></span>
                 </template>
               </div>
@@ -268,7 +269,7 @@ onMounted(() => {
                   <div v-if="heatHover" class="heat-tooltip"
                     :style="{ left: heatHover.left + 'px', top: heatHover.top + 'px' }">
                     <div class="heat-tip-date">{{ heatHover.date }}</div>
-                    <div class="heat-tip-val">{{ heatHover.mode === 'tokens' ? $t('settings.chart.tokenCountWithUnit', { count: fmtTok(heatHover.count) }) : $t('settings.chart.requestCountWithUnit', { count: heatHover.count }) }}</div>
+                    <div class="heat-tip-val"><template v-if="heatHover.mode === 'tokens'">{{ $t('settings.chart.tokenCountWithUnit', { count: fmtTok(heatHover.count) }) }}<span v-if="heatHover.cached"> · 缓存 {{ fmtTok(heatHover.cached) }}</span></template><template v-else>{{ $t('settings.chart.requestCountWithUnit', { count: heatHover.count }) }}</template></div>
                   </div>
                 </Transition>
               </Teleport>
@@ -291,6 +292,10 @@ onMounted(() => {
               <div class="trend-stat">
                 <span class="trend-val token-color">{{ fmtTok(trendData.totalTokens) }}</span>
                 <span class="trend-lbl">{{ $t('settings.label.tokens30d') }}</span>
+              </div>
+              <div class="trend-stat" v-if="trendData.totalCached">
+                <span class="trend-val cache-color">{{ fmtTok(trendData.totalCached) }}</span>
+                <span class="trend-lbl">{{ $t('settings.label.cached30d') }}</span>
               </div>
               <div class="trend-stat">
                 <span class="trend-val">{{ Math.round(trendData.total / Math.max(stats.trend.length, 1)) }}</span>
@@ -354,9 +359,9 @@ onMounted(() => {
                 
                 <g v-if="trendHover">
                   <line :x1="trendHover.x" :y1="PAD_T" :x2="trendHover.x" :y2="CHART_H-PAD_B" stroke="var(--chart-grid)" stroke-width="0.5" stroke-dasharray="3,3"/>
-                  <rect :x="Math.min(trendHover.x+8, CHART_W-PAD_R-100)" :y="Math.max(PAD_T, trendHover.y-36)" width="96" height="30" rx="6" fill="var(--chart-tooltip-bg)"/>
-                  <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-94)" :y="Math.max(PAD_T+10, trendHover.y-24)" fill="var(--chart-tooltip-text)" font-size="10" font-family="SF Mono, monospace">{{ trendHover.date.slice(5) }}</text>
-                  <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-94)" :y="Math.max(PAD_T+22, trendHover.y-12)" fill="var(--chart-tooltip-muted)" font-size="9" font-family="SF Mono, monospace">{{ $t('settings.chart.trendCount', { count: trendHover.count }) }} / {{ fmtTok(trendHover.tokens) }}</text>
+                  <rect :x="Math.min(trendHover.x+8, CHART_W-PAD_R-130)" :y="Math.max(PAD_T, trendHover.y-36)" width="130" height="30" rx="6" fill="var(--chart-tooltip-bg)"/>
+                  <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-124)" :y="Math.max(PAD_T+10, trendHover.y-24)" fill="var(--chart-tooltip-text)" font-size="10" font-family="SF Mono, monospace">{{ trendHover.date.slice(5) }}</text>
+                  <text :x="Math.min(trendHover.x+14, CHART_W-PAD_R-124)" :y="Math.max(PAD_T+22, trendHover.y-12)" fill="var(--chart-tooltip-muted)" font-size="9" font-family="SF Mono, monospace">{{ $t('settings.chart.trendCount', { count: trendHover.count }) }} / {{ fmtTok(trendHover.tokens) }}<tspan v-if="trendHover.cached"> / 缓存 {{ fmtTok(trendHover.cached) }}</tspan></text>
                 </g>
               </svg>
             </div>
@@ -469,6 +474,7 @@ onMounted(() => {
 .trend-stat { text-align: center; }
 .trend-val { font-size: 20px; font-weight: 700; color: var(--text-primary); font-family: 'SF Mono',monospace; }
 .trend-val.token-color { background: linear-gradient(135deg, #f59e0b, #f97316); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.trend-val.cache-color { background: linear-gradient(135deg, #34d399, #10b981); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
 .trend-lbl { font-size: 11px; color: var(--text-muted); display: block; margin-top: 2px; }
 .chart-legend { display: flex; justify-content: center; gap: 20px; margin-bottom: 12px; }
 .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }

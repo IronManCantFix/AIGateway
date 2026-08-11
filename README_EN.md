@@ -83,7 +83,6 @@ After adding available models, the home page displays all currently available mo
 Enable the config, click "Start" proxy. Then point your tools to `http://127.0.0.1:9999`.
 
 ![2.png](images/2.png)
-![1.png](images/1.png)
 
 ### 2️⃣ Use with Codex CLI or Desktop
 
@@ -129,6 +128,7 @@ Supported proxy endpoints (`/v1` prefix optional, both `/chat/completions` and `
 ### 📠 System Tray
 
 Closing the window minimizes the app to the system tray. Right-click the tray icon to quickly start/stop the proxy or quit the app.
+![1.png](images/1.png)
 
 ## 📊 Logs & Statistics
 
@@ -138,7 +138,7 @@ The Settings page provides multi-dimensional request statistics and log viewing.
 
 The top section shows three core metrics: **Total Requests**, **Token Consumption** (Prompt / Completion breakdown), **Daily Average Requests**.
 
-![3.png](images/3.png)
+![6.png](images/6.png)
 
 ### Trend Analysis
 
@@ -162,6 +162,8 @@ The log page records every proxy request, supporting:
 - Requests through HTTP proxy show a blue `PROXY` badge
 - Requests with model mapping show `original_model → mapped_model | provider`
 - **404 (route not matched) requests** additionally record: HTTP method, the `model` extracted from the request body, and full request/response bodies (without enabling debug logging), making it easier to diagnose clients hitting wrong endpoints or sending malformed payloads
+
+![7.png](images/7.png)
 
 ### Debug Logging
 
