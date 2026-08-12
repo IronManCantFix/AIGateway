@@ -35,12 +35,19 @@ const httpProxyEnabled = computed(() => !!settings.value?.httpProxy?.enabled)
 
 const todayCount = computed(() => stats.value?.today?.count ?? 0)
 const todayTokens = computed(() => stats.value?.today?.tokens ?? 0)
+const speedStats = computed(() => stats.value?.today?.speed ?? null)
 
 function fmtTokens(n) {
   if (n == null) return '—'
   if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M'
   if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'K'
   return String(n)
+}
+
+function fmtSpeed(n) {
+  if (n == null || !isFinite(n)) return '—'
+  const v = n >= 100 ? Math.round(n) : Math.round(n * 10) / 10
+  return `${v} tok/s`
 }
 
 function fmtRelative(ts) {
@@ -244,6 +251,18 @@ onBeforeUnmount(() => {
         <div class="stat-num tok">{{ fmtTokens(todayTokens) }}</div>
         <div class="stat-label">{{ $t('panel.todayTokens') }}</div>
       </div>
+      <div class="stat-card">
+        <div class="stat-num speed">{{ fmtSpeed(speedStats?.max) }}</div>
+        <div class="stat-label">{{ $t('panel.speedMax') }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num speed">{{ fmtSpeed(speedStats?.min) }}</div>
+        <div class="stat-label">{{ $t('panel.speedMin') }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num speed">{{ fmtSpeed(speedStats?.avg) }}</div>
+        <div class="stat-label">{{ $t('panel.speedAvg') }}</div>
+      </div>
     </section>
 
     <section class="recent">
@@ -412,12 +431,13 @@ onBeforeUnmount(() => {
 
 .stats {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 10px;
 }
 
 .stat-card {
-  flex: 1;
+  flex: 1 1 30%;
   padding: 12px 14px;
   border-radius: var(--radius-md);
   background: var(--bg-card);
@@ -436,6 +456,12 @@ onBeforeUnmount(() => {
 }
 .stat-num.tok {
   color: #f59e0b;
+}
+
+.stat-num.speed {
+  font-size: 14px;
+  color: var(--text-primary);
+  white-space: nowrap;
 }
 
 .stat-label {
@@ -610,4 +636,3 @@ body::-webkit-scrollbar {
 }
 
 </style>
-

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 // --- Data Types ---
 
@@ -214,6 +215,33 @@ pub struct LogsPage {
     pub total: usize,
 }
 
+/// 某天输出 token 速度（tokens/s = completionTokens / 耗时秒）聚合。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DailySpeed {
+    #[serde(default)]
+    pub max: f64,
+    #[serde(default)]
+    pub min: Option<f64>,
+    #[serde(default)]
+    pub total_tokens: u64,
+    #[serde(default)]
+    pub total_duration_ms: u64,
+}
+
+impl DailySpeed {
+    fn add(&mut self, ct: u64, dur_ms: u64) {
+        self.total_tokens += ct;
+        self.total_duration_ms += dur_ms;
+        let speed = ct as f64 / (dur_ms as f64 / 1000.0);
+        if speed > self.max {
+            self.max = speed;
+        }
+        if self.min.map_or(true, |m| speed < m) {
+            self.min = Some(speed);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AggregatedStats {
     #[serde(default)]
@@ -240,7 +268,12 @@ pub struct AggregatedStats {
     pub daily_tokens: std::collections::HashMap<String, u64>,
     #[serde(default)]
     pub daily_cached_tokens: std::collections::HashMap<String, u64>,
+    #[serde(default)]
+    pub daily_speed: std::collections::HashMap<String, DailySpeed>,
 }
+
+/// 记录"今日速度统计已回填"的日期，每天最多从日志回填一次。
+static SPEED_BACKFILL_DATE: Mutex<Option<String>> = Mutex::new(None);
 
 // --- Config Store ---
 
@@ -620,7 +653,14 @@ impl ConfigStore {
         let date = chrono_date(entry.timestamp);
         *stats.daily_counts.entry(date.clone()).or_insert(0) += 1;
         *stats.daily_tokens.entry(date.clone()).or_insert(0) += entry.total_tokens.unwrap_or(0);
-        *stats.daily_cached_tokens.entry(date).or_insert(0) += entry.cached_tokens.unwrap_or(0);
+        *stats.daily_cached_tokens.entry(date.clone()).or_insert(0) += entry.cached_tokens.unwrap_or(0);
+
+        // 输出 token 速度（tokens/s），仅统计有 completion 且耗时有效的请求
+        if let Some(ct) = entry.completion_tokens {
+            if ct > 0 && entry.duration > 0 {
+                stats.daily_speed.entry(date).or_default().add(ct, entry.duration);
+            }
+        }
 
         self.write_json("aggregated-stats.json", &stats)
     }
@@ -694,8 +734,77 @@ impl ConfigStore {
         (count, tokens)
     }
 
+    /// 升级后当天可能已有请求但聚合文件里还没有速度统计，从日志回填一次。
+    fn backfill_today_speed_if_needed(&self, stats: &mut AggregatedStats) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let today = chrono_date(now);
+
+        let mut guard = SPEED_BACKFILL_DATE.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.as_deref() == Some(today.as_str()) {
+            return;
+        }
+        guard.replace(today.clone());
+
+        let today_count = stats.daily_counts.get(&today).copied().unwrap_or(0);
+        let already_has_speed = stats.daily_speed.get(&today).map_or(false, |d| d.total_tokens > 0);
+        if today_count == 0 || already_has_speed {
+            return;
+        }
+        if let Some(speed) = self.scan_today_speed() {
+            stats.daily_speed.insert(today, speed);
+            let _ = self.write_json("aggregated-stats.json", stats);
+        }
+    }
+
+    /// 扫描今天的日志，重新计算输出 token 速度聚合（用于升级后的回填）。
+    fn scan_today_speed(&self) -> Option<DailySpeed> {
+        let path = self.logs_jsonl_path();
+        if !path.exists() {
+            return None;
+        }
+        let day_start = chrono::Local::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_local_timezone(chrono::Local)
+            .unwrap()
+            .timestamp_millis() as u64;
+        let day_end = day_start + 86_400_000;
+
+        let mut speed = DailySpeed::default();
+        let file = fs::File::open(&path).ok()?;
+        for line in BufReader::new(file).lines().map_while(Result::ok) {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(entry) = serde_json::from_str::<LogEntry>(&line) else {
+                continue;
+            };
+            if entry.timestamp < day_start || entry.timestamp >= day_end {
+                continue;
+            }
+            if entry.status_code != 200 || Self::is_non_relay_endpoint(&entry.endpoint) {
+                continue;
+            }
+            if let Some(ct) = entry.completion_tokens {
+                if ct > 0 && entry.duration > 0 {
+                    speed.add(ct, entry.duration);
+                }
+            }
+        }
+        if speed.total_tokens == 0 {
+            None
+        } else {
+            Some(speed)
+        }
+    }
+
     pub fn get_stats(&self) -> serde_json::Value {
-        let stats: AggregatedStats = self.read_json("aggregated-stats.json");
+        let mut stats: AggregatedStats = self.read_json("aggregated-stats.json");
+        self.backfill_today_speed_if_needed(&mut stats);
 
         let today = chrono::Local::now().date_naive();
         let mut trend = Vec::new();
@@ -732,11 +841,23 @@ impl ConfigStore {
         }).collect();
 
         let (today_count, today_tokens) = self.get_today_stats();
+        let today_str = today.to_string();
+        let today_speed = stats.daily_speed.get(&today_str).cloned().unwrap_or_default();
+        let today_speed_json = if today_speed.total_tokens > 0 {
+            serde_json::json!({
+                "max": today_speed.max,
+                "min": today_speed.min.unwrap_or(0.0),
+                "avg": (today_speed.total_tokens as f64) / (today_speed.total_duration_ms as f64 / 1000.0),
+            })
+        } else {
+            serde_json::json!({ "max": null, "min": null, "avg": null })
+        };
 
         serde_json::json!({
             "today": {
                 "count": today_count,
                 "tokens": today_tokens,
+                "speed": today_speed_json,
             },
             "totalRequests": stats.total_requests,
             "totalTokens": stats.total_tokens,
