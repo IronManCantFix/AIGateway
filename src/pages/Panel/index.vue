@@ -253,6 +253,9 @@ onBeforeUnmount(() => {
         <div class="stat-num tok">{{ fmtTokens(todayTokens) }}</div>
         <div class="stat-label">{{ $t('panel.todayTokens') }}</div>
       </div>
+    </section>
+
+    <section class="speed-stats">
       <div class="stat-card">
         <div class="stat-num speed">{{ fmtSpeed(speedStats?.max) }}</div>
         <div class="stat-label">{{ $t('panel.speedMax') }}</div>
@@ -433,13 +436,18 @@ onBeforeUnmount(() => {
 
 .stats {
   display: flex;
-  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.speed-stats {
+  display: flex;
   gap: 8px;
   margin-bottom: 10px;
 }
 
 .stat-card {
-  flex: 1 1 30%;
+  flex: 1;
   padding: 12px 14px;
   border-radius: var(--radius-md);
   background: var(--bg-card);
