@@ -113,11 +113,13 @@ async function fitWindow() {
 }
 
 async function loadAll() {
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
   const [s, st, agg, lg] = await Promise.all([
     api.getSettings(),
     api.getProxyStatus(),
     api.getStats(),
-    api.getLogs(50)
+    api.getLogs(500, 0, { dateFrom: todayStart.getTime(), statusClass: '2xx' })
   ])
   settings.value = s
   status.value = st
