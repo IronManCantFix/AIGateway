@@ -226,18 +226,30 @@ pub struct DailySpeed {
     pub total_tokens: u64,
     #[serde(default)]
     pub total_duration_ms: u64,
+    #[serde(default)]
+    pub max_provider: String,
+    #[serde(default)]
+    pub max_model: String,
+    #[serde(default)]
+    pub min_provider: String,
+    #[serde(default)]
+    pub min_model: String,
 }
 
 impl DailySpeed {
-    fn add(&mut self, ct: u64, dur_ms: u64) {
+    fn add(&mut self, ct: u64, dur_ms: u64, provider: &str, model: &str) {
         self.total_tokens += ct;
         self.total_duration_ms += dur_ms;
         let speed = ct as f64 / (dur_ms as f64 / 1000.0);
         if speed > self.max {
             self.max = speed;
+            self.max_provider = provider.to_string();
+            self.max_model = model.to_string();
         }
         if self.min.map_or(true, |m| speed < m) {
             self.min = Some(speed);
+            self.min_provider = provider.to_string();
+            self.min_model = model.to_string();
         }
     }
 }
@@ -658,7 +670,9 @@ impl ConfigStore {
         // 输出 token 速度（tokens/s），仅统计有 completion 且耗时有效的请求
         if let Some(ct) = entry.completion_tokens {
             if ct > 0 && entry.duration > 0 {
-                stats.daily_speed.entry(date).or_default().add(ct, entry.duration);
+                let prov = if entry.provider.is_empty() { "-" } else { &entry.provider };
+                let mdl = if entry.model.is_empty() { "-" } else { &entry.model };
+                stats.daily_speed.entry(date).or_default().add(ct, entry.duration, prov, mdl);
             }
         }
 
@@ -749,8 +763,11 @@ impl ConfigStore {
         guard.replace(today.clone());
 
         let today_count = stats.daily_counts.get(&today).copied().unwrap_or(0);
-        let already_has_speed = stats.daily_speed.get(&today).map_or(false, |d| d.total_tokens > 0);
-        if today_count == 0 || already_has_speed {
+        // 旧版本聚合可能缺少最高/最低速度对应的提供商与模型，此时也需要回填
+        let need_backfill = stats.daily_speed.get(&today).map_or(true, |d| {
+            d.total_tokens == 0 || d.max_provider.is_empty() || d.min_provider.is_empty()
+        });
+        if today_count == 0 || !need_backfill {
             return;
         }
         if let Some(speed) = self.scan_today_speed() {
@@ -791,7 +808,9 @@ impl ConfigStore {
             }
             if let Some(ct) = entry.completion_tokens {
                 if ct > 0 && entry.duration > 0 {
-                    speed.add(ct, entry.duration);
+                    let prov = if entry.provider.is_empty() { "-" } else { &entry.provider };
+                    let mdl = if entry.model.is_empty() { "-" } else { &entry.model };
+                    speed.add(ct, entry.duration, prov, mdl);
                 }
             }
         }
@@ -848,9 +867,13 @@ impl ConfigStore {
                 "max": today_speed.max,
                 "min": today_speed.min.unwrap_or(0.0),
                 "avg": (today_speed.total_tokens as f64) / (today_speed.total_duration_ms as f64 / 1000.0),
+                "maxProvider": today_speed.max_provider,
+                "maxModel": today_speed.max_model,
+                "minProvider": today_speed.min_provider,
+                "minModel": today_speed.min_model,
             })
         } else {
-            serde_json::json!({ "max": null, "min": null, "avg": null })
+            serde_json::json!({ "max": null, "min": null, "avg": null, "maxProvider": null, "maxModel": null, "minProvider": null, "minModel": null })
         };
 
         serde_json::json!({

@@ -259,10 +259,12 @@ onBeforeUnmount(() => {
       <div class="stat-card">
         <div class="stat-num speed">{{ fmtSpeed(speedStats?.max) }}</div>
         <div class="stat-label">{{ $t('panel.speedMax') }}</div>
+        <div class="stat-sub" v-if="speedStats?.maxProvider">{{ speedStats.maxProvider }} · {{ speedStats.maxModel }}</div>
       </div>
       <div class="stat-card">
         <div class="stat-num speed">{{ fmtSpeed(speedStats?.min) }}</div>
         <div class="stat-label">{{ $t('panel.speedMin') }}</div>
+        <div class="stat-sub" v-if="speedStats?.minProvider">{{ speedStats.minProvider }} · {{ speedStats.minModel }}</div>
       </div>
       <div class="stat-card">
         <div class="stat-num speed">{{ fmtSpeed(speedStats?.avg) }}</div>
@@ -477,6 +479,15 @@ onBeforeUnmount(() => {
 .stat-label {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.stat-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
 }
 
 .recent {
