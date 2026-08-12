@@ -47,7 +47,7 @@ function fmtTokens(n) {
 function fmtSpeed(n) {
   if (n == null || !isFinite(n)) return '—'
   const v = n >= 100 ? Math.round(n) : Math.round(n * 10) / 10
-  return `${v} tok/s`
+  return `${v} t/s`
 }
 
 function fmtRelative(ts) {
@@ -97,8 +97,8 @@ function onVisibility() {
   }
 }
 
-// 测量实际内容高度，精确设置窗口大小，最大440px
-const MAX_HEIGHT = 520
+// 测量实际内容高度，精确设置窗口大小
+const MAX_HEIGHT = 620
 async function fitWindow() {
   await nextTick()
   try {
@@ -256,19 +256,17 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="speed-stats">
-      <div class="stat-card">
-        <div class="stat-num speed">{{ fmtSpeed(speedStats?.max) }}</div>
-        <div class="stat-label">{{ $t('panel.speedMax') }}</div>
+      <div class="stat-card speed-card">
+        <div class="speed-row">
+          <span class="stat-label">{{ $t('panel.speedMax') }}</span>
+          <span class="stat-num speed">{{ fmtSpeed(speedStats?.max) }}</span>
+        </div>
         <div class="stat-sub" v-if="speedStats?.maxProvider">{{ speedStats.maxProvider }} · {{ speedStats.maxModel }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num speed">{{ fmtSpeed(speedStats?.min) }}</div>
-        <div class="stat-label">{{ $t('panel.speedMin') }}</div>
-        <div class="stat-sub" v-if="speedStats?.minProvider">{{ speedStats.minProvider }} · {{ speedStats.minModel }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num speed">{{ fmtSpeed(speedStats?.avg) }}</div>
-        <div class="stat-label">{{ $t('panel.speedAvg') }}</div>
+        <div class="speed-divider"></div>
+        <div class="speed-row">
+          <span class="stat-label">{{ $t('panel.speedAvg') }}</span>
+          <span class="stat-num speed">{{ fmtSpeed(speedStats?.avg) }}</span>
+        </div>
       </div>
     </section>
 
@@ -309,7 +307,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0;
   padding: 10px;
-  max-height: 520px;
+  max-height: 620px;
   border-radius: 14px;
   background: var(--bg-base);
   border: 1px solid var(--border);
@@ -448,6 +446,23 @@ onBeforeUnmount(() => {
   margin-bottom: 10px;
 }
 
+.speed-card {
+  gap: 3px;
+}
+
+.speed-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.speed-divider {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--border-subtle);
+}
+
 .stat-card {
   flex: 1;
   min-width: 0;
@@ -484,8 +499,9 @@ onBeforeUnmount(() => {
 .stat-sub {
   font-size: 10px;
   color: var(--text-muted);
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   opacity: 0.8;
 }
 
