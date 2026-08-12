@@ -450,6 +450,7 @@ onBeforeUnmount(() => {
 
 .stat-card {
   flex: 1;
+  min-width: 0;
   padding: 12px 14px;
   border-radius: var(--radius-md);
   background: var(--bg-card);
@@ -473,7 +474,6 @@ onBeforeUnmount(() => {
 .stat-num.speed {
   font-size: 14px;
   color: var(--text-primary);
-  white-space: nowrap;
 }
 
 .stat-label {
@@ -484,9 +484,8 @@ onBeforeUnmount(() => {
 .stat-sub {
   font-size: 10px;
   color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
   opacity: 0.8;
 }
 
