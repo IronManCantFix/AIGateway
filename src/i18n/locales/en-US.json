@@ -92,7 +92,8 @@
       "none": "No LB",
       "roundRobin": "Round Robin",
       "failover": "Failover",
-      "tooltip": "Click to cycle: None → Round Robin → Failover",
+      "providers": "Specific Provider",
+      "tooltip": "Pick a strategy, or pin this model to a specific provider",
       "saved": "Switched to {strategy}"
     }
   },

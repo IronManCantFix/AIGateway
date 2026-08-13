@@ -51,7 +51,7 @@ const aggregatedModels = computed(() => {
     if (Array.isArray(p.models)) {
       for (const m of p.models) {
         if (!modelProviders[m]) modelProviders[m] = []
-        modelProviders[m].push(p.name)
+        modelProviders[m].push({ id: p.id, name: p.name })
       }
     }
   }
@@ -281,31 +281,73 @@ async function addQuickMappings(fromModels) {
 }
 
 // --- Per-model strategy ---
-const STRATEGY_ORDER = ['none', 'round-robin', 'failover']
+const BASE_STRATEGIES = ['none', 'round-robin', 'failover']
+const PROVIDER_STRATEGY_PREFIX = 'provider:'
 
 function strategyLabel(strategy) {
   const map = { 'none': t('home.strategy.none'), 'round-robin': t('home.strategy.roundRobin'), 'failover': t('home.strategy.failover') }
-  return map[strategy] || strategy
+  if (map[strategy]) return map[strategy]
+  if (strategy && strategy.startsWith(PROVIDER_STRATEGY_PREFIX)) {
+    const id = strategy.slice(PROVIDER_STRATEGY_PREFIX.length)
+    const p = profiles.value.find(p => p.id === id)
+    return p ? p.name : t('home.strategy.providers')
+  }
+  return strategy
+}
+
+function strategyClass(strategy) {
+  if (strategy && strategy.startsWith(PROVIDER_STRATEGY_PREFIX)) return 'strategy-provider'
+  return 'strategy-' + strategy
+}
+
+function strategyMenuProviders(modelName) {
+  const item = aggregatedModels.value.find(i => i.model === modelName)
+  return item ? item.providers : []
+}
+
+function providerStrategyId(provider) {
+  return PROVIDER_STRATEGY_PREFIX + provider.id
 }
 
 const strategyMenu = ref(null)      // model name of the open menu
 const strategyMenuPos = ref({ x: 0, y: 0 })
+const strategyAnchor = ref(null)    // DOM element the menu was opened from
+const strategyMenuEl = ref(null)    // dropdown menu DOM element
 
 function openStrategyMenu(modelName, event) {
   if (strategyMenu.value === modelName) {
-    strategyMenu.value = null
+    closeStrategyMenu()
     return
   }
-  const rect = event.currentTarget.getBoundingClientRect()
-  const menuWidth = 150
-  let x = rect.left
-  if (x + menuWidth > window.innerWidth - 8) x = window.innerWidth - menuWidth - 8
-  strategyMenuPos.value = { x, y: rect.bottom + 6 }
+  strategyAnchor.value = event.currentTarget
   strategyMenu.value = modelName
+  nextTick(updateStrategyMenuPos)
 }
 
 function closeStrategyMenu() {
   strategyMenu.value = null
+  strategyAnchor.value = null
+}
+
+// 根据触发按钮当前视口位置重新定位菜单；按钮滚出视口时关闭菜单
+function updateStrategyMenuPos() {
+  if (!strategyMenu.value || !strategyAnchor.value) return
+  const rect = strategyAnchor.value.getBoundingClientRect()
+  if (rect.top < 0 || rect.bottom > window.innerHeight || rect.left < 0 || rect.right > window.innerWidth) {
+    closeStrategyMenu()
+    return
+  }
+  const menuWidth = 180
+  let x = rect.left
+  if (x + menuWidth > window.innerWidth - 8) x = window.innerWidth - menuWidth - 8
+  let y = rect.bottom + 6
+  const menuEl = strategyMenuEl.value
+  const menuHeight = menuEl ? menuEl.offsetHeight : 0
+  // 下方空间不足时向上弹出，避免超出视口
+  if (y + menuHeight > window.innerHeight - 8 && rect.top - menuHeight - 6 > 0) {
+    y = rect.top - menuHeight - 6
+  }
+  strategyMenuPos.value = { x, y }
 }
 
 async function selectStrategy(modelName, strategy) {
@@ -328,11 +370,14 @@ function onStrategyMenuValue(modelName) {
 function onGlobalClick(e) {
   if (strategyMenu.value && !e.target.closest('.strategy-menu') && !e.target.closest('.strategy-pill')) {
     strategyMenu.value = null
+    strategyAnchor.value = null
   }
 }
 
 onMounted(async () => {
   window.addEventListener('click', onGlobalClick)
+  window.addEventListener('scroll', onStrategyMenuViewportChange, true)
+  window.addEventListener('resize', onStrategyMenuViewportChange)
   await loadData()
   statusUnlisten = await api.onStatusChange((payload) => {
     proxyStatus.value = payload.status
@@ -357,11 +402,18 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('click', onGlobalClick)
+  window.removeEventListener('scroll', onStrategyMenuViewportChange, true)
+  window.removeEventListener('resize', onStrategyMenuViewportChange)
   clearTimeout(mappingSaveTimer)
   statusUnlisten?.()
   toastUnlisten?.()
   refreshUnlisten?.()
 })
+
+function onStrategyMenuViewportChange() {
+  if (!strategyMenu.value) return
+  updateStrategyMenuPos()
+}
 </script>
 
 <template>
@@ -459,9 +511,9 @@ onUnmounted(() => {
           <div v-for="item in aggregatedModels" :key="item.model" class="model-row">
             <span class="model-id">{{ item.model }}</span>
             <div class="model-providers">
-              <span v-for="pv in item.providers" :key="pv" class="provider-tag">{{ pv }}</span>
+              <span v-for="pv in item.providers" :key="pv.id" class="provider-tag">{{ pv.name }}</span>
             </div>
-            <button class="strategy-pill" :class="'strategy-' + item.strategy" @click.stop="openStrategyMenu(item.model, $event)" :title="$t('home.strategy.tooltip')">
+            <button class="strategy-pill" :class="strategyClass(item.strategy)" @click.stop="openStrategyMenu(item.model, $event)" :title="$t('home.strategy.tooltip')">
               <span class="strategy-dot"></span>
               {{ strategyLabel(item.strategy) }}
               <svg class="strategy-chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
@@ -555,11 +607,17 @@ onUnmounted(() => {
   <!-- 策略选择浮层 -->
   <Teleport to="body">
     <div v-if="strategyMenu" class="strategy-menu-overlay" @click.stop="closeStrategyMenu">
-      <div class="strategy-menu" :style="{ top: strategyMenuPos.y + 'px', left: strategyMenuPos.x + 'px' }">
-        <button v-for="s in STRATEGY_ORDER" :key="s" class="strategy-menu-item" :class="{ active: onStrategyMenuValue(strategyMenu) === s }" @click.stop="selectStrategy(strategyMenu, s)">
+      <div ref="strategyMenuEl" class="strategy-menu" :style="{ top: strategyMenuPos.y + 'px', left: strategyMenuPos.x + 'px' }">
+        <button v-for="s in BASE_STRATEGIES" :key="s" class="strategy-menu-item" :class="{ active: onStrategyMenuValue(strategyMenu) === s }" @click.stop="selectStrategy(strategyMenu, s)">
           <span class="strategy-dot" :class="'dot-' + s"></span>
           <span class="strategy-menu-label">{{ strategyLabel(s) }}</span>
           <svg v-if="onStrategyMenuValue(strategyMenu) === s" class="strategy-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+        <div v-if="strategyMenuProviders(strategyMenu).length > 0" class="strategy-menu-sep">{{ $t('home.strategy.providers') }}</div>
+        <button v-for="pv in strategyMenuProviders(strategyMenu)" :key="pv.id" class="strategy-menu-item" :class="{ active: onStrategyMenuValue(strategyMenu) === providerStrategyId(pv) }" @click.stop="selectStrategy(strategyMenu, providerStrategyId(pv))">
+          <span class="strategy-dot dot-provider"></span>
+          <span class="strategy-menu-label">{{ pv.name }}</span>
+          <svg v-if="onStrategyMenuValue(strategyMenu) === providerStrategyId(pv)" class="strategy-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
         </button>
       </div>
     </div>
@@ -1012,9 +1070,16 @@ onUnmounted(() => {
   border: 1px solid rgba(52, 211, 153, 0.15);
 }
 .strategy-failover .strategy-dot { background: var(--success); }
+.strategy-provider {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+}
+.strategy-provider .strategy-dot { background: var(--warning); }
 .dot-none { background: var(--text-muted); }
 .dot-round-robin { background: var(--accent); }
 .dot-failover { background: var(--success); }
+.dot-provider { background: var(--warning); }
 
 .strategy-chevron {
   opacity: .55;
@@ -1034,7 +1099,10 @@ onUnmounted(() => {
 .strategy-menu {
   position: fixed;
   z-index: 9991;
-  min-width: 152px;
+  min-width: 180px;
+  max-width: 240px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -1043,6 +1111,18 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.strategy-menu-sep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 2px 0;
+  padding: 6px 10px 2px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
 }
 .strategy-menu-item {
   display: flex;
@@ -1069,6 +1149,9 @@ onUnmounted(() => {
 }
 .strategy-menu-label {
   flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .strategy-check {
   color: var(--accent);

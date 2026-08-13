@@ -1023,6 +1023,13 @@ async function handleApiRequest(req, res) {
       if (candidates.length > 0) {
         profile = candidates[0]
       }
+    } else if (modelStrategy && modelStrategy.startsWith('provider:')) {
+      // 指定提供商：直接路由到该 profile（需启用且包含此模型）。
+      // 若该提供商已停用/删除/不含此模型，则回退到第一个匹配提供商（等同 'none'）。
+      const targetId = modelStrategy.slice('provider:'.length)
+      if (candidates.length > 0) {
+        profile = candidates.find(p => p.id === targetId) || candidates[0]
+      }
     } else {
       // 'none': use first matching profile (profile list order = priority)
       if (candidates.length > 0) {

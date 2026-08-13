@@ -210,23 +210,25 @@ When multiple providers offer the same model, configure load balancing to optimi
 
 | Strategy | Description |
 |---|---|
+| **No LB** | Use the first matching provider (provider order = priority) |
 | **Round Robin** | Distribute requests evenly across providers |
 | **Failover** | Try providers in order, auto-switch on failure for high availability |
+| **Specific Provider** | Pin the model to one provider, independent of provider ordering |
 
 ### Configuration
 
-1. Find the "Load Balancer" card on the home page
-2. Click "+ Create Load Balancer Group" button
-3. Enter group name (e.g., "GPT-4o Dual Line")
-4. Select strategy (Round Robin or Failover)
-5. Select participating providers (at least 2 required)
-6. Save configuration
+1. Find the model in the "Available Models" list on the home page
+2. Click the strategy button on the right side of the model row
+3. Pick a strategy (No LB / Round Robin / Failover), or pick a provider under "Specific Provider"
+
+> Once pinned to a provider, reordering providers won't affect routing for that model. If the pinned provider is disabled or deleted, it automatically falls back to the "No LB" behavior.
 
 ### Use Cases
 
 - **Multi-account rotation**: Multiple OpenAI accounts with the same model, rotate to avoid rate limiting
 - **Primary-backup switching**: Auto-switch to backup provider on primary failure
 - **Cross-region redundancy**: Providers in different regions as backups for availability
+- **Fixed routing**: Pin a model to a specific provider (e.g., cheaper channel or dedicated account) without reordering providers
 
 ## 🌐 HTTP Proxy
 

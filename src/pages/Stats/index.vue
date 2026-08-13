@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../../api.js'
 
@@ -12,6 +12,31 @@ const statsTab = ref('provider')
 const heatMode = ref('requests')
 const trendHover = ref(null)
 const heatHover = ref(null)
+const heatTipEl = ref(null)
+
+// 热力图悬浮提示：记录格子中心位置，渲染后按实际宽度钳制在视口内
+function setHeatHover(day, mode, rect) {
+  heatHover.value = {
+    date: day.date,
+    count: day.count,
+    cached: (stats.value?.yearMapCachedTokens || {})[day.date] || 0,
+    mode,
+    left: rect.left + rect.width / 2,
+    top: rect.top
+  }
+  nextTick(adjustHeatTipPos)
+}
+
+function adjustHeatTipPos() {
+  const el = heatTipEl.value
+  if (!el || !heatHover.value) return
+  const margin = 8
+  const half = el.offsetWidth / 2
+  let left = heatHover.value.left
+  if (left - half < margin) left = margin + half
+  if (left + half > window.innerWidth - margin) left = window.innerWidth - margin - half
+  if (left !== heatHover.value.left) heatHover.value.left = left
+}
 
 const confirmState = ref({ visible: false, message: '', resolve: null })
 function showConfirm(message) {
@@ -260,13 +285,13 @@ onMounted(() => {
                 <template v-for="col in heatmapData.columns" :key="col[0].date">
                   <span v-for="day in col" :key="day.date"
                     class="heat-cell" :style="{ background: day.color }"
-                    @mouseenter="heatHover = (() => { const r = $event.target.getBoundingClientRect(); return { date: day.date, count: day.count, cached: (stats.yearMapCachedTokens || {})[day.date] || 0, mode: heatMode, left: r.left + r.width / 2, top: r.top } })()"
+                    @mouseenter="setHeatHover(day, heatMode, $event.target.getBoundingClientRect())"
                     @mouseleave="heatHover = null"></span>
                 </template>
               </div>
               <Teleport to="body">
                 <Transition name="fade">
-                  <div v-if="heatHover" class="heat-tooltip"
+                  <div v-if="heatHover" ref="heatTipEl" class="heat-tooltip"
                     :style="{ left: heatHover.left + 'px', top: heatHover.top + 'px' }">
                     <div class="heat-tip-date">{{ heatHover.date }}</div>
                     <div class="heat-tip-val"><template v-if="heatHover.mode === 'tokens'">{{ $t('settings.chart.tokenCountWithUnit', { count: fmtTok(heatHover.count) }) }}<span v-if="heatHover.cached"> · 缓存 {{ fmtTok(heatHover.cached) }}</span></template><template v-else>{{ $t('settings.chart.requestCountWithUnit', { count: heatHover.count }) }}</template></div>
@@ -487,8 +512,7 @@ onMounted(() => {
 .heat-mode-toggle button { padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font-size: 12px; color: var(--text-secondary); cursor: pointer; transition: all .15s; }
 .heat-mode-toggle button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .heat-mode-toggle button.active-tok { background: #f59e0b; color: #fff; border-color: #f59e0b; }
-.heat-tooltip { position: fixed; transform: translate(-50%, -110%); background: var(--bg-card); color: var(--text-primary); padding: 6px 10px; border-radius: 6px; font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 99999; box-shadow: var(--shadow-md); border: 1px solid var(--border); }
-.heat-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 4px solid transparent; border-top-color: rgba(22,31,56,.92); }
+.heat-tooltip { position: fixed; transform: translate(-50%, -100%); background: var(--bg-card); color: var(--text-primary); padding: 6px 10px; border-radius: 6px; font-size: 11px; white-space: nowrap; pointer-events: none; z-index: 99999; box-shadow: var(--shadow-md); border: 1px solid var(--border); }
 .heat-tip-date { color: var(--text-muted); font-size: 10px; margin-bottom: 2px; }
 .heat-tip-val { font-weight: 600; font-family: 'SF Mono',monospace; }
 
