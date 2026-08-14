@@ -279,6 +279,8 @@ pub struct AggregatedStats {
     #[serde(default)]
     pub daily_tokens: std::collections::HashMap<String, u64>,
     #[serde(default)]
+    pub daily_prompt_tokens: std::collections::HashMap<String, u64>,
+    #[serde(default)]
     pub daily_cached_tokens: std::collections::HashMap<String, u64>,
     #[serde(default)]
     pub daily_speed: std::collections::HashMap<String, DailySpeed>,
@@ -286,6 +288,8 @@ pub struct AggregatedStats {
 
 /// 记录"今日速度统计已回填"的日期，每天最多从日志回填一次。
 static SPEED_BACKFILL_DATE: Mutex<Option<String>> = Mutex::new(None);
+/// 记录"今日缓存统计已回填"的日期，每天最多从日志回填一次。
+static CACHE_BACKFILL_DATE: Mutex<Option<String>> = Mutex::new(None);
 
 // --- Config Store ---
 
@@ -665,6 +669,7 @@ impl ConfigStore {
         let date = chrono_date(entry.timestamp);
         *stats.daily_counts.entry(date.clone()).or_insert(0) += 1;
         *stats.daily_tokens.entry(date.clone()).or_insert(0) += entry.total_tokens.unwrap_or(0);
+        *stats.daily_prompt_tokens.entry(date.clone()).or_insert(0) += entry.prompt_tokens.unwrap_or(0);
         *stats.daily_cached_tokens.entry(date.clone()).or_insert(0) += entry.cached_tokens.unwrap_or(0);
 
         // 输出 token 速度（tokens/s），仅统计有 completion 且耗时有效的请求
@@ -821,9 +826,74 @@ impl ConfigStore {
         }
     }
 
+    /// 升级后当天可能已有请求但聚合文件里缺少缓存 token / prompt token 统计，从日志回填一次。
+    fn backfill_today_cache_if_needed(&self, stats: &mut AggregatedStats) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let today = chrono_date(now);
+
+        let mut guard = CACHE_BACKFILL_DATE.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.as_deref() == Some(today.as_str()) {
+            return;
+        }
+        guard.replace(today.clone());
+
+        let today_count = stats.daily_counts.get(&today).copied().unwrap_or(0);
+        // 旧版本聚合缺少 daily_prompt_tokens，此时需要从日志回填
+        let need_backfill = !stats.daily_prompt_tokens.contains_key(&today);
+        if today_count == 0 || !need_backfill {
+            return;
+        }
+        if let Some((prompt, cached)) = self.scan_today_cache() {
+            stats.daily_prompt_tokens.insert(today.clone(), prompt);
+            stats.daily_cached_tokens.insert(today, cached);
+            let _ = self.write_json("aggregated-stats.json", stats);
+        }
+    }
+
+    /// 扫描今天的日志，重新计算今日 prompt token 与缓存 token（用于升级后的回填）。
+    fn scan_today_cache(&self) -> Option<(u64, u64)> {
+        let path = self.logs_jsonl_path();
+        if !path.exists() {
+            return None;
+        }
+        let day_start = chrono::Local::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_local_timezone(chrono::Local)
+            .unwrap()
+            .timestamp_millis() as u64;
+        let day_end = day_start + 86_400_000;
+
+        let mut prompt = 0u64;
+        let mut cached = 0u64;
+        let file = fs::File::open(&path).ok()?;
+        for line in BufReader::new(file).lines().map_while(Result::ok) {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(entry) = serde_json::from_str::<LogEntry>(&line) else {
+                continue;
+            };
+            if entry.timestamp < day_start || entry.timestamp >= day_end {
+                continue;
+            }
+            if entry.status_code != 200 || Self::is_non_relay_endpoint(&entry.endpoint) {
+                continue;
+            }
+            prompt += entry.prompt_tokens.unwrap_or(0);
+            cached += entry.cached_tokens.unwrap_or(0);
+        }
+        Some((prompt, cached))
+    }
+
     pub fn get_stats(&self) -> serde_json::Value {
         let mut stats: AggregatedStats = self.read_json("aggregated-stats.json");
         self.backfill_today_speed_if_needed(&mut stats);
+        self.backfill_today_cache_if_needed(&mut stats);
 
         let today = chrono::Local::now().date_naive();
         let mut trend = Vec::new();
@@ -861,6 +931,13 @@ impl ConfigStore {
 
         let (today_count, today_tokens) = self.get_today_stats();
         let today_str = today.to_string();
+        let today_cached = stats.daily_cached_tokens.get(&today_str).copied().unwrap_or(0);
+        let today_prompt = stats.daily_prompt_tokens.get(&today_str).copied().unwrap_or(0);
+        let cache_hit_rate = if today_prompt > 0 {
+            Some(((today_cached as f64 / today_prompt as f64) * 1000.0).round() / 10.0)
+        } else {
+            None
+        };
         let today_speed = stats.daily_speed.get(&today_str).cloned().unwrap_or_default();
         let today_speed_json = if today_speed.total_tokens > 0 {
             serde_json::json!({
@@ -880,6 +957,8 @@ impl ConfigStore {
             "today": {
                 "count": today_count,
                 "tokens": today_tokens,
+                "cached": today_cached,
+                "cacheHitRate": cache_hit_rate,
                 "speed": today_speed_json,
             },
             "totalRequests": stats.total_requests,

@@ -336,6 +336,8 @@
     "off": "Off",
     "todayCalls": "Today Calls",
     "todayTokens": "Today Tokens",
+    "todayCached": "Cached",
+    "hitRate": "Rate",
     "speedMax": "Max Output Speed",
     "speedMin": "Min Output Speed",
     "speedAvg": "Avg Output Speed",

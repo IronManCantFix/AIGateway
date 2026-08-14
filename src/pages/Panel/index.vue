@@ -35,6 +35,8 @@ const httpProxyEnabled = computed(() => !!settings.value?.httpProxy?.enabled)
 
 const todayCount = computed(() => stats.value?.today?.count ?? 0)
 const todayTokens = computed(() => stats.value?.today?.tokens ?? 0)
+const todayCached = computed(() => stats.value?.today?.cached ?? 0)
+const cacheHitRate = computed(() => stats.value?.today?.cacheHitRate ?? null)
 const speedStats = computed(() => stats.value?.today?.speed ?? null)
 
 function fmtTokens(n) {
@@ -48,6 +50,11 @@ function fmtSpeed(n) {
   if (n == null || !isFinite(n)) return '—'
   const v = n >= 100 ? Math.round(n) : Math.round(n * 10) / 10
   return `${v} t/s`
+}
+
+function fmtRate(n) {
+  if (n == null || !isFinite(n)) return '—'
+  return `${n}%`
 }
 
 function fmtRelative(ts) {
@@ -252,6 +259,11 @@ onBeforeUnmount(() => {
       <div class="stat-card">
         <div class="stat-num tok">{{ fmtTokens(todayTokens) }}</div>
         <div class="stat-label">{{ $t('panel.todayTokens') }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num cache">{{ fmtTokens(todayCached) }}</div>
+        <div class="stat-label">{{ $t('panel.todayCached') }}</div>
+        <div class="stat-sub">{{ $t('panel.hitRate') }} {{ fmtRate(cacheHitRate) }}</div>
       </div>
     </section>
 
@@ -486,6 +498,10 @@ onBeforeUnmount(() => {
   color: #f59e0b;
 }
 
+.stat-num.cache {
+  color: var(--success);
+}
+
 .stat-num.speed {
   font-size: 14px;
   color: var(--text-primary);
@@ -494,6 +510,9 @@ onBeforeUnmount(() => {
 .stat-label {
   font-size: 11px;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stat-sub {
