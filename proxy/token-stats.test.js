@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseUsageFromResponse, normalizeUsage, estimateTokens, estimateRequestTokens } from './token-usage.js'
+import { parseUsageFromResponse, normalizeUsage, estimateTokens, estimateRequestTokens, createIncrementalUsageParser } from './token-usage.js'
 
 test('parses OpenAI Chat non-streaming JSON usage', () => {
   const body = JSON.stringify({
@@ -242,4 +242,72 @@ test('estimateRequestTokens: collects all string fields', () => {
 test('estimateRequestTokens: empty body', () => {
   assert.equal(estimateRequestTokens(null), 0)
   assert.equal(estimateRequestTokens({}), 0)
+})
+
+// --- 增量解析器（流式转发时逐行喂入，避免缓冲整个响应体） ---
+
+function feedStream(collector, body) {
+  // 模拟真实调用方（proxy-server.js）的拆行行为：按 \n 拆成完整行后逐行喂入，
+  // 解析器只负责单行解析，跨 chunk 的行拼接由调用方的 lineBuffer 负责。
+  for (const line of body.split('\n')) {
+    collector.add(line)
+  }
+  return collector
+}
+
+test('incremental parser: Anthropic stream matches full-body parse', () => {
+  const body = [
+    'data: {"type":"message_start","message":{"id":"m1","usage":{"input_tokens":100,"cache_read_input_tokens":80,"output_tokens":0}}}',
+    'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}',
+    'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":20}}'
+  ].join('\n') + '\n'
+  const collector = feedStream(createIncrementalUsageParser(), body)
+  assert.deepEqual(collector.getUsage(), {
+    prompt_tokens: 180,
+    completion_tokens: 20,
+    total_tokens: 200,
+    cached_tokens: 80
+  })
+  assert.deepEqual(collector.getUsage(), parseUsageFromResponse(body))
+})
+
+test('incremental parser: OpenAI stream final chunk usage matches full-body parse', () => {
+  const body = [
+    'data: {"id":"1","choices":[{"delta":{"content":"a"}}]}',
+    'data: {"id":"1","choices":[],"usage":{"prompt_tokens":500,"completion_tokens":80,"total_tokens":580,"prompt_tokens_details":{"cached_tokens":400}}}',
+    'data: [DONE]'
+  ].join('\n\n') + '\n\n'
+  const collector = feedStream(createIncrementalUsageParser(), body)
+  assert.deepEqual(collector.getUsage(), {
+    prompt_tokens: 500,
+    completion_tokens: 80,
+    total_tokens: 580,
+    cached_tokens: 400
+  })
+})
+
+test('incremental parser: Responses usage from response.completed', () => {
+  const body = [
+    'data: {"type":"response.created","response":{"id":"r1"}}',
+    'data: {"type":"response.completed","response":{"id":"r1","usage":{"input_tokens":999,"output_tokens":42,"total_tokens":1041,"input_tokens_details":{"cached_tokens":700}}}}'
+  ].join('\n\n') + '\n\n'
+  const collector = feedStream(createIncrementalUsageParser(), body)
+  assert.deepEqual(collector.getUsage(), {
+    prompt_tokens: 999,
+    completion_tokens: 42,
+    total_tokens: 1041,
+    cached_tokens: 700
+  })
+})
+
+test('incremental parser: returns null when no usage present', () => {
+  const collector = createIncrementalUsageParser()
+  collector.add('data: {"choices":[{"delta":{"content":"a"}}]}')
+  collector.add('data: [DONE]')
+  assert.equal(collector.getUsage(), null)
+  // 非 data: 行直接忽略
+  const c2 = createIncrementalUsageParser()
+  c2.add('event: message_start')
+  c2.add('data: {"type":"message_stop"}')
+  assert.equal(c2.getUsage(), null)
 })

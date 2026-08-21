@@ -23,7 +23,7 @@ import {
   setReasoningCache
 } from './protocol-converters.js'
 import { parseMultipartFields } from './multipart-scanner.js'
-import { normalizeUsage, parseUsageFromResponse, estimateRequestTokens } from './token-usage.js'
+import { normalizeUsage, parseUsageFromResponse, estimateRequestTokens, createIncrementalUsageParser } from './token-usage.js'
 
 
 // --- State ---
@@ -186,7 +186,7 @@ function readBody(req) {
       received += c.length
       if (received > MAX_JSON_BODY) {
         req.destroy()
-        reject(new Error('JSON body too large (max 50 MiB)'))
+        reject(new Error(`JSON body too large (max ${MAX_JSON_BODY / (1024 * 1024)} MiB)`))
         return
       }
       chunks.push(c)
@@ -398,16 +398,26 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         if (!closed && !clientRes.writableEnded) clientRes.write(': keepalive\n\n')
       }, 15000)
 
-      const cleanup = () => {
+      // token 统计改为流式增量解析，不再无条件缓冲整个响应体；
+      // 仅当开启详细日志时才保留原始 body 用于入库。
+      const usageCollector = createIncrementalUsageParser()
+      const rawChunks = []
+      const keepBody = logEnabled
+
+      const finalizeStream = () => {
         if (closed) return
         closed = true
         clearInterval(keepAlive)
         upstreamReq.destroy()
         // 客户端提前断开（如 Codex 收到 response.completed 后立即关闭连接）时，
-        // 也要把已收到的响应体回传给日志记录，避免 token 统计缺失。
+        // usage 已增量解析，日志统计不会缺失。
+        if (!clientReq._streamUsage) clientReq._streamUsage = usageCollector.getUsage()
         if (onResponseBody) {
-          const rawBuffer = Buffer.concat(rawChunks)
-          if (rawBuffer.length > 0) onResponseBody(rawBuffer.toString('utf8'))
+          if (keepBody && rawChunks.length > 0) {
+            onResponseBody(Buffer.concat(rawChunks).toString('utf8'))
+          } else {
+            onResponseBody(null)
+          }
         }
         // bun 运行时下 res 的 close/finish 事件在客户端提前断开时可能不触发，
         // 直接调用主处理器的日志兜底回调，确保请求被记录。
@@ -415,19 +425,18 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         if (!clientRes.writableEnded) clientRes.end()
       }
 
-      clientRes.on('error', cleanup)
-      clientRes.on('close', cleanup)
+      clientRes.on('error', finalizeStream)
+      clientRes.on('close', finalizeStream)
 
-      upstreamRes.on('error', cleanup)
+      upstreamRes.on('error', finalizeStream)
 
       const decoder = new StringDecoder('utf8')
       let lineBuffer = ''
-      const rawChunks = []
       let lineCount = 0
       let convertedCount = 0
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        rawChunks.push(chunk)
+        if (keepBody) rawChunks.push(chunk)
         // StringDecoder 会正确处理多字节 UTF-8 字符在 chunk 边界被截断的情况，
         // 不完整的字节会被缓存到下一个 chunk 一起解码，避免中文乱码。
         lineBuffer += decoder.write(chunk)
@@ -436,6 +445,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
         for (const line of lines) {
           lineCount++
+          usageCollector.add(line)
           const result = sseConverter(line)
           if (result) {
             convertedCount++
@@ -445,12 +455,10 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
       })
 
       upstreamRes.on('end', () => {
-        if (closed) return
-        closed = true
-        clearInterval(keepAlive)
         // 刷出 StringDecoder 中可能缓存的最后几个字节
         const remaining = lineBuffer + decoder.end()
         if (remaining.trim()) {
+          usageCollector.add(remaining)
           const result = sseConverter(remaining)
           if (result) clientRes.write(result)
         }
@@ -459,13 +467,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
           const flushed = sseConverter.flush()
           if (flushed) clientRes.write(flushed)
         }
-        // Stream ended
-        clientRes.end()
-        const rawBuffer = Buffer.concat(rawChunks)
-        if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
-        // bun 运行时下客户端提前断开（如 Codex 收到 response.completed 后立即关闭
-        // 连接）时 finish/close 事件可能都不触发，SSE 流完整结束时直接记录日志。
-        if (clientReq._finalizeLog) clientReq._finalizeLog()
+        finalizeStream()
       })
     } else if (isStreaming) {
       // SSE streaming without conversion — pipe through immediately
@@ -480,41 +482,51 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         if (!closed && !clientRes.writableEnded) clientRes.write(': keepalive\n\n')
       }, 15000)
 
-      const cleanup = () => {
+      // 与转换分支一致：增量解析 usage，仅日志开启时才缓冲原始 body
+      const usageCollector = createIncrementalUsageParser()
+      const rawChunks = []
+      const keepBody = logEnabled
+      const decoder = new StringDecoder('utf8')
+      let lineBuffer = ''
+
+      const finalizeStream = () => {
         if (closed) return
         closed = true
         clearInterval(keepAlive)
         upstreamReq.destroy()
-        // 客户端提前断开时同样捕获已收到的响应体，保证 token 统计不丢失。
+        // 客户端提前断开时同样保留已解析的 token 统计。
+        if (!clientReq._streamUsage) clientReq._streamUsage = usageCollector.getUsage()
         if (onResponseBody) {
-          const rawBuffer = Buffer.concat(rawChunks)
-          if (rawBuffer.length > 0) onResponseBody(rawBuffer.toString('utf8'))
+          if (keepBody && rawChunks.length > 0) {
+            onResponseBody(Buffer.concat(rawChunks).toString('utf8'))
+          } else {
+            onResponseBody(null)
+          }
         }
         // bun 运行时兜底：直接触发日志记录，不依赖 res close/finish 事件。
         if (clientReq._finalizeLog) clientReq._finalizeLog()
         if (!clientRes.writableEnded) clientRes.end()
       }
 
-      clientRes.on('error', cleanup)
-      clientRes.on('close', cleanup)
+      clientRes.on('error', finalizeStream)
+      clientRes.on('close', finalizeStream)
 
-      upstreamRes.on('error', cleanup)
+      upstreamRes.on('error', finalizeStream)
 
-      const rawChunks = []
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        rawChunks.push(chunk)
+        if (keepBody) rawChunks.push(chunk)
         clientRes.write(chunk)
+        // 逐行喂入 usage 解析器（SSE 事件行通常很短，行缓冲开销可忽略）
+        lineBuffer += decoder.write(chunk)
+        const lines = lineBuffer.split(/\r?\n/)
+        lineBuffer = lines.pop() || ''
+        for (const line of lines) usageCollector.add(line)
       })
       upstreamRes.on('end', () => {
-        if (closed) return
-        closed = true
-        clearInterval(keepAlive)
-        const rawBuffer = Buffer.concat(rawChunks)
-        if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
-        // bun 运行时兜底：SSE 流完整结束时直接记录日志。
-        if (clientReq._finalizeLog) clientReq._finalizeLog()
-        clientRes.end()
+        const remaining = lineBuffer + decoder.end()
+        if (remaining.trim()) usageCollector.add(remaining)
+        finalizeStream()
       })
     } else if (sseConverter) {
       // Client requested streaming but upstream returned non-streaming response.
@@ -1325,7 +1337,7 @@ async function handleApiRequest(req, res) {
 
 // --- HTTP Server ---
 
-function logRequest(endpoint, model, statusCode, duration, error, requestBody, responseBody, providerName, extra) {
+function logRequest(endpoint, model, statusCode, duration, error, requestBody, responseBody, providerName, extra, parsedUsage) {
   const data = {
     timestamp: Date.now(),
     endpoint,
@@ -1344,21 +1356,24 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
     if (extra.bodySizeBefore != null) data.bodySizeBefore = extra.bodySizeBefore
     if (extra.bodySizeAfter != null) data.bodySizeAfter = extra.bodySizeAfter
   }
-  // 解析 token 使用量（无论 logEnabled 状态，优先解析）
-  if (responseBody) {
+  // 解析 token 使用量（无论 logEnabled 状态，优先解析）：
+  // 流式路径已在转发过程中增量解析（parsedUsage），避免缓冲整个响应体；
+  // 非流式路径仍从响应体解析。
+  let usage = parsedUsage || null
+  if (!usage && responseBody) {
     try {
-      const usage = parseUsageFromResponse(responseBody)
-      if (usage) {
-        data.promptTokens = usage.prompt_tokens
-        data.completionTokens = usage.completion_tokens
-        data.totalTokens = usage.total_tokens
-        data.cachedTokens = usage.cached_tokens || 0
-        // 缓存命中率 = 缓存命中数 / 总输入 token，保留一位小数
-        data.cacheHitRate = usage.prompt_tokens > 0
-          ? Math.round((usage.cached_tokens / usage.prompt_tokens) * 1000) / 10
-          : 0
-      }
+      usage = parseUsageFromResponse(responseBody)
     } catch {}
+  }
+  if (usage) {
+    data.promptTokens = usage.prompt_tokens
+    data.completionTokens = usage.completion_tokens
+    data.totalTokens = usage.total_tokens
+    data.cachedTokens = usage.cached_tokens || 0
+    // 缓存命中率 = 缓存命中数 / 总输入 token，保留一位小数
+    data.cacheHitRate = usage.prompt_tokens > 0
+      ? Math.round((usage.cached_tokens / usage.prompt_tokens) * 1000) / 10
+      : 0
   }
   // 仅当开启详细日志时才记录请求/响应体
   if (logEnabled) {
@@ -1483,7 +1498,7 @@ const server = http.createServer(async (req, res) => {
     }
     model = model || '-'
     const errExtra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
-    logRequest(endpoint, model, res.statusCode || 500, Date.now() - startTime, err.message, rawBody, responseBody, req._providerName, errExtra)
+    logRequest(endpoint, model, res.statusCode || 500, Date.now() - startTime, err.message, rawBody, responseBody, req._providerName, errExtra, req._streamUsage)
     return
   }
 
@@ -1495,7 +1510,7 @@ const server = http.createServer(async (req, res) => {
     if (logged) return
     logged = true
     const extra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
-    logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra)
+    logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra, req._streamUsage)
   }
   // bun 运行时下 res 的 close 事件在客户端提前断开时可能不触发，
   // 因此把 finalizeLog 挂到 req 上供 forwardRequest 直接调用，并监听

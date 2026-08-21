@@ -235,18 +235,29 @@ pub fn set_log_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), 
 // --- Stats & Logs commands ---
 
 #[tauri::command]
-pub fn get_stats(state: State<'_, AppState>) -> serde_json::Value {
-    state.config.get_stats()
+pub async fn get_stats(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    // 重活（读聚合文件 + 可能回填扫描整个日志文件）放到阻塞线程池，
+    // 避免阻塞主线程导致 UI 卡顿。
+    let config = state.config.clone();
+    tauri::async_runtime::spawn_blocking(move || config.get_stats())
+        .await
+        .map_err(|e| format!("get_stats task failed: {e}"))
 }
 
 #[tauri::command]
-pub fn get_logs(
+pub async fn get_logs(
     state: State<'_, AppState>,
     limit: Option<usize>,
     offset: Option<usize>,
     filter: Option<crate::config::LogFilter>,
-) -> crate::config::LogsPage {
-    state.config.get_logs(limit, offset, filter.unwrap_or_default())
+) -> Result<crate::config::LogsPage, String> {
+    // 日志文件可能很大（上限 50MB），整文件读取+解析放到阻塞线程池。
+    let config = state.config.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        config.get_logs(limit, offset, filter.unwrap_or_default())
+    })
+    .await
+    .map_err(|e| format!("get_logs task failed: {e}"))
 }
 
 #[tauri::command]
@@ -268,8 +279,12 @@ pub fn clear_all_data(app_handle: tauri::AppHandle, state: State<'_, AppState>) 
 }
 
 #[tauri::command]
-pub fn clear_logs_bodies(state: State<'_, AppState>) -> Result<(), String> {
-    state.config.clear_logs_bodies()
+pub async fn clear_logs_bodies(state: State<'_, AppState>) -> Result<(), String> {
+    // 全文件重写（去掉 body），放到阻塞线程池避免卡 UI。
+    let config = state.config.clone();
+    tauri::async_runtime::spawn_blocking(move || config.clear_logs_bodies())
+        .await
+        .map_err(|e| format!("clear_logs_bodies task failed: {e}"))?
 }
 
 #[tauri::command]

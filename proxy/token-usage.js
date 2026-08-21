@@ -36,57 +36,71 @@ export function parseUsageFromResponse(responseBody) {
     return normalizeUsage(parsed.usage || parsed.usage_total)
   } catch {
     // SSE 流式：逐事件解析，聚合输入与输出
-    let inputTokens = 0
-    let outputTokens = 0
-    let cachedTokens = 0
-    const applyUsage = (u) => {
-      if (!u || typeof u !== 'object') return
-      if (u.prompt_tokens != null) inputTokens = u.prompt_tokens || 0
-      if (u.input_tokens != null) inputTokens = u.input_tokens || 0
-      if (u.completion_tokens != null) outputTokens = u.completion_tokens || 0
-      if (u.output_tokens != null) outputTokens = u.output_tokens || 0
-      if (u.cache_read_input_tokens != null) cachedTokens = u.cache_read_input_tokens || 0
-      if (u.prompt_tokens_details?.cached_tokens != null) cachedTokens = u.prompt_tokens_details.cached_tokens || 0
-      if (u.input_tokens_details?.cached_tokens != null) cachedTokens = u.input_tokens_details.cached_tokens || 0
-      // 部分中转会把 Anthropic 缓存字段透传在 OpenAI 格式 usage 中
-      inputTokens += u.cache_creation_input_tokens || 0
-      inputTokens += u.cache_read_input_tokens || 0
-    }
+    const collector = createIncrementalUsageParser()
     for (const rawLine of responseBody.split('\n')) {
-      const line = rawLine.trim()
-      if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
+      collector.add(rawLine)
+    }
+    return collector.getUsage()
+  }
+}
+
+// 增量 SSE usage 解析器：流式转发时逐行喂入，避免为统计而缓冲整个响应体。
+// 与 parseUsageFromResponse 的流式分支共享同一套字段提取逻辑。
+export function createIncrementalUsageParser() {
+  let inputTokens = 0
+  let outputTokens = 0
+  let cachedTokens = 0
+  const applyUsage = (u) => {
+    if (!u || typeof u !== 'object') return
+    if (u.prompt_tokens != null) inputTokens = u.prompt_tokens || 0
+    if (u.input_tokens != null) inputTokens = u.input_tokens || 0
+    if (u.completion_tokens != null) outputTokens = u.completion_tokens || 0
+    if (u.output_tokens != null) outputTokens = u.output_tokens || 0
+    if (u.cache_read_input_tokens != null) cachedTokens = u.cache_read_input_tokens || 0
+    if (u.prompt_tokens_details?.cached_tokens != null) cachedTokens = u.prompt_tokens_details.cached_tokens || 0
+    if (u.input_tokens_details?.cached_tokens != null) cachedTokens = u.input_tokens_details.cached_tokens || 0
+    // 部分中转会把 Anthropic 缓存字段透传在 OpenAI 格式 usage 中
+    inputTokens += u.cache_creation_input_tokens || 0
+    inputTokens += u.cache_read_input_tokens || 0
+  }
+  return {
+    add(rawLine) {
+      const line = (rawLine || '').trim()
+      if (!line.startsWith('data: ') || line === 'data: [DONE]') return
       let parsed
       try {
         parsed = JSON.parse(line.slice(6))
       } catch {
-        continue
+        return
       }
       // Anthropic message_start：输入 token（含缓存命中/创建）
       if (parsed.type === 'message_start' && parsed.message?.usage) {
         const u = parsed.message.usage
         inputTokens = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0)
         cachedTokens = u.cache_read_input_tokens || 0
-        continue
+        return
       }
       // Anthropic message_delta：output_tokens 为流内累计值
       if (parsed.type === 'message_delta' && parsed.usage) {
         if (parsed.usage.output_tokens != null) outputTokens = parsed.usage.output_tokens || 0
-        continue
+        return
       }
       // OpenAI Chat 流式 chunk：usage 一般为累计值，直接覆盖
       applyUsage(parsed.usage)
       // OpenAI Responses 流式事件：usage 在 response.usage 内
       applyUsage(parsed.response?.usage)
-    }
-    if (inputTokens > 0 || outputTokens > 0) {
-      return {
-        prompt_tokens: inputTokens,
-        completion_tokens: outputTokens,
-        total_tokens: inputTokens + outputTokens,
-        cached_tokens: cachedTokens
+    },
+    getUsage() {
+      if (inputTokens > 0 || outputTokens > 0) {
+        return {
+          prompt_tokens: inputTokens,
+          completion_tokens: outputTokens,
+          total_tokens: inputTokens + outputTokens,
+          cached_tokens: cachedTokens
+        }
       }
+      return null
     }
-    return null
   }
 }
 
