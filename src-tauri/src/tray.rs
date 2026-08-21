@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::tray::TrayIcon;
+use tauri::{Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::config::ConfigStore;
 
@@ -226,11 +228,55 @@ pub fn update_tray_stats(app: &tauri::AppHandle, config_store: &ConfigStore, run
     tray.set_tooltip(Some(tooltip)).ok();
 }
 
+/// 面板隐藏后延迟销毁窗口，释放 WebContent 渲染进程。
+/// 期间用户重新打开面板 → 唤醒时复查窗口仍隐藏且未聚焦才销毁（零延迟复用）；
+/// 超时未打开 → 销毁进程，内存归零，下次点击自动重建。
+pub fn schedule_panel_destroy(app: &tauri::AppHandle) {
+    if PANEL_DESTROY_SCHEDULED.swap(true, Ordering::SeqCst) {
+        return; // 已有调度在途，避免线程堆积
+    }
+    const DELAY: u64 = 60; // 秒
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(DELAY));
+        PANEL_DESTROY_SCHEDULED.store(false, Ordering::SeqCst);
+        if let Some(window) = app.get_webview_window("panel") {
+            let hidden = !window.is_visible().unwrap_or(false);
+            let unfocused = !window.is_focused().unwrap_or(false);
+            if hidden && unfocused {
+                // 销毁后 get_webview_window("panel") 返回 None，下次点击自动重建
+                let _ = window.destroy();
+            }
+        }
+    });
+}
+
+static PANEL_DESTROY_SCHEDULED: AtomicBool = AtomicBool::new(false);
+
+/// 面板窗口按需创建：不存在时才用 builder 新建（属性与原来的
+/// tauri.conf.json 静态声明一致），存在则直接返回复用。
+fn ensure_panel_window(app: &tauri::AppHandle) -> WebviewWindow {
+    if let Some(window) = app.get_webview_window("panel") {
+        return window;
+    }
+    WebviewWindowBuilder::new(app, "panel", WebviewUrl::App("panel.html".into()))
+        .title("AIGateway")
+        .inner_size(360.0, 480.0)
+        .resizable(false)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .visible(false)
+        .skip_taskbar(true)
+        .shadow(true)
+        .build()
+        .expect("failed to create panel window")
+}
+
 /// 显示/隐藏面板窗口；显示时定位在托盘图标正下方，取不到图标位置时退化为
 /// 主显示器右上角（菜单栏下方）。
 pub fn toggle_panel_window(app: &tauri::AppHandle) {
-    use tauri::Manager;
-    let Some(window) = app.get_webview_window("panel") else { return };
+    let window = ensure_panel_window(app);
     if window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false) {
         let _ = window.hide();
         return;
