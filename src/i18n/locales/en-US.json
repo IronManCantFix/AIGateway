@@ -250,7 +250,7 @@
       "availableModels": "Available models",
       "optional": "(optional)",
       "availableHint": "(leave empty to skip model routing)",
-      "baseUrlHint": "Do not append /v1; the proxy adds it automatically.",
+      "baseUrlHint": "Do not append /v1 — the proxy adds it automatically. Bases that already include a version path (e.g. Volcano Engine https://ark.cn-beijing.volces.com/api/v3) work as-is.",
       "added": "Added",
       "copied": "Copied"
     },

@@ -100,6 +100,42 @@ const PROVIDER_META = {
 const IMAGE_PROVIDERS = new Set(['openai-image', 'google-nano-banana'])
 const INTERACTIONS_PROVIDERS = new Set(['google-nano-banana'])
 
+// --- Base URL 拼接 ---
+// baseUrl 可能以两种形态出现：
+//   1. 裸根地址：https://api.openai.com → 追加完整版本路径（/v1/chat/completions）
+//   2. 已含版本前缀：https://api.openai.com/v1 或火山引擎
+//      https://ark.cn-beijing.volces.com/api/v3 → 去掉待拼接路径开头的版本段，
+//      避免出现 /v1/v1/...、/api/v3/v1/... 之类的重复路径。
+// 版本段形如 v1、v2、v3、v1beta、v2alpha 等。
+const VERSION_SEGMENT_RE = /^v\d+(?:beta|alpha|preview)?$/i
+
+function urlPathname(raw) {
+  try {
+    return new URL(raw).pathname
+  } catch {
+    // 非标准 URL（缺少协议等）：退化为提取 host 之后的部分
+    const m = /^[a-z][a-z0-9+.-]*:\/\/[^/]+/i.exec(raw)
+    return (m ? raw.slice(m[0].length) : raw) || '/'
+  }
+}
+
+function pathEndsWithVersionSegment(pathname) {
+  const seg = pathname.split('/').filter(Boolean).pop()
+  return !!seg && VERSION_SEGMENT_RE.test(seg)
+}
+
+function buildUpstreamUrl(baseUrl, apiPath) {
+  const base = (baseUrl || '').trim().replace(/\/+$/, '')
+  if (!base) return apiPath
+  if (pathEndsWithVersionSegment(urlPathname(base))) {
+    // base 已含版本段：丢弃 apiPath 开头的版本段（/v1/chat/completions → /chat/completions）
+    const segs = apiPath.split('/').filter(Boolean)
+    if (segs.length && VERSION_SEGMENT_RE.test(segs[0])) segs.shift()
+    return `${base}/${segs.join('/')}`
+  }
+  return `${base}${apiPath}`
+}
+
 // --- OpenAI → Nano Banana conversion helpers ---
 
 const OPENAI_SIZE_TO_NANOBANANA = {
@@ -868,8 +904,7 @@ function selectRoundRobinForModel(requestedModel, profiles) {
 function countTokensUpstream(profile, body) {
   return new Promise((resolve, reject) => {
     const meta = PROVIDER_META[profile.providerType]
-    const baseUrl = (profile.baseUrl || '').replace(/\/+$/, '').replace(/\/v1$/, '')
-    const parsed = new URL(`${baseUrl}/v1/messages/count_tokens`)
+    const parsed = new URL(buildUpstreamUrl(profile.baseUrl || '', '/v1/messages/count_tokens'))
     const isHttps = parsed.protocol === 'https:'
     const transport = isHttps ? https : http
     const proxyConfig = currentConfig?.settings?.httpProxy
@@ -1004,10 +1039,10 @@ async function handleFilesRequest(req, res) {
     return
   }
 
-  // 上游路径：去掉客户端 /v1 前缀（DeepSeek 为 https://api.deepseek.com/files），保留查询串
+  // 上游路径：去掉客户端 /v1 前缀（DeepSeek 为 https://api.deepseek.com/files），保留查询串；
+  // baseUrl 自带的版本段（如火山引擎 /api/v3）会被保留
   const rel = endpoint.replace(/^\/v1/, '')
-  const baseUrl = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
-  const upstreamUrl = `${baseUrl}${rel}${rawSearch}`
+  const upstreamUrl = `${buildUpstreamUrl(profile.baseUrl, rel)}${rawSearch}`
   req._upstreamUrl = upstreamUrl
   req._providerName = profile.name
 
@@ -1246,7 +1281,6 @@ async function handleApiRequest(req, res) {
     injectGeminiThoughtSignatures(body.messages)
   }
 
-  const baseUrl = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
   let upstreamPath
   if (source === 'image') {
     upstreamPath = meta.paths[urlPath]
@@ -1258,7 +1292,7 @@ async function handleApiRequest(req, res) {
   } else {
     upstreamPath = meta.path
   }
-  const upstreamUrl = `${baseUrl}${upstreamPath}`
+  const upstreamUrl = buildUpstreamUrl(profile.baseUrl, upstreamPath)
   req._upstreamUrl = upstreamUrl
 
   if (source === 'image') {
@@ -1410,9 +1444,8 @@ async function handleApiRequest(req, res) {
         }
       }
 
-      const curBaseUrl = currentProfile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
       const curUpstreamPath = curMeta.path
-      const curUpstreamUrl = `${curBaseUrl}${curUpstreamPath}`
+      const curUpstreamUrl = buildUpstreamUrl(currentProfile.baseUrl, curUpstreamPath)
       req._upstreamUrl = curUpstreamUrl
       req._providerName = currentProfile.name
 

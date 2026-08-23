@@ -74,6 +74,8 @@ After launching the app, add a provider configuration on the main page:
 | Name | `My OpenAI` | Any name you like |
 | Type | `openai-chat` | Provider API type |
 | Base URL | `https://api.openai.com` | Without path |
+
+> **Base URL rule**: no need to append `/v1` manually — the proxy adds versioned paths such as `/v1/chat/completions` automatically. If a provider requires a versioned base URL (e.g. Volcano Engine `https://ark.cn-beijing.volces.com/api/v3`), paste the full URL as-is; the proxy detects the version segment and won't append a duplicate `/v1`.
 | API Key | `sk-...` | Your API key |
 | Default Model | `gpt-4o` | Used when no model specified |
 | Available Models | `gpt-4o`, `gpt-4o-mini` | Models supported by this provider, used for model routing and exposing available models |
