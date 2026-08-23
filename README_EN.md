@@ -123,7 +123,13 @@ Supported proxy endpoints (`/v1` prefix optional, both `/chat/completions` and `
 | `POST /v1/messages` | Anthropic Messages format |
 | `POST /v1/images/generations` | OpenAI Image Generation format |
 | `POST /v1/images/edits` | OpenAI Image Editing format |
+| `POST /v1/files` | Upload file (multipart, Files API) |
+| `GET /v1/files` | List files (Files API) |
+| `GET /v1/files/{file_id}` | Retrieve file info (Files API) |
+| `DELETE /v1/files/{file_id}` | Delete file (Files API) |
 | `GET /v1/models` | Global model list (OpenAI-compatible format) |
+
+The Files API is an OpenAI-compatible pass-through: requests carry no `model` field and are routed to the first OpenAI-compatible profile in list order (`openai-chat` / `openai-response` / `newapi`). It supports use cases like DeepSeek vision (see the [Files API guide](https://api-docs.deepseek.com/zh-cn/guides/files_api)) — upload once, then reference the file in chat via a `{"type": "file", "file_id": "file-api-..."}` content block.
 
 ### 📠 System Tray
 

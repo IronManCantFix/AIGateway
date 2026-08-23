@@ -124,7 +124,13 @@ wire_api = "responses"
 | `POST /v1/messages` | Anthropic Messages 格式 |
 | `POST /v1/images/generations` | OpenAI 图像生成格式 |
 | `POST /v1/images/edits` | OpenAI 图像编辑格式 |
+| `POST /v1/files` | 上传文件（multipart，Files API） |
+| `GET /v1/files` | 文件列表（Files API） |
+| `GET /v1/files/{file_id}` | 查询文件信息（Files API） |
+| `DELETE /v1/files/{file_id}` | 删除文件（Files API） |
 | `GET /v1/models` | 全局模型列表（OpenAI 兼容格式） |
+
+Files API 为 OpenAI 兼容透传：请求无 `model` 字段，按 profile 列表顺序路由到第一个 OpenAI 兼容 profile（`openai-chat` / `openai-response` / `newapi`）。可用于 DeepSeek 图像理解（[Files API 文档](https://api-docs.deepseek.com/zh-cn/guides/files_api)）等场景，上传后以 `{"type": "file", "file_id": "file-api-..."}` 内容块在对话中引用。
 
 ### 📎 系统托盘
 

@@ -65,6 +65,21 @@ const PATH_TO_SOURCE = {
   '/v1beta/interactions': 'interactions'
 }
 
+// --- Files API (OpenAI 兼容透传) ---
+// DeepSeek Files API 文档: https://api-docs.deepseek.com/zh-cn/guides/files_api
+// 支持: POST /v1/files (multipart 上传), GET /v1/files (列表),
+//       GET /v1/files/{file_id} (查询), DELETE /v1/files/{file_id} (删除)
+// 请求无 model 字段，按 profile 列表顺序路由到第一个 OpenAI 兼容 profile。
+const FILES_PROVIDERS = new Set(['openai-chat', 'openai-response', 'newapi'])
+const MAX_FILES_BODY = 100 * 1024 * 1024  // 100 MiB；上游单文件上限 64 MiB，留出 multipart 开销
+
+// 返回 'files'（集合）| 'files-item'（单个文件）| null（不是 Files API 路径）
+function matchFilesPath(urlPath) {
+  if (urlPath === '/v1/files' || urlPath === '/files') return 'files'
+  if (/^\/v1\/files\/[^/]+$/.test(urlPath) || /^\/files\/[^/]+$/.test(urlPath)) return 'files-item'
+  return null
+}
+
 // --- Provider type → target format + upstream path ---
 
 const PROVIDER_META = {
@@ -936,6 +951,119 @@ async function handleModels(_, res) {
   res.end(JSON.stringify({ object: 'list', data }))
 }
 
+// --- Route: Files API ---
+
+async function handleFilesRequest(req, res) {
+  const started = Date.now()
+  const endpoint = req.url.split('?')[0]
+  const rawSearch = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''
+  const shape = matchFilesPath(endpoint)
+  const method = req.method
+
+  // 统一日志：无论成功/失败分支，res finish/close 时记录一次
+  let logged = false
+  const finalize = () => {
+    if (logged) return
+    logged = true
+    logRequest(endpoint, '-', res.statusCode, Date.now() - started, null,
+      req._loggedRequestBody ?? null, req._filesResponseBody ?? null,
+      req._providerName ?? '-', { method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy })
+  }
+  res.on('finish', finalize)
+  res.on('close', finalize)
+  req.on('close', finalize)
+  req.on('aborted', finalize)
+
+  if (!['GET', 'POST', 'DELETE'].includes(method)) {
+    res.writeHead(405, { 'Content-Type': 'application/json', Allow: 'GET, POST, DELETE' })
+    res.end(JSON.stringify({ error: 'Method Not Allowed' }))
+    return
+  }
+  if (method === 'POST' && shape !== 'files') {
+    res.writeHead(400, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Bad Request: upload only supported on /v1/files' }))
+    return
+  }
+  if (method === 'DELETE' && shape !== 'files-item') {
+    res.writeHead(400, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Bad Request: DELETE requires a file id (/v1/files/{file_id})' }))
+    return
+  }
+  if (shape === null) {
+    res.writeHead(404, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Not Found' }))
+    return
+  }
+
+  // 路由：第一个 OpenAI 兼容 profile（profile 列表顺序 = 优先级）
+  const profiles = (currentConfig && currentConfig.profiles) || []
+  const profile = profiles.find(p => FILES_PROVIDERS.has(p.providerType))
+  if (!profile) {
+    res.writeHead(503, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Service Unavailable: no OpenAI-compatible profile configured for Files API' }))
+    return
+  }
+
+  // 上游路径：去掉客户端 /v1 前缀（DeepSeek 为 https://api.deepseek.com/files），保留查询串
+  const rel = endpoint.replace(/^\/v1/, '')
+  const baseUrl = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
+  const upstreamUrl = `${baseUrl}${rel}${rawSearch}`
+  req._upstreamUrl = upstreamUrl
+  req._providerName = profile.name
+
+  let forwardBody
+  let contentType = 'application/json'
+
+  if (method === 'POST') {
+    const ct = req.headers['content-type'] || ''
+    if (ct.startsWith('multipart/form-data')) {
+      try {
+        req._rawBuffer = await readBodyAsBuffer(req, MAX_FILES_BODY)
+      } catch (e) {
+        if (e.code === 'PAYLOAD_TOO_LARGE') {
+          const errBody = JSON.stringify({ error: 'Payload Too Large', maxBytes: MAX_FILES_BODY })
+          res.writeHead(413, { 'Content-Type': 'application/json' })
+          res.end(errBody)
+          req.resume()  // drain remaining upload bytes
+          return
+        }
+        throw e
+      }
+      forwardBody = req._rawBuffer
+      contentType = ct
+      // 日志只记录字段与文件元数据，不记录二进制内容
+      const boundaryMatch = /boundary=("?)([^";]+)\1/i.exec(ct)
+      if (boundaryMatch) {
+        try {
+          const parsed = parseMultipartFields(req._rawBuffer, boundaryMatch[2])
+          req._loggedRequestBody = { fields: parsed.fields, files: parsed.files }
+        } catch {
+          req._loggedRequestBody = { note: 'multipart parse failed', bytes: req._rawBuffer.length }
+        }
+      } else {
+        req._loggedRequestBody = { note: 'multipart without boundary', bytes: req._rawBuffer.length }
+      }
+    } else {
+      try {
+        forwardBody = await readBody(req)
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+        return
+      }
+      req._loggedRequestBody = forwardBody
+    }
+  } else {
+    // GET / DELETE 无请求体
+    forwardBody = Buffer.alloc(0)
+  }
+
+  req._onResponseBody = (b) => { req._filesResponseBody = b }
+
+  forwardRequest(req, res, upstreamUrl, profile.apiKey, forwardBody, null,
+    req._onResponseBody, null, 'files', profile.id, contentType)
+}
+
 // --- Handle API request ---
 
 async function handleApiRequest(req, res) {
@@ -1437,6 +1565,9 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ input_tokens: inputTokens }))
       logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-', { method: req.method })
+      return
+    } else if (matchFilesPath(urlPath)) {
+      await handleFilesRequest(req, res)
       return
     } else if (PATH_TO_SOURCE[urlPath]) {
       const ct = req.headers['content-type'] || ''
