@@ -123,7 +123,13 @@ Supported proxy endpoints (`/v1` prefix optional, both `/chat/completions` and `
 | `POST /v1/messages` | Anthropic Messages format |
 | `POST /v1/images/generations` | OpenAI Image Generation format |
 | `POST /v1/images/edits` | OpenAI Image Editing format |
+| `POST /v1/files` | Upload file (multipart, Files API) |
+| `GET /v1/files` | List files (Files API) |
+| `GET /v1/files/{file_id}` | Retrieve file info (Files API) |
+| `DELETE /v1/files/{file_id}` | Delete file (Files API) |
 | `GET /v1/models` | Global model list (OpenAI-compatible format) |
+
+The Files API is an OpenAI-compatible pass-through: requests carry no `model` field and are routed to the first OpenAI-compatible profile in list order (`openai-chat` / `openai-response` / `newapi`). It supports use cases like DeepSeek vision (see the [Files API guide](https://api-docs.deepseek.com/zh-cn/guides/files_api)) — upload once, then reference the file in chat via a `{"type": "file", "file_id": "file-api-..."}` content block.
 
 ### 📠 System Tray
 
@@ -210,23 +216,25 @@ When multiple providers offer the same model, configure load balancing to optimi
 
 | Strategy | Description |
 |---|---|
+| **No LB** | Use the first matching provider (provider order = priority) |
 | **Round Robin** | Distribute requests evenly across providers |
 | **Failover** | Try providers in order, auto-switch on failure for high availability |
+| **Specific Provider** | Pin the model to one provider, independent of provider ordering |
 
 ### Configuration
 
-1. Find the "Load Balancer" card on the home page
-2. Click "+ Create Load Balancer Group" button
-3. Enter group name (e.g., "GPT-4o Dual Line")
-4. Select strategy (Round Robin or Failover)
-5. Select participating providers (at least 2 required)
-6. Save configuration
+1. Find the model in the "Available Models" list on the home page
+2. Click the strategy button on the right side of the model row
+3. Pick a strategy (No LB / Round Robin / Failover), or pick a provider under "Specific Provider"
+
+> Once pinned to a provider, reordering providers won't affect routing for that model. If the pinned provider is disabled or deleted, it automatically falls back to the "No LB" behavior.
 
 ### Use Cases
 
 - **Multi-account rotation**: Multiple OpenAI accounts with the same model, rotate to avoid rate limiting
 - **Primary-backup switching**: Auto-switch to backup provider on primary failure
 - **Cross-region redundancy**: Providers in different regions as backups for availability
+- **Fixed routing**: Pin a model to a specific provider (e.g., cheaper channel or dedicated account) without reordering providers
 
 ## 🌐 HTTP Proxy
 

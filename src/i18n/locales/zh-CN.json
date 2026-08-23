@@ -92,7 +92,8 @@
       "none": "不负载",
       "roundRobin": "轮询",
       "failover": "故障转移",
-      "tooltip": "点击切换策略：不负载 → 轮询 → 故障转移",
+      "providers": "指定提供商",
+      "tooltip": "点击选择策略，或直接指定该模型走某个提供商",
       "saved": "已切换为 {strategy}"
     }
   },
@@ -335,6 +336,11 @@
     "off": "已关闭",
     "todayCalls": "今日调用",
     "todayTokens": "今日 Token",
+    "todayCached": "今日缓存",
+    "hitRate": "命中率",
+    "speedMax": "最高输出速度",
+    "speedMin": "最低输出速度",
+    "speedAvg": "平均输出速度",
     "recentModels": "最近调用的模型",
     "emptyModels": "暂无调用记录",
     "copyHint": "点击复制模型名",

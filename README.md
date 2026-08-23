@@ -124,7 +124,13 @@ wire_api = "responses"
 | `POST /v1/messages` | Anthropic Messages 格式 |
 | `POST /v1/images/generations` | OpenAI 图像生成格式 |
 | `POST /v1/images/edits` | OpenAI 图像编辑格式 |
+| `POST /v1/files` | 上传文件（multipart，Files API） |
+| `GET /v1/files` | 文件列表（Files API） |
+| `GET /v1/files/{file_id}` | 查询文件信息（Files API） |
+| `DELETE /v1/files/{file_id}` | 删除文件（Files API） |
 | `GET /v1/models` | 全局模型列表（OpenAI 兼容格式） |
+
+Files API 为 OpenAI 兼容透传：请求无 `model` 字段，按 profile 列表顺序路由到第一个 OpenAI 兼容 profile（`openai-chat` / `openai-response` / `newapi`）。可用于 DeepSeek 图像理解（[Files API 文档](https://api-docs.deepseek.com/zh-cn/guides/files_api)）等场景，上传后以 `{"type": "file", "file_id": "file-api-..."}` 内容块在对话中引用。
 
 ### 📎 系统托盘
 
@@ -211,23 +217,25 @@ wire_api = "responses"
 
 | 策略 | 说明 |
 |---|---|
+| **不负载（No LB）** | 按提供商顺序取第一个可用的提供商 |
 | **轮询（Round Robin）** | 请求轮流分配到各个提供商，均匀分担负载 |
 | **故障转移（Failover）** | 按顺序尝试提供商，失败自动切换到下一个，确保高可用 |
+| **指定提供商（Specific Provider）** | 固定使用某个提供商，不受提供商排序影响 |
 
 ### 配置方式
 
-1. 在首页找到「负载均衡」配置卡片
-2. 点击「+ 创建负载均衡组」按钮
-3. 填写组名称（如「GPT-4o 双线」）
-4. 选择策略（轮询或故障转移）
-5. 选择参与的提供商（至少需要 2 个）
-6. 保存配置
+1. 在首页「可用模型」列表中找到目标模型
+2. 点击该模型右侧的策略按钮
+3. 在弹出的菜单中选择策略（不负载 / 轮询 / 故障转移），或直接选择「指定提供商」下的某个提供商
+
+> 选择「指定提供商」后，即使调整提供商顺序也不会影响该模型的请求去向；若指定提供商被停用或删除，会自动回退到「不负载」行为。
 
 ### 使用场景
 
 - **多账号轮询**：多个 OpenAI 账号提供相同模型，轮询分配请求避免单账号限流
 - **主备切换**：主提供商故障时自动切换到备用提供商，确保服务连续性
 - **跨区域容灾**：不同区域的提供商互为备份，提高可用性
+- **固定路由**：模型固定走指定提供商（如低价渠道或特定账号），无需频繁调整提供商顺序
 
 ## 🌐 HTTP 代理
 

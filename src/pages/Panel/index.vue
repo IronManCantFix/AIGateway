@@ -35,12 +35,26 @@ const httpProxyEnabled = computed(() => !!settings.value?.httpProxy?.enabled)
 
 const todayCount = computed(() => stats.value?.today?.count ?? 0)
 const todayTokens = computed(() => stats.value?.today?.tokens ?? 0)
+const todayCached = computed(() => stats.value?.today?.cached ?? 0)
+const cacheHitRate = computed(() => stats.value?.today?.cacheHitRate ?? null)
+const speedStats = computed(() => stats.value?.today?.speed ?? null)
 
 function fmtTokens(n) {
   if (n == null) return '—'
   if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M'
   if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'K'
   return String(n)
+}
+
+function fmtSpeed(n) {
+  if (n == null || !isFinite(n)) return '—'
+  const v = n >= 100 ? Math.round(n) : Math.round(n * 10) / 10
+  return `${v} t/s`
+}
+
+function fmtRate(n) {
+  if (n == null || !isFinite(n)) return '—'
+  return `${n}%`
 }
 
 function fmtRelative(ts) {
@@ -90,8 +104,8 @@ function onVisibility() {
   }
 }
 
-// 测量实际内容高度，精确设置窗口大小，最大440px
-const MAX_HEIGHT = 520
+// 测量实际内容高度，精确设置窗口大小
+const MAX_HEIGHT = 620
 async function fitWindow() {
   await nextTick()
   try {
@@ -106,11 +120,13 @@ async function fitWindow() {
 }
 
 async function loadAll() {
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
   const [s, st, agg, lg] = await Promise.all([
     api.getSettings(),
     api.getProxyStatus(),
     api.getStats(),
-    api.getLogs(50)
+    api.getLogs(500, 0, { dateFrom: todayStart.getTime(), statusClass: '2xx' })
   ])
   settings.value = s
   status.value = st
@@ -244,6 +260,26 @@ onBeforeUnmount(() => {
         <div class="stat-num tok">{{ fmtTokens(todayTokens) }}</div>
         <div class="stat-label">{{ $t('panel.todayTokens') }}</div>
       </div>
+      <div class="stat-card">
+        <div class="stat-num cache">{{ fmtTokens(todayCached) }}</div>
+        <div class="stat-label">{{ $t('panel.todayCached') }}</div>
+        <div class="stat-sub">{{ $t('panel.hitRate') }} {{ fmtRate(cacheHitRate) }}</div>
+      </div>
+    </section>
+
+    <section class="speed-stats">
+      <div class="stat-card speed-card">
+        <div class="speed-row">
+          <span class="stat-label">{{ $t('panel.speedMax') }}</span>
+          <span class="stat-num speed">{{ fmtSpeed(speedStats?.max) }}</span>
+        </div>
+        <div class="stat-sub" v-if="speedStats?.maxProvider">{{ speedStats.maxProvider }} · {{ speedStats.maxModel }}</div>
+        <div class="speed-divider"></div>
+        <div class="speed-row">
+          <span class="stat-label">{{ $t('panel.speedAvg') }}</span>
+          <span class="stat-num speed">{{ fmtSpeed(speedStats?.avg) }}</span>
+        </div>
+      </div>
     </section>
 
     <section class="recent">
@@ -283,7 +319,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0;
   padding: 10px;
-  max-height: 520px;
+  max-height: 620px;
   border-radius: 14px;
   background: var(--bg-base);
   border: 1px solid var(--border);
@@ -416,8 +452,32 @@ onBeforeUnmount(() => {
   margin-bottom: 10px;
 }
 
+.speed-stats {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.speed-card {
+  gap: 3px;
+}
+
+.speed-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.speed-divider {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--border-subtle);
+}
+
 .stat-card {
   flex: 1;
+  min-width: 0;
   padding: 12px 14px;
   border-radius: var(--radius-md);
   background: var(--bg-card);
@@ -438,9 +498,30 @@ onBeforeUnmount(() => {
   color: #f59e0b;
 }
 
+.stat-num.cache {
+  color: var(--success);
+}
+
+.stat-num.speed {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
 .stat-label {
   font-size: 11px;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
 }
 
 .recent {
@@ -610,4 +691,3 @@ body::-webkit-scrollbar {
 }
 
 </style>
-

@@ -154,12 +154,19 @@ fn main() {
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
+                    if window.label() == "panel" {
+                        // 面板按需创建：直接关闭销毁，释放渲染进程（下次点击自动重建）
+                        return;
+                    }
                     // Hide to tray instead of closing
                     window.hide().ok();
                     api.prevent_close();
                 }
                 tauri::WindowEvent::Focused(false) if window.label() == "panel" => {
                     window.hide().ok();
+                    // 面板失焦后延迟销毁窗口，释放 WebContent 渲染进程；
+                    // 60s 内再次打开则直接复用，无重建延迟
+                    crate::tray::schedule_panel_destroy(window.app_handle());
                 }
                 _ => {}
             }

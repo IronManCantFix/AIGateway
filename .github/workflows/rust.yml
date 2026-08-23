@@ -244,7 +244,13 @@ jobs:
             gh pr edit "$PR_NUM" --title "$TITLE" --body "$BODY"
           else
             echo "创建 PR：$BRANCH -> main"
-            PR_NUM="$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY" --json number --jq '.number')" || { echo "创建失败：可能分支间没有差异"; exit 0; }
+            # 注意：runner 上的 gh 版本不支持 `gh pr create --json`（unknown flag），
+            # 创建后用支持旧版本的 gh pr list 重新取回 PR 号。
+            if ! gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY" >/dev/null; then
+              echo "创建失败：可能分支间没有差异"
+              exit 0
+            fi
+            PR_NUM="$(gh pr list --base main --head "$BRANCH" --json number --jq '.[0].number')"
             echo "已创建 PR #${PR_NUM}"
           fi
 

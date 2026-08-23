@@ -23,7 +23,7 @@ import {
   setReasoningCache
 } from './protocol-converters.js'
 import { parseMultipartFields } from './multipart-scanner.js'
-import { normalizeUsage, parseUsageFromResponse, estimateRequestTokens } from './token-usage.js'
+import { normalizeUsage, parseUsageFromResponse, estimateRequestTokens, createIncrementalUsageParser } from './token-usage.js'
 
 
 // --- State ---
@@ -63,6 +63,21 @@ const PATH_TO_SOURCE = {
   '/v1/images/generations': 'image',
   '/v1/images/edits': 'image',
   '/v1beta/interactions': 'interactions'
+}
+
+// --- Files API (OpenAI 兼容透传) ---
+// DeepSeek Files API 文档: https://api-docs.deepseek.com/zh-cn/guides/files_api
+// 支持: POST /v1/files (multipart 上传), GET /v1/files (列表),
+//       GET /v1/files/{file_id} (查询), DELETE /v1/files/{file_id} (删除)
+// 请求无 model 字段，按 profile 列表顺序路由到第一个 OpenAI 兼容 profile。
+const FILES_PROVIDERS = new Set(['openai-chat', 'openai-response', 'newapi'])
+const MAX_FILES_BODY = 100 * 1024 * 1024  // 100 MiB；上游单文件上限 64 MiB，留出 multipart 开销
+
+// 返回 'files'（集合）| 'files-item'（单个文件）| null（不是 Files API 路径）
+function matchFilesPath(urlPath) {
+  if (urlPath === '/v1/files' || urlPath === '/files') return 'files'
+  if (/^\/v1\/files\/[^/]+$/.test(urlPath) || /^\/files\/[^/]+$/.test(urlPath)) return 'files-item'
+  return null
 }
 
 // --- Provider type → target format + upstream path ---
@@ -186,7 +201,7 @@ function readBody(req) {
       received += c.length
       if (received > MAX_JSON_BODY) {
         req.destroy()
-        reject(new Error('JSON body too large (max 50 MiB)'))
+        reject(new Error(`JSON body too large (max ${MAX_JSON_BODY / (1024 * 1024)} MiB)`))
         return
       }
       chunks.push(c)
@@ -398,16 +413,26 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         if (!closed && !clientRes.writableEnded) clientRes.write(': keepalive\n\n')
       }, 15000)
 
-      const cleanup = () => {
+      // token 统计改为流式增量解析，不再无条件缓冲整个响应体；
+      // 仅当开启详细日志时才保留原始 body 用于入库。
+      const usageCollector = createIncrementalUsageParser()
+      const rawChunks = []
+      const keepBody = logEnabled
+
+      const finalizeStream = () => {
         if (closed) return
         closed = true
         clearInterval(keepAlive)
         upstreamReq.destroy()
         // 客户端提前断开（如 Codex 收到 response.completed 后立即关闭连接）时，
-        // 也要把已收到的响应体回传给日志记录，避免 token 统计缺失。
+        // usage 已增量解析，日志统计不会缺失。
+        if (!clientReq._streamUsage) clientReq._streamUsage = usageCollector.getUsage()
         if (onResponseBody) {
-          const rawBuffer = Buffer.concat(rawChunks)
-          if (rawBuffer.length > 0) onResponseBody(rawBuffer.toString('utf8'))
+          if (keepBody && rawChunks.length > 0) {
+            onResponseBody(Buffer.concat(rawChunks).toString('utf8'))
+          } else {
+            onResponseBody(null)
+          }
         }
         // bun 运行时下 res 的 close/finish 事件在客户端提前断开时可能不触发，
         // 直接调用主处理器的日志兜底回调，确保请求被记录。
@@ -415,19 +440,18 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         if (!clientRes.writableEnded) clientRes.end()
       }
 
-      clientRes.on('error', cleanup)
-      clientRes.on('close', cleanup)
+      clientRes.on('error', finalizeStream)
+      clientRes.on('close', finalizeStream)
 
-      upstreamRes.on('error', cleanup)
+      upstreamRes.on('error', finalizeStream)
 
       const decoder = new StringDecoder('utf8')
       let lineBuffer = ''
-      const rawChunks = []
       let lineCount = 0
       let convertedCount = 0
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        rawChunks.push(chunk)
+        if (keepBody) rawChunks.push(chunk)
         // StringDecoder 会正确处理多字节 UTF-8 字符在 chunk 边界被截断的情况，
         // 不完整的字节会被缓存到下一个 chunk 一起解码，避免中文乱码。
         lineBuffer += decoder.write(chunk)
@@ -436,6 +460,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
         for (const line of lines) {
           lineCount++
+          usageCollector.add(line)
           const result = sseConverter(line)
           if (result) {
             convertedCount++
@@ -445,12 +470,10 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
       })
 
       upstreamRes.on('end', () => {
-        if (closed) return
-        closed = true
-        clearInterval(keepAlive)
         // 刷出 StringDecoder 中可能缓存的最后几个字节
         const remaining = lineBuffer + decoder.end()
         if (remaining.trim()) {
+          usageCollector.add(remaining)
           const result = sseConverter(remaining)
           if (result) clientRes.write(result)
         }
@@ -459,13 +482,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
           const flushed = sseConverter.flush()
           if (flushed) clientRes.write(flushed)
         }
-        // Stream ended
-        clientRes.end()
-        const rawBuffer = Buffer.concat(rawChunks)
-        if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
-        // bun 运行时下客户端提前断开（如 Codex 收到 response.completed 后立即关闭
-        // 连接）时 finish/close 事件可能都不触发，SSE 流完整结束时直接记录日志。
-        if (clientReq._finalizeLog) clientReq._finalizeLog()
+        finalizeStream()
       })
     } else if (isStreaming) {
       // SSE streaming without conversion — pipe through immediately
@@ -480,41 +497,51 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         if (!closed && !clientRes.writableEnded) clientRes.write(': keepalive\n\n')
       }, 15000)
 
-      const cleanup = () => {
+      // 与转换分支一致：增量解析 usage，仅日志开启时才缓冲原始 body
+      const usageCollector = createIncrementalUsageParser()
+      const rawChunks = []
+      const keepBody = logEnabled
+      const decoder = new StringDecoder('utf8')
+      let lineBuffer = ''
+
+      const finalizeStream = () => {
         if (closed) return
         closed = true
         clearInterval(keepAlive)
         upstreamReq.destroy()
-        // 客户端提前断开时同样捕获已收到的响应体，保证 token 统计不丢失。
+        // 客户端提前断开时同样保留已解析的 token 统计。
+        if (!clientReq._streamUsage) clientReq._streamUsage = usageCollector.getUsage()
         if (onResponseBody) {
-          const rawBuffer = Buffer.concat(rawChunks)
-          if (rawBuffer.length > 0) onResponseBody(rawBuffer.toString('utf8'))
+          if (keepBody && rawChunks.length > 0) {
+            onResponseBody(Buffer.concat(rawChunks).toString('utf8'))
+          } else {
+            onResponseBody(null)
+          }
         }
         // bun 运行时兜底：直接触发日志记录，不依赖 res close/finish 事件。
         if (clientReq._finalizeLog) clientReq._finalizeLog()
         if (!clientRes.writableEnded) clientRes.end()
       }
 
-      clientRes.on('error', cleanup)
-      clientRes.on('close', cleanup)
+      clientRes.on('error', finalizeStream)
+      clientRes.on('close', finalizeStream)
 
-      upstreamRes.on('error', cleanup)
+      upstreamRes.on('error', finalizeStream)
 
-      const rawChunks = []
       upstreamRes.on('data', (chunk) => {
         if (closed) return
-        rawChunks.push(chunk)
+        if (keepBody) rawChunks.push(chunk)
         clientRes.write(chunk)
+        // 逐行喂入 usage 解析器（SSE 事件行通常很短，行缓冲开销可忽略）
+        lineBuffer += decoder.write(chunk)
+        const lines = lineBuffer.split(/\r?\n/)
+        lineBuffer = lines.pop() || ''
+        for (const line of lines) usageCollector.add(line)
       })
       upstreamRes.on('end', () => {
-        if (closed) return
-        closed = true
-        clearInterval(keepAlive)
-        const rawBuffer = Buffer.concat(rawChunks)
-        if (onResponseBody) onResponseBody(rawBuffer.length > 0 ? rawBuffer.toString('utf8') : null)
-        // bun 运行时兜底：SSE 流完整结束时直接记录日志。
-        if (clientReq._finalizeLog) clientReq._finalizeLog()
-        clientRes.end()
+        const remaining = lineBuffer + decoder.end()
+        if (remaining.trim()) usageCollector.add(remaining)
+        finalizeStream()
       })
     } else if (sseConverter) {
       // Client requested streaming but upstream returned non-streaming response.
@@ -924,6 +951,119 @@ async function handleModels(_, res) {
   res.end(JSON.stringify({ object: 'list', data }))
 }
 
+// --- Route: Files API ---
+
+async function handleFilesRequest(req, res) {
+  const started = Date.now()
+  const endpoint = req.url.split('?')[0]
+  const rawSearch = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''
+  const shape = matchFilesPath(endpoint)
+  const method = req.method
+
+  // 统一日志：无论成功/失败分支，res finish/close 时记录一次
+  let logged = false
+  const finalize = () => {
+    if (logged) return
+    logged = true
+    logRequest(endpoint, '-', res.statusCode, Date.now() - started, null,
+      req._loggedRequestBody ?? null, req._filesResponseBody ?? null,
+      req._providerName ?? '-', { method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy })
+  }
+  res.on('finish', finalize)
+  res.on('close', finalize)
+  req.on('close', finalize)
+  req.on('aborted', finalize)
+
+  if (!['GET', 'POST', 'DELETE'].includes(method)) {
+    res.writeHead(405, { 'Content-Type': 'application/json', Allow: 'GET, POST, DELETE' })
+    res.end(JSON.stringify({ error: 'Method Not Allowed' }))
+    return
+  }
+  if (method === 'POST' && shape !== 'files') {
+    res.writeHead(400, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Bad Request: upload only supported on /v1/files' }))
+    return
+  }
+  if (method === 'DELETE' && shape !== 'files-item') {
+    res.writeHead(400, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Bad Request: DELETE requires a file id (/v1/files/{file_id})' }))
+    return
+  }
+  if (shape === null) {
+    res.writeHead(404, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Not Found' }))
+    return
+  }
+
+  // 路由：第一个 OpenAI 兼容 profile（profile 列表顺序 = 优先级）
+  const profiles = (currentConfig && currentConfig.profiles) || []
+  const profile = profiles.find(p => FILES_PROVIDERS.has(p.providerType))
+  if (!profile) {
+    res.writeHead(503, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Service Unavailable: no OpenAI-compatible profile configured for Files API' }))
+    return
+  }
+
+  // 上游路径：去掉客户端 /v1 前缀（DeepSeek 为 https://api.deepseek.com/files），保留查询串
+  const rel = endpoint.replace(/^\/v1/, '')
+  const baseUrl = profile.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
+  const upstreamUrl = `${baseUrl}${rel}${rawSearch}`
+  req._upstreamUrl = upstreamUrl
+  req._providerName = profile.name
+
+  let forwardBody
+  let contentType = 'application/json'
+
+  if (method === 'POST') {
+    const ct = req.headers['content-type'] || ''
+    if (ct.startsWith('multipart/form-data')) {
+      try {
+        req._rawBuffer = await readBodyAsBuffer(req, MAX_FILES_BODY)
+      } catch (e) {
+        if (e.code === 'PAYLOAD_TOO_LARGE') {
+          const errBody = JSON.stringify({ error: 'Payload Too Large', maxBytes: MAX_FILES_BODY })
+          res.writeHead(413, { 'Content-Type': 'application/json' })
+          res.end(errBody)
+          req.resume()  // drain remaining upload bytes
+          return
+        }
+        throw e
+      }
+      forwardBody = req._rawBuffer
+      contentType = ct
+      // 日志只记录字段与文件元数据，不记录二进制内容
+      const boundaryMatch = /boundary=("?)([^";]+)\1/i.exec(ct)
+      if (boundaryMatch) {
+        try {
+          const parsed = parseMultipartFields(req._rawBuffer, boundaryMatch[2])
+          req._loggedRequestBody = { fields: parsed.fields, files: parsed.files }
+        } catch {
+          req._loggedRequestBody = { note: 'multipart parse failed', bytes: req._rawBuffer.length }
+        }
+      } else {
+        req._loggedRequestBody = { note: 'multipart without boundary', bytes: req._rawBuffer.length }
+      }
+    } else {
+      try {
+        forwardBody = await readBody(req)
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+        return
+      }
+      req._loggedRequestBody = forwardBody
+    }
+  } else {
+    // GET / DELETE 无请求体
+    forwardBody = Buffer.alloc(0)
+  }
+
+  req._onResponseBody = (b) => { req._filesResponseBody = b }
+
+  forwardRequest(req, res, upstreamUrl, profile.apiKey, forwardBody, null,
+    req._onResponseBody, null, 'files', profile.id, contentType)
+}
+
 // --- Handle API request ---
 
 async function handleApiRequest(req, res) {
@@ -1022,6 +1162,13 @@ async function handleApiRequest(req, res) {
       // Failover: pick the first matching profile; retry logic is handled later
       if (candidates.length > 0) {
         profile = candidates[0]
+      }
+    } else if (modelStrategy && modelStrategy.startsWith('provider:')) {
+      // 指定提供商：直接路由到该 profile（需启用且包含此模型）。
+      // 若该提供商已停用/删除/不含此模型，则回退到第一个匹配提供商（等同 'none'）。
+      const targetId = modelStrategy.slice('provider:'.length)
+      if (candidates.length > 0) {
+        profile = candidates.find(p => p.id === targetId) || candidates[0]
       }
     } else {
       // 'none': use first matching profile (profile list order = priority)
@@ -1318,7 +1465,7 @@ async function handleApiRequest(req, res) {
 
 // --- HTTP Server ---
 
-function logRequest(endpoint, model, statusCode, duration, error, requestBody, responseBody, providerName, extra) {
+function logRequest(endpoint, model, statusCode, duration, error, requestBody, responseBody, providerName, extra, parsedUsage) {
   const data = {
     timestamp: Date.now(),
     endpoint,
@@ -1337,21 +1484,24 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
     if (extra.bodySizeBefore != null) data.bodySizeBefore = extra.bodySizeBefore
     if (extra.bodySizeAfter != null) data.bodySizeAfter = extra.bodySizeAfter
   }
-  // 解析 token 使用量（无论 logEnabled 状态，优先解析）
-  if (responseBody) {
+  // 解析 token 使用量（无论 logEnabled 状态，优先解析）：
+  // 流式路径已在转发过程中增量解析（parsedUsage），避免缓冲整个响应体；
+  // 非流式路径仍从响应体解析。
+  let usage = parsedUsage || null
+  if (!usage && responseBody) {
     try {
-      const usage = parseUsageFromResponse(responseBody)
-      if (usage) {
-        data.promptTokens = usage.prompt_tokens
-        data.completionTokens = usage.completion_tokens
-        data.totalTokens = usage.total_tokens
-        data.cachedTokens = usage.cached_tokens || 0
-        // 缓存命中率 = 缓存命中数 / 总输入 token，保留一位小数
-        data.cacheHitRate = usage.prompt_tokens > 0
-          ? Math.round((usage.cached_tokens / usage.prompt_tokens) * 1000) / 10
-          : 0
-      }
+      usage = parseUsageFromResponse(responseBody)
     } catch {}
+  }
+  if (usage) {
+    data.promptTokens = usage.prompt_tokens
+    data.completionTokens = usage.completion_tokens
+    data.totalTokens = usage.total_tokens
+    data.cachedTokens = usage.cached_tokens || 0
+    // 缓存命中率 = 缓存命中数 / 总输入 token，保留一位小数
+    data.cacheHitRate = usage.prompt_tokens > 0
+      ? Math.round((usage.cached_tokens / usage.prompt_tokens) * 1000) / 10
+      : 0
   }
   // 仅当开启详细日志时才记录请求/响应体
   if (logEnabled) {
@@ -1416,6 +1566,9 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ input_tokens: inputTokens }))
       logRequest(endpoint, model, 200, Date.now() - startTime, null, rawBody, null, '-', { method: req.method })
       return
+    } else if (matchFilesPath(urlPath)) {
+      await handleFilesRequest(req, res)
+      return
     } else if (PATH_TO_SOURCE[urlPath]) {
       const ct = req.headers['content-type'] || ''
       const isMultipart = PATH_TO_SOURCE[urlPath] === 'image' && ct.startsWith('multipart/form-data')
@@ -1476,7 +1629,7 @@ const server = http.createServer(async (req, res) => {
     }
     model = model || '-'
     const errExtra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
-    logRequest(endpoint, model, res.statusCode || 500, Date.now() - startTime, err.message, rawBody, responseBody, req._providerName, errExtra)
+    logRequest(endpoint, model, res.statusCode || 500, Date.now() - startTime, err.message, rawBody, responseBody, req._providerName, errExtra, req._streamUsage)
     return
   }
 
@@ -1488,7 +1641,7 @@ const server = http.createServer(async (req, res) => {
     if (logged) return
     logged = true
     const extra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
-    logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra)
+    logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra, req._streamUsage)
   }
   // bun 运行时下 res 的 close 事件在客户端提前断开时可能不触发，
   // 因此把 finalizeLog 挂到 req 上供 forwardRequest 直接调用，并监听

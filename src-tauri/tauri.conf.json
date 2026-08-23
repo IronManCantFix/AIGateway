@@ -18,20 +18,6 @@
         "minWidth": 600,
         "minHeight": 400,
         "center": true
-      },
-      {
-        "label": "panel",
-        "title": "AIGateway",
-        "width": 360,
-        "height": 480,
-        "resizable": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "visible": false,
-        "skipTaskbar": true,
-        "shadow": true,
-        "url": "index.html#/panel"
       }
     ],
     "security": {},
