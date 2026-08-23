@@ -305,13 +305,13 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
     let api_key = profile.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
     let provider_type = profile.get("providerType").and_then(|v| v.as_str()).unwrap_or("");
 
-    let base_url = base_url.trim_end_matches('/').trim_end_matches("/v1");
+    let base_url = base_url.trim_end_matches('/');
     let is_gemini = provider_type == "google-gemini" || provider_type == "google-nano-banana";
 
     let url = if is_gemini {
-        format!("{}/v1beta/models", base_url)
+        join_api_path(base_url, "/v1beta/models")
     } else {
-        format!("{}/v1/models", base_url)
+        join_api_path(base_url, "/v1/models")
     };
 
     let client = reqwest::Client::new();
@@ -819,4 +819,108 @@ pub fn show_main_window(app_handle: tauri::AppHandle) -> Result<(), String> {
 pub fn toggle_panel_window(app_handle: tauri::AppHandle) -> Result<(), String> {
     crate::tray::toggle_panel_window(&app_handle);
     Ok(())
+}
+
+// --- Base URL 拼接 ---
+// baseUrl 可能以两种形态出现：
+//   1. 裸根地址：https://api.openai.com → 追加完整版本路径（/v1/models）
+//   2. 已含版本前缀：https://api.openai.com/v1 或火山引擎
+//      https://ark.cn-beijing.volces.com/api/v3 → 去掉待拼接路径开头的版本段，
+//      避免出现 /v1/v1/...、/api/v3/v1/... 之类的重复路径。
+// 版本段形如 v1、v2、v3、v1beta、v2alpha 等。
+
+/// 判断单个路径段是否为 API 版本段（v1、v2、v1beta、v1alpha、v3 等）。
+fn is_version_segment(seg: &str) -> bool {
+    let seg = seg.to_ascii_lowercase();
+    let Some(rest) = seg.strip_prefix('v') else {
+        return false;
+    };
+    let digits_end = rest
+        .char_indices()
+        .find(|(_, c)| !c.is_ascii_digit())
+        .map(|(i, _)| i)
+        .unwrap_or(rest.len());
+    if digits_end == 0 {
+        return false;
+    }
+    let suffix = &rest[digits_end..];
+    suffix.is_empty() || matches!(suffix, "beta" | "alpha" | "preview")
+}
+
+/// 拼接上游 API 路径。baseUrl 已含版本段时去掉 api_path 开头的版本段，
+/// 否则原样拼接。
+fn join_api_path(base_url: &str, api_path: &str) -> String {
+    let base = base_url.trim_end_matches('/');
+    let path = base
+        .split("://")
+        .nth(1)
+        .and_then(|s| s.find('/').map(|i| &s[i..]))
+        .unwrap_or("");
+    let last_seg = path.rsplit('/').next().unwrap_or("");
+    if is_version_segment(last_seg) {
+        let rel: Vec<&str> = api_path
+            .trim_start_matches('/')
+            .split('/')
+            .enumerate()
+            .filter(|(idx, s)| !(*idx == 0 && is_version_segment(s)))
+            .map(|(_, s)| s)
+            .collect();
+        format!("{}/{}", base, rel.join("/"))
+    } else {
+        format!("{}{}", base, api_path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn join_api_path_plain_root() {
+        assert_eq!(
+            join_api_path("https://api.openai.com", "/v1/models"),
+            "https://api.openai.com/v1/models"
+        );
+        assert_eq!(
+            join_api_path("http://127.0.0.1:8080", "/v1/models"),
+            "http://127.0.0.1:8080/v1/models"
+        );
+    }
+
+    #[test]
+    fn join_api_path_trailing_slash() {
+        assert_eq!(
+            join_api_path("https://api.openai.com/", "/v1/models"),
+            "https://api.openai.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn join_api_path_volcano_v3() {
+        // 火山引擎 Ark：base_url 已含 /api/v3，不应重复拼接 /v1
+        assert_eq!(
+            join_api_path("https://ark.cn-beijing.volces.com/api/v3", "/v1/models"),
+            "https://ark.cn-beijing.volces.com/api/v3/models"
+        );
+    }
+
+    #[test]
+    fn join_api_path_v1_dedupe() {
+        assert_eq!(
+            join_api_path("https://api.openai.com/v1", "/v1/models"),
+            "https://api.openai.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn join_api_path_gemini_v1beta() {
+        assert_eq!(
+            join_api_path("https://generativelanguage.googleapis.com/v1beta", "/v1beta/models"),
+            "https://generativelanguage.googleapis.com/v1beta/models"
+        );
+        assert_eq!(
+            join_api_path("https://generativelanguage.googleapis.com", "/v1beta/models"),
+            "https://generativelanguage.googleapis.com/v1beta/models"
+        );
+    }
 }

@@ -75,6 +75,8 @@ sudo xattr -r -d com.apple.quarantine /Applications/AIGateway.app
 | 名称 | `My OpenAI` | 随意命名 |
 | 类型 | `openai-chat` | 提供商接口类型 |
 | Base URL | `https://api.openai.com` | 不含路径 |
+
+> **Base URL 填写规则**：无需手动添加 `/v1`，代理会自动拼接 `/v1/chat/completions` 等版本路径。如果提供商要求填写带版本路径的地址（如火山引擎 `https://ark.cn-beijing.volces.com/api/v3`），直接填写完整地址即可，代理会智能识别版本段，不会重复拼接 `/v1`。
 | API Key | `sk-...` | 你的密钥 |
 | 默认模型 | `gpt-4o` | 未指定模型时使用 |
 | 可用模型 | `gpt-4o`, `gpt-4o-mini` | 该提供商支持的模型列表，用于模型路由匹配和对外暴露可用模型 |

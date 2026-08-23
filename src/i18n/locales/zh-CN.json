@@ -250,7 +250,7 @@
       "availableModels": "可用模型",
       "optional": "(可选)",
       "availableHint": "(为空则不参与模型路由)",
-      "baseUrlHint": "无需添加 /v1，代理会自动拼接",
+      "baseUrlHint": "无需添加 /v1，代理会自动拼接；若 Base URL 已含版本路径（如火山引擎 https://ark.cn-beijing.volces.com/api/v3），直接填写即可",
       "added": "已添加",
       "copied": "已复制"
     },
