@@ -44,3 +44,10 @@ JSON 文件存储于平台标准应用数据目录（`dirs::data_dir()`/`aigatew
 - `src-tauri/src/commands.rs` — Tauri invoke 命令
 - `proxy/proxy-server.js` — 代理服务器 + 协议转换
 - `docs/superpowers/specs/2026-05-17-tauri-migration-design.md` — 迁移设计文档
+
+## Sentinel 监听约定（哨兵值守）
+
+- 本仓库远程为 `https://github.com/IronManCantFix/AIGateway`，发布工作流 `.github/workflows/rust.yml` 由推送 `v*` tag 触发（构建 4 平台 → 创建 Release → 自动开 PR 合并回 main）。
+- **哨兵 command 探针若使用 gh CLI，必须显式带 `-R IronManCantFix/AIGateway`（或 `--repo`）**：值守进程的 cwd 不是 git 仓库，缺省时 gh 会报 `failed to determine base repo` 而 exit 1，哨兵永不触发。默认就用本仓库；只有监听其他仓库时才需要用户另行指定。
+- 示例：`gh run view <run-id> -R IronManCantFix/AIGateway --json status,conclusion --jq '.status'`
+- 备选写法：命令里先 `cd /Users/huanghongda/develop/node/AIGateway && gh ...` 再执行。
