@@ -1636,6 +1636,20 @@ function reasoningSSEFactory() {
       var choice = data.choices && data.choices[0]
       if (!choice) return 'data: ' + JSON.stringify(data) + '\n\n'
 
+      // Normalize streaming tool_calls deltas: continuation chunks from some
+      // upstreams (e.g. newapi relays) repeat empty-string id/name, which would
+      // overwrite the first chunk's real id/name in downstream clients such as
+      // DSH Desktop (dsh-llm-deepseek adopts any present — even empty — value).
+      // Drop the empty fields so clients keep the values from the first chunk.
+      var streamToolCalls = choice.delta && choice.delta.tool_calls
+      if (Array.isArray(streamToolCalls)) {
+        for (var tcIdx = 0; tcIdx < streamToolCalls.length; tcIdx++) {
+          var streamToolCall = streamToolCalls[tcIdx]
+          if (streamToolCall && streamToolCall.id === '') delete streamToolCall.id
+          if (streamToolCall && streamToolCall.function && streamToolCall.function.name === '') delete streamToolCall.function.name
+        }
+      }
+
       // Case 1: reasoning_details (MiniMax reasoning_split=true)
       var details = choice.delta && choice.delta.reasoning_details
       if (details && details.length > 0) {
@@ -1662,8 +1676,12 @@ function reasoningSSEFactory() {
         return 'data: ' + JSON.stringify(data) + '\n\n'
       }
 
-      // No content to process, pass through (preserves finish_reason, usage, etc.)
-      if (!choice.delta || choice.delta.content == null) {
+      // No content to process, pass through (preserves finish_reason, usage, etc.).
+      // Empty-string content is treated like null: upstreams (e.g. newapi relays)
+      // emit `"content":""` on tool_calls chunks, and dropping those chunks would
+      // silently remove the whole tool-call stream (DSH Desktop then stops at the
+      // tool step without ever invoking a tool).
+      if (!choice.delta || choice.delta.content == null || choice.delta.content === '') {
         return 'data: ' + JSON.stringify(data) + '\n\n'
       }
 
