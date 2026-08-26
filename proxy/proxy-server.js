@@ -20,7 +20,9 @@ import {
   fmtResponseEvent,
   mapFinishReason,
   parseMaybeJson,
-  setReasoningCache
+  setReasoningCache,
+  ensureAssistantReasoning,
+  withReasoningCapture
 } from './protocol-converters.js'
 import { parseMultipartFields } from './multipart-scanner.js'
 import { normalizeUsage, parseUsageFromResponse, estimateRequestTokens, createIncrementalUsageParser } from './token-usage.js'
@@ -1281,6 +1283,14 @@ async function handleApiRequest(req, res) {
     injectGeminiThoughtSignatures(body.messages)
   }
 
+  // Thinking-mode upstreams (LiteLLM + DeepSeek) 400 when assistant tool_calls
+  // messages are passed back without reasoning_content ("must be passed back").
+  // Clients (DSH, Claude Code, …) routinely strip it, so backfill from the
+  // reasoning cache (recorded by withReasoningCapture) or inject an empty string.
+  if (meta.target === 'chat_completions' && Array.isArray(body.messages)) {
+    ensureAssistantReasoning(body.messages, (callId) => reasoningCache.get(callId))
+  }
+
   let upstreamPath
   if (source === 'image') {
     upstreamPath = meta.paths[urlPath]
@@ -1414,6 +1424,13 @@ async function handleApiRequest(req, res) {
   }
   const responseBodyConverter = getResponseBodyConverter(source, meta.target)
 
+  // Record reasoning_content streamed before each tool_call into the reasoning
+  // cache, so the next request can backfill it when a client stripped the field
+  // (thinking-mode upstreams reject the omission).
+  if (needStream && sseConverter && meta.target === 'chat_completions') {
+    sseConverter = withReasoningCapture(sseConverter, cacheReasoning)
+  }
+
   // Failover: try providers in order, retry on HTTP error before data is sent
   if (modelStrategy === 'failover') {
     const candidates = getProfilesForModel(requestedModel, source)
@@ -1442,6 +1459,9 @@ async function handleApiRequest(req, res) {
         if (currentProfile.providerType === 'google-gemini' && Array.isArray(curBody.messages)) {
           injectGeminiThoughtSignatures(curBody.messages)
         }
+        if (curMeta.target === 'chat_completions' && Array.isArray(curBody.messages)) {
+          ensureAssistantReasoning(curBody.messages, (callId) => reasoningCache.get(callId))
+        }
       }
 
       const curUpstreamPath = curMeta.path
@@ -1449,7 +1469,10 @@ async function handleApiRequest(req, res) {
       req._upstreamUrl = curUpstreamUrl
       req._providerName = currentProfile.name
 
-      const curSseConverter = needStream ? createSSEConverter(source, curMeta.target) : null
+      let curSseConverter = needStream ? createSSEConverter(source, curMeta.target) : null
+      if (needStream && curSseConverter && curMeta.target === 'chat_completions') {
+        curSseConverter = withReasoningCapture(curSseConverter, cacheReasoning)
+      }
       const curResponseBodyConverter = getResponseBodyConverter(source, curMeta.target)
 
       let failed = false
