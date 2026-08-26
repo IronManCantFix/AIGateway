@@ -375,7 +375,52 @@ function createProxyAgent(proxyConfig, isHttps, profileId) {
   }
 }
 
-function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId, contentType, onUpstreamResponse, authType) {
+// 非流式响应体收集上限（解压后字节数），默认 64MB，可用环境变量
+// PROXY_MAX_RESPONSE_MB 调整。超过即中止上游并回 502，防止大文件响应打爆内存。
+const MAX_NONSTREAM_BUFFER_BYTES =
+  Math.min(2048, Math.max(1, parseInt(process.env.PROXY_MAX_RESPONSE_MB, 10) || 64)) * 1024 * 1024
+
+// 有界收集响应体：超过上限时回调 onError 并销毁上游连接，避免无限缓冲。
+// 超限视为终态（换提供商重试同样会超限），不走 failover 重试链；
+// 销毁后可能迟到的 aborted/error 由调用方监听里的 headersSent/writableEnded 守卫兜住。
+function boundedCollect(upstreamRes, upstreamReqRef, onDone, onOverflow) {
+  const chunks = []
+  let received = 0
+  let done = false
+  const finish = (fn, arg) => {
+    if (done) return
+    done = true
+    fn(arg)
+  }
+  upstreamRes.on('data', (c) => {
+    if (done) return
+    received += c.length
+    if (received > MAX_NONSTREAM_BUFFER_BYTES) {
+      chunks.length = 0
+      finish(onOverflow, new Error(`Upstream response exceeds buffer limit (${MAX_NONSTREAM_BUFFER_BYTES >> 20}MB)`))
+      try { upstreamReqRef.destroy() } catch {}
+      return
+    }
+    chunks.push(c)
+  })
+  upstreamRes.on('end', () => finish(onDone, Buffer.concat(chunks)))
+}
+
+// 上游响应在非流式分支中途失败（中断/超限）时的统一收尾：
+// headers 未发则回 502，否则截断结束客户端响应
+function endWithBadGateway(clientRes, err, onResponseBody) {
+  if (!clientRes.writableEnded) {
+    if (!clientRes.headersSent) {
+      clientRes.writeHead(502, { 'Content-Type': 'application/json' })
+      clientRes.end(JSON.stringify({ error: 'Bad Gateway', message: err?.message || 'upstream aborted' }))
+      if (onResponseBody) onResponseBody(null)
+    } else {
+      clientRes.end()
+    }
+  }
+}
+
+function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConverter, onResponseBody, responseBodyConverter, sourceFormat, profileId, contentType, onUpstreamResponse, authType, onConnectionError) {
   const parsed = new URL(upstreamUrl)
   const isHttps = parsed.protocol === 'https:'
   const transport = isHttps ? https : http
@@ -487,6 +532,13 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
       let lineBuffer = ''
       let lineCount = 0
       let convertedCount = 0
+
+      // 背压控制：客户端写缓冲满时暂停上游读取，drain 后恢复，
+      // 避免慢客户端把整个响应堆在内存里
+      const resumeUpstream = () => {
+        if (!closed && !clientRes.writableEnded) upstreamRes.resume()
+      }
+
       upstreamRes.on('data', (chunk) => {
         if (closed) return
         if (keepBody) rawChunks.push(chunk)
@@ -496,14 +548,19 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         const lines = lineBuffer.split(/\r?\n/)
         lineBuffer = lines.pop() || ''
 
+        let out = ''
         for (const line of lines) {
           lineCount++
           usageCollector.add(line)
           const result = sseConverter(line)
           if (result) {
             convertedCount++
-            clientRes.write(result)
+            out += result
           }
+        }
+        if (out && !clientRes.write(out)) {
+          upstreamRes.pause()
+          clientRes.once('drain', resumeUpstream)
         }
       })
 
@@ -566,15 +623,24 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
       upstreamRes.on('error', finalizeStream)
 
+      // 背压控制：同转换分支
+      const resumeUpstream = () => {
+        if (!closed && !clientRes.writableEnded) upstreamRes.resume()
+      }
+
       upstreamRes.on('data', (chunk) => {
         if (closed) return
         if (keepBody) rawChunks.push(chunk)
-        clientRes.write(chunk)
+        const canContinue = clientRes.write(chunk)
         // 逐行喂入 usage 解析器（SSE 事件行通常很短，行缓冲开销可忽略）
         lineBuffer += decoder.write(chunk)
         const lines = lineBuffer.split(/\r?\n/)
         lineBuffer = lines.pop() || ''
         for (const line of lines) usageCollector.add(line)
+        if (!canContinue) {
+          upstreamRes.pause()
+          clientRes.once('drain', resumeUpstream)
+        }
       })
       upstreamRes.on('end', () => {
         const remaining = lineBuffer + decoder.end()
@@ -584,16 +650,16 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
     } else if (sseConverter) {
       // Client requested streaming but upstream returned non-streaming response.
       // Treat response body as a single SSE event: parse JSON, produce full SSE sequence.
-      const chunks = []
-      upstreamRes.on('data', c => chunks.push(c))
-      upstreamRes.on('end', () => {
-        const rawBody = Buffer.concat(chunks).toString()
+      // 有界收集，防止异常大的响应撑爆内存
+      const failClient = (err) => endWithBadGateway(clientRes, err, onResponseBody)
+      upstreamRes.on('error', failClient)
+      boundedCollect(upstreamRes, upstreamReq, (buf) => {
+        const rawBody = buf.toString()
         clientRes.writeHead(upstreamRes.statusCode, {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
           'Connection': 'keep-alive'
         })
-
         try {
           const data = JSON.parse(rawBody)
 
@@ -814,13 +880,13 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
           clientRes.write(rawBody)
         }
         clientRes.end()
-      })
+      }, failClient)
     } else {
-      // Non-streaming: collect full body, optionally convert
-      const chunks = []
-      upstreamRes.on('data', c => chunks.push(c))
-      upstreamRes.on('end', () => {
-        let responseBody = Buffer.concat(chunks).toString()
+      // Non-streaming: collect full body (bounded), optionally convert
+      const failClient = (err) => endWithBadGateway(clientRes, err, onResponseBody)
+      upstreamRes.on('error', failClient)
+      boundedCollect(upstreamRes, upstreamReq, (buf) => {
+        let responseBody = buf.toString()
 
         if (responseBodyConverter) {
           try {
@@ -845,7 +911,7 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
         clientRes.writeHead(upstreamRes.statusCode, { 'Content-Type': 'application/json' })
         clientRes.end(responseBody)
         if (onResponseBody) onResponseBody(responseBody)
-      })
+      }, failClient)
     }
   })
 
@@ -855,11 +921,13 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
 
   upstreamReq.on('error', (err) => {
     if (!clientRes.headersSent) {
+      // Failover 模式：连接级失败交由调用方重试下一个提供商
+      if (onConnectionError && onConnectionError(err)) return
       const errorBody = JSON.stringify({ error: 'Bad Gateway', message: err.message })
       clientRes.writeHead(502, { 'Content-Type': 'application/json' })
       clientRes.end(errorBody)
       if (onResponseBody) onResponseBody(errorBody)
-    } else {
+    } else if (!clientRes.writableEnded) {
       clientRes.end()
     }
   })
@@ -1431,19 +1499,35 @@ async function handleApiRequest(req, res) {
     sseConverter = withReasoningCapture(sseConverter, cacheReasoning)
   }
 
-  // Failover: try providers in order, retry on HTTP error before data is sent
+  // Failover: try providers in order, retry on HTTP error before data is sent.
+  // 重试决策必须发生在上游响应回调（异步）里：旧实现用同步循环检查一个
+  // 异步回调里才置位的标志，条件恒为假，failover 从未真正生效——且被拒的
+  // 响应直接销毁 upstream 而不回写客户端，客户端请求会一直挂起。
   if (modelStrategy === 'failover') {
     const candidates = getProfilesForModel(requestedModel, source)
-    const triedIds = new Set()
-    let currentProfile = profile
     let lastError = null
 
-    for (let attempt = 0; attempt < candidates.length; attempt++) {
-      const pid = currentProfile.id
-      triedIds.add(pid)
+    const respondAllFailed = () => {
+      if (!res.headersSent) {
+        res.writeHead(lastError || 502, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Bad Gateway', message: 'All upstream providers failed' }))
+      }
+    }
+
+    const attempt = (index) => {
+      if (res.headersSent) return
+      const currentProfile = candidates[index]
+      if (!currentProfile) {
+        respondAllFailed()
+        return
+      }
 
       const curMeta = PROVIDER_META[currentProfile.providerType]
-      if (!curMeta) break
+      // Unknown provider type — skip to next candidate
+      if (!curMeta) {
+        attempt(index + 1)
+        return
+      }
 
       let curBody = { ...body }
       if (!curBody.model && currentProfile.defaultModel) {
@@ -1470,40 +1554,39 @@ async function handleApiRequest(req, res) {
       req._providerName = currentProfile.name
 
       let curSseConverter = needStream ? createSSEConverter(source, curMeta.target) : null
+      // 同格式 chat_completions 的流式请求也需要转换器（补 reasoning_content 等），
+      // 与非 failover 路径保持一致；否则流式请求会被原样透传 JSON
+      if (!curSseConverter && needStream && source === 'chat_completions' && curMeta.target === 'chat_completions') {
+        curSseConverter = reasoningSSEFactory()
+      }
       if (needStream && curSseConverter && curMeta.target === 'chat_completions') {
         curSseConverter = withReasoningCapture(curSseConverter, cacheReasoning)
       }
       const curResponseBodyConverter = getResponseBodyConverter(source, curMeta.target)
 
-      let failed = false
       forwardRequest(req, res, curUpstreamUrl, currentProfile.apiKey, curBody,
         curSseConverter, req._onResponseBody || null, curResponseBodyConverter,
         source, currentProfile.id, null,
         (upstreamRes) => {
-          if (upstreamRes.statusCode >= 400 && !res.headersSent) {
-            failed = true
+          if (upstreamRes.statusCode >= 400 && !res.headersSent && index < candidates.length - 1) {
             lastError = upstreamRes.statusCode
             upstreamRes.resume()
+            setImmediate(() => attempt(index + 1))
             return false
           }
           return true
         },
-        curMeta.authType
+        curMeta.authType,
+        // 连接级错误（DNS/拒绝连接/超时等）：headers 未发出时同样切下一个提供商
+        () => {
+          lastError = 502
+          setImmediate(() => attempt(index + 1))
+          return true
+        }
       )
-
-      if (!failed) return
-
-      // Find next profile that we haven't tried
-      const nextProfile = candidates.find(p => !triedIds.has(p.id))
-      if (!nextProfile) break
-      currentProfile = nextProfile
     }
 
-    // All providers failed
-    if (!res.headersSent) {
-      res.writeHead(lastError || 502, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Bad Gateway', message: 'All upstream providers failed' }))
-    }
+    attempt(0)
     return
   }
 
