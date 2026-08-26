@@ -242,7 +242,7 @@ onMounted(async () => {
   white-space: pre-line;
   text-align: center;
   max-width: 420px;
-  z-index: 9999;
+  z-index: var(--z-toast);
   box-shadow: var(--shadow-md);
   cursor: pointer;
   user-select: none;

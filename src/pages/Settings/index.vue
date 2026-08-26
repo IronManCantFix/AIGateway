@@ -6,6 +6,7 @@ import { api } from '../../api.js'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { translateError } from '../../i18n/errorCodes.js'
 import { setLocale, resolveLocale } from '../../i18n'
+import SelectMenu from '../../components/SelectMenu.vue'
 import iconUrl from '../../assets/icon.png'
 
 const { t } = useI18n()
@@ -338,11 +339,17 @@ onUnmounted(() => {
         <div class="setting-row">
           <div class="setting-label">{{ $t('settings.language.title') }}</div>
           <div class="setting-control">
-            <select v-model="languageSetting" @change="onLanguageChange" class="lang-select">
-              <option value="auto">{{ $t('settings.language.auto') }}</option>
-              <option value="zh-CN">{{ $t('settings.language.zh-CN') }}</option>
-              <option value="en-US">{{ $t('settings.language.en-US') }}</option>
-            </select>
+            <SelectMenu
+              v-model="languageSetting"
+              class="lang-select-menu"
+              :options="[
+                { value: 'auto', label: $t('settings.language.auto') },
+                { value: 'zh-CN', label: $t('settings.language.zh-CN') },
+                { value: 'en-US', label: $t('settings.language.en-US') }
+              ]"
+              :min-width="200"
+              @change="onLanguageChange"
+            />
           </div>
         </div>
 
@@ -350,11 +357,17 @@ onUnmounted(() => {
         <div class="setting-row">
           <div class="setting-label">{{ $t('theme.appearance') }}</div>
           <div class="setting-control">
-            <select v-model="themeSetting" @change="onThemeChange" class="lang-select">
-              <option value="auto">{{ $t('theme.auto') }}</option>
-              <option value="dark">{{ $t('theme.dark') }}</option>
-              <option value="light">{{ $t('theme.light') }}</option>
-            </select>
+            <SelectMenu
+              v-model="themeSetting"
+              class="lang-select-menu"
+              :options="[
+                { value: 'auto', label: $t('theme.auto') },
+                { value: 'dark', label: $t('theme.dark') },
+                { value: 'light', label: $t('theme.light') }
+              ]"
+              :min-width="200"
+              @change="onThemeChange"
+            />
           </div>
         </div>
 
@@ -523,8 +536,6 @@ onUnmounted(() => {
 .field-row { display: flex; align-items: center; gap: 12px; }
 .field-row input[type=number] { padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 15px; font-weight: 500; font-family: 'SF Mono','Fira Code',monospace; outline: none; width: 130px; transition: all .2s; background: var(--bg-input); color: var(--text-primary); }
 .field-row input[type=number]:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.lang-select { padding: 10px 36px 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; color: var(--text-primary); background: var(--bg-input); outline: none; min-width: 180px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238b95b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; cursor: pointer; transition: all .2s; }
-.lang-select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .check-field { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: var(--text-secondary); }
 .check-field input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 .field-hint { font-size: 12px; color: var(--text-muted); margin: 6px 0 0; }
@@ -552,7 +563,7 @@ label.toggle-row { cursor: pointer; margin: 0; }
 .port-conflict-btn.kill:hover { background: #ef4444; }
 .port-conflict-btn.cancel { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
 .port-conflict-btn.cancel:hover { background: var(--accent-soft); }
-.setting-control .lang-select { min-width: 160px; padding-top: 8px; padding-bottom: 8px; }
+.setting-control .lang-select-menu { width: 160px; font-size: 13px; padding-top: 8px; padding-bottom: 8px; }
 
 /* HTTP Proxy */
 .proxy-field { margin-bottom: 12px; }

@@ -3,6 +3,7 @@ import { ref, onMounted, computed, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../../api.js'
 import { translateError } from '../../i18n/errorCodes.js'
+import SelectMenu from '../../components/SelectMenu.vue'
 
 const { t } = useI18n()
 const navigate = inject('navigate')
@@ -10,6 +11,8 @@ const pagePayload = inject('pagePayload')
 
 const isEdit = ref(false)
 const editId = ref(null)
+
+const PROVIDER_TYPES = ['openai-chat', 'openai-response', 'anthropic-message', 'openai-image', 'google-gemini', 'google-nano-banana', 'newapi']
 
 const form = ref({
   name: '',
@@ -209,15 +212,11 @@ onMounted(() => {
 
           <div class="field">
             <label>{{ $t('profileEdit.label.providerType') }} <span class="req">*</span></label>
-            <select v-model="form.providerType">
-              <option value="openai-chat">{{ $t('profileEdit.providerType.openai-chat') }}</option>
-              <option value="openai-response">{{ $t('profileEdit.providerType.openai-response') }}</option>
-              <option value="anthropic-message">{{ $t('profileEdit.providerType.anthropic-message') }}</option>
-              <option value="openai-image">{{ $t('profileEdit.providerType.openai-image') }}</option>
-              <option value="google-gemini">{{ $t('profileEdit.providerType.google-gemini') }}</option>
-              <option value="google-nano-banana">{{ $t('profileEdit.providerType.google-nano-banana') }}</option>
-              <option value="newapi">{{ $t('profileEdit.providerType.newapi') }}</option>
-            </select>
+            <SelectMenu
+              v-model="form.providerType"
+              :options="PROVIDER_TYPES.map(pt => ({ value: pt, label: $t('profileEdit.providerType.' + pt) }))"
+              :min-width="300"
+            />
           </div>
 
           <div class="field">
@@ -375,19 +374,14 @@ onMounted(() => {
   background: var(--bg-input);
   color: var(--text-primary);
 }
-.field input:focus,
-.field select:focus {
+.field input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
-.field select {
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238b95b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  padding-right: 32px;
-  cursor: pointer;
+.field .select-trigger {
+  padding: 10px 28px 10px 14px;
+  font-size: 14px;
+  border-radius: var(--radius-md);
 }
 
 .key-row {
