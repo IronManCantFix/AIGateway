@@ -14,7 +14,8 @@ import {
   convertMessagesResponseToResponses,
   convertResponsesResponseToMessages,
   convertResponsesResponseToChat,
-  createSSEConverter
+  createSSEConverter,
+  reasoningSSEFactory
 } from './protocol-converters.js'
 
 function ssePayloads(output, prefix = 'data: ') {
@@ -738,4 +739,52 @@ test('convertResponsesToMessages converts remote image_url to Anthropic url sour
   assert.deepEqual(userMsg.content, [
     { type: 'image', source: { type: 'url', url: 'https://example.com/photo.png' } }
   ])
+})
+
+// --- Regression: empty-string delta.content must not drop tool_calls chunks ---
+// DSH Desktop stops at the tool step (turn ends "completed" with zero tool-call
+// blocks) when the gateway drops tool_calls chunks whose delta carries
+// `"content":""` — newapi-style relays emit "" where DeepSeek/OpenAI emit null.
+test('reasoningSSEFactory keeps the full tool-call stream when delta.content is an empty string', () => {
+  const convert = reasoningSSEFactory()
+  const output = [
+    convert('data: {"choices":[{"delta":{"reasoning_content":"","content":"","role":"assistant"},"finish_reason":null}],"usage":null}'),
+    convert('data: {"choices":[{"delta":{"reasoning_content":"thinking..."},"finish_reason":null}],"usage":null}'),
+    convert('data: {"choices":[{"delta":{"content":"我先看一下项目结构。"},"finish_reason":null}],"usage":null}'),
+    convert('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"bash","arguments":""}}],"reasoning_content":"","content":""},"finish_reason":null}],"usage":null}'),
+    convert('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"","arguments":"ls -la"}}]},"finish_reason":null}],"usage":null}'),
+    convert('data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}'),
+    convert('data: {"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}'),
+    convert('data: [DONE]')
+  ].join('')
+
+  const chunks = ssePayloads(output)
+  assert.equal(chunks.length, 7)
+  assert.equal(chunks[0].choices[0].delta.role, 'assistant')
+  assert.equal(chunks[3].choices[0].delta.tool_calls[0].id, 'call_abc')
+  assert.equal(chunks[3].choices[0].delta.tool_calls[0].function.name, 'bash')
+  const cont = chunks[4].choices[0].delta.tool_calls[0]
+  assert.equal(cont.id, undefined)
+  assert.equal(cont.function.name, undefined)
+  assert.equal(cont.function.arguments, 'ls -la')
+  assert.equal(chunks[5].choices[0].finish_reason, 'tool_calls')
+  assert.equal(chunks[6].usage.total_tokens, 3)
+})
+
+test('reasoningSSEFactory passes through empty-string content chunks without tool_calls', () => {
+  const convert = reasoningSSEFactory()
+  const out = convert('data: {"choices":[{"delta":{"content":"","role":"assistant"},"finish_reason":null}],"usage":null}')
+  const chunks = ssePayloads(out)
+  assert.equal(chunks.length, 1)
+  assert.deepEqual(chunks[0].choices[0].delta, { content: '', role: 'assistant' })
+})
+
+test('reasoningSSEFactory keeps non-empty id/name on first tool_calls chunk untouched', () => {
+  const convert = reasoningSSEFactory()
+  const out = convert('data: {"choices":[{"delta":{"content":null,"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"bash","arguments":""}}]}}]}')
+  const chunks = ssePayloads(out)
+  const first = chunks[0].choices[0].delta.tool_calls[0]
+  assert.equal(first.id, 'call_abc')
+  assert.equal(first.function.name, 'bash')
+  assert.equal(first.function.arguments, '')
 })
