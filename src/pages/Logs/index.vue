@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../../api.js'
+import SelectMenu from '../../components/SelectMenu.vue'
 
 const { t } = useI18n()
 
@@ -196,6 +197,10 @@ function resetLogPage() {
   logPage.value = 1
   loadLogs().catch(e => console.error('Load logs failed:', e))
 }
+function onPageSizeChange(v) {
+  logPageSize.value = Number(v) || 5
+  resetLogPage()
+}
 function prevPage() {
   if (logPage.value > 1) {
     logPage.value -= 1
@@ -242,20 +247,33 @@ onMounted(async () => {
       <div class="card-body" style="padding:0">
         <div class="log-toolbar" v-if="logs.length || hasActiveLogFilter">
           <div class="log-search-row">
-            <select v-model="logSearch.provider" @change="resetLogPage" class="log-filter">
-              <option value="">{{ $t('settings.placeholder.allProviders') }}</option>
-              <option v-for="p in logProviderOptions" :key="p" :value="p">{{ p }}</option>
-            </select>
-            <select v-model="logSearch.model" @change="resetLogPage" class="log-filter">
-              <option value="">{{ $t('settings.placeholder.allModels') }}</option>
-              <option v-for="m in logModelOptions" :key="m" :value="m">{{ m }}</option>
-            </select>
-            <select v-model="logSearch.statusCode" @change="resetLogPage" class="log-filter">
-              <option value="">{{ $t('settings.placeholder.allStatuses') }}</option>
-              <option value="2xx">{{ $t('settings.label.status2xx') }}</option>
-              <option value="4xx">{{ $t('settings.label.status4xx') }}</option>
-              <option value="5xx">{{ $t('settings.label.status5xx') }}</option>
-            </select>
+            <SelectMenu
+              v-model="logSearch.provider"
+              class="log-filter-menu"
+              :options="[{ value: '', label: $t('settings.placeholder.allProviders') }, ...logProviderOptions.map(p => ({ value: p, label: p }))]"
+              :min-width="140"
+              @change="resetLogPage"
+            />
+            <SelectMenu
+              v-model="logSearch.model"
+              class="log-filter-menu"
+              mono
+              :options="[{ value: '', label: $t('settings.placeholder.allModels') }, ...logModelOptions.map(m => ({ value: m, label: m }))]"
+              :min-width="160"
+              @change="resetLogPage"
+            />
+            <SelectMenu
+              v-model="logSearch.statusCode"
+              class="log-filter-menu log-status-menu"
+              :options="[
+                { value: '', label: $t('settings.placeholder.allStatuses') },
+                { value: '2xx', label: $t('settings.label.status2xx') },
+                { value: '4xx', label: $t('settings.label.status4xx') },
+                { value: '5xx', label: $t('settings.label.status5xx') }
+              ]"
+              :min-width="110"
+              @change="resetLogPage"
+            />
             <input type="date" v-model="logSearch.dateFrom" @change="resetLogPage" class="log-filter" :placeholder="$t('settings.placeholder.dateFrom')" />
             <input type="date" v-model="logSearch.dateTo" @change="resetLogPage" class="log-filter" :placeholder="$t('settings.placeholder.dateTo')" />
           </div>
@@ -305,12 +323,14 @@ onMounted(async () => {
         <div class="log-pagination" v-if="logTotal > 0">
           <div class="page-size">
             <span>{{ $t('settings.label.perPagePrefix', { count: logTotal }) }}</span>
-            <select v-model.number="logPageSize" @change="resetLogPage">
-              <option :value="5">5</option>
-              <option :value="10">10</option>
-              <option :value="20">20</option>
-              <option :value="50">50</option>
-            </select>
+            <SelectMenu
+              class="page-size-menu"
+              :model-value="String(logPageSize)"
+              :options="['5', '10', '20', '50']"
+              mono
+              :min-width="64"
+              @change="onPageSizeChange"
+            />
             <span>{{ $t('settings.label.perPageSuffix') }}</span>
           </div>
           <button :disabled="logPage <= 1 || logsLoading" @click="prevPage">{{ $t('settings.button.prevPage') }}</button>
@@ -358,6 +378,21 @@ onMounted(async () => {
 .log-search-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .log-filter { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-primary); background: var(--bg-input); outline: none; min-width: 0; flex: 1; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238b95b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; padding-right: 28px; }
 .log-filter:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.log-filter-menu.select-trigger {
+  width: auto;
+  flex: 1 1 150px;
+  min-width: 0;
+  font-size: 12px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.page-size .page-size-menu.select-trigger {
+  width: auto;
+  display: inline-flex;
+  padding: 2px 24px 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
 .log-toolbar-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 .log-size { font-size: 12px; color: var(--text-muted); font-family: 'SF Mono',monospace; }
 .log-clear-btns { display: flex; gap: 6px; }

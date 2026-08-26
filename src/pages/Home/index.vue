@@ -3,6 +3,8 @@ import { ref, onMounted, onUnmounted, computed, inject, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../../api.js'
 import { listen } from '@tauri-apps/api/event'
+import SelectMenu from '../../components/SelectMenu.vue'
+import SwitchToggle from '../../components/SwitchToggle.vue'
 import iconUrl from '../../assets/icon.png'
 
 const { t } = useI18n()
@@ -491,8 +493,10 @@ function onStrategyMenuViewportChange() {
         </div>
         </div>
       </div>
-      <div class="card-empty" v-else>
-        {{ $t('home.empty.providers') }}
+      <div class="empty-state" v-else>
+        <svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+        <p class="empty-text">{{ $t('home.empty.providers') }}</p>
+        <button class="empty-cta" @click="navigate('gw-add')">{{ $t('home.button.add') }}</button>
       </div>
     </div>
 
@@ -536,9 +540,7 @@ function onStrategyMenuViewportChange() {
             <span class="tip-pop">{{ $t('home.tip.mappings') }}</span>
           </span>
         </h3>
-        <button class="toggle-btn" :class="{ on: modelMappings.enabled }" @click="toggleModelMappings">
-          {{ modelMappings.enabled ? $t('home.button.enabled') : $t('home.button.disabled') }}
-        </button>
+        <SwitchToggle :model-value="modelMappings.enabled" @change="toggleModelMappings" />
       </div>
       <div class="card-body">
         <div class="mapping-rules" v-if="modelMappings.rules.length > 0">
@@ -559,15 +561,16 @@ function onStrategyMenuViewportChange() {
             <span class="mapping-arrow">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </span>
-            <select
-              class="mapping-select"
-              :value="rule.to"
-              @change="updateMappingRule(index, 'to', $event.target.value)"
+            <SelectMenu
+              class="mapping-select-menu"
+              :model-value="rule.to"
+              :options="aggregatedModels.map(i => i.model)"
+              :placeholder="$t('home.label.selectActualModel')"
               :disabled="!modelMappings.enabled"
-            >
-              <option value="" disabled>{{ $t('home.label.selectActualModel') }}</option>
-              <option v-for="item in aggregatedModels" :key="item.model" :value="item.model">{{ item.model }}</option>
-            </select>
+              mono
+              :min-width="220"
+              @change="updateMappingRule(index, 'to', $event)"
+            />
             <button class="mapping-remove" @click="removeMappingRule(index)" :disabled="!modelMappings.enabled">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
@@ -650,7 +653,7 @@ function onStrategyMenuViewportChange() {
   white-space: pre-line;
   text-align: center;
   max-width: 380px;
-  z-index: 999;
+  z-index: var(--z-toast);
   box-shadow: var(--shadow-md);
   pointer-events: none;
 }
@@ -834,6 +837,40 @@ function onStrategyMenuViewportChange() {
   font-size: 13px;
 }
 
+/* ===== Empty State ===== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 36px 16px;
+  text-align: center;
+}
+.empty-icon { color: var(--text-muted); opacity: .7; }
+.empty-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  max-width: 40ch;
+}
+.empty-cta {
+  padding: 6px 18px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease-out, box-shadow .15s ease-out;
+  margin-top: 2px;
+}
+.empty-cta:hover {
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-sm);
+}
+
 .link-btn {
   padding: 0;
   border: none;
@@ -963,6 +1000,13 @@ function onStrategyMenuViewportChange() {
   gap: 4px;
   flex-shrink: 0;
   margin-left: 10px;
+  /* 行操作默认隐藏，hover 或键盘聚焦所在行时显现，让列表更清爽 */
+  opacity: 0;
+  transition: opacity .15s ease-out;
+}
+.provider-row:hover .pr-actions,
+.provider-row:focus-within .pr-actions {
+  opacity: 1;
 }
 
 .act-btn {
@@ -1040,11 +1084,10 @@ function onStrategyMenuViewportChange() {
   line-height: 1.6;
 }
 .strategy-pill:hover {
-  filter: brightness(1.15);
-  transform: scale(1.04);
+  filter: brightness(1.12);
 }
 .strategy-pill:active {
-  transform: scale(0.97);
+  filter: brightness(0.96);
 }
 .strategy-dot {
   width: 5px;
@@ -1094,11 +1137,10 @@ function onStrategyMenuViewportChange() {
 .strategy-menu-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9990;
+  z-index: var(--z-overlay);
 }
 .strategy-menu {
   position: fixed;
-  z-index: 9991;
   min-width: 180px;
   max-width: 240px;
   max-height: calc(100vh - 80px);
@@ -1248,24 +1290,6 @@ function onStrategyMenuViewportChange() {
 }
 .tip-icon:hover .tip-pop { display: block; }
 
-/* ===== Toggle Button ===== */
-.toggle-btn {
-  padding: 4px 12px;
-  border: none;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all .2s;
-  background: var(--accent-soft);
-  color: var(--text-muted);
-}
-.toggle-btn.on {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.toggle-btn:hover { opacity: .85; }
-
 /* ===== Mapping Rules ===== */
 .mapping-rules {
   display: flex;
@@ -1319,32 +1343,11 @@ function onStrategyMenuViewportChange() {
   cursor: not-allowed;
 }
 
-.mapping-select {
-  flex: 1;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 12.5px;
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  color: var(--text-primary);
-  background: var(--bg-input);
-  outline: none;
-  transition: all .2s;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238b95b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  padding-right: 28px;
-}
-.mapping-select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-soft);
-}
-.mapping-select:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+/* 覆盖子组件 width:100%，让下拉在映射行里与左侧输入框等分 */
+.mapping-select-menu.select-trigger {
+  width: auto;
+  flex: 1 1 0;
+  min-width: 120px;
 }
 
 .mapping-arrow {
@@ -1435,7 +1438,7 @@ function onStrategyMenuViewportChange() {
 .confirm-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: var(--z-overlay);
   background: var(--bg-overlay);
   display: flex;
   align-items: center;

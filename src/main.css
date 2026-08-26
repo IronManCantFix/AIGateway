@@ -126,6 +126,49 @@
   --radius-sm: 8px;
   --radius-md: 10px;
   --radius-lg: 12px;
+
+  /* Spacing scale（4px 基准） */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Motion tokens */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  /* z-index scale：数值从小到大，避免魔法数字混用 */
+  --z-sticky: 100;      /* 顶栏吸顶 */
+  --z-toast: 600;       /* 页面级 toast */
+  --z-dropdown: 800;    /* 下拉菜单/浮层 */
+  --z-overlay: 900;     /* 遮罩与模态 */
+}
+
+/* 键盘焦点可见性：鼠标点击不出现描边，Tab 导航时清晰可见 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+button:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+select:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible),
+[tabindex]:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* 用户偏好减少动态效果时关闭动画与过渡 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 body {
