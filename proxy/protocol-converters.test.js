@@ -15,7 +15,9 @@ import {
   convertResponsesResponseToMessages,
   convertResponsesResponseToChat,
   createSSEConverter,
-  reasoningSSEFactory
+  reasoningSSEFactory,
+  ensureAssistantReasoning,
+  withReasoningCapture
 } from './protocol-converters.js'
 
 function ssePayloads(output, prefix = 'data: ') {
@@ -787,4 +789,180 @@ test('reasoningSSEFactory keeps non-empty id/name on first tool_calls chunk unto
   assert.equal(first.id, 'call_abc')
   assert.equal(first.function.name, 'bash')
   assert.equal(first.function.arguments, '')
+})
+
+// --- Regression: thinking-mode requests must carry `reasoning_content` back ---
+// LiteLLM + DeepSeek reject assistant tool_calls messages that omit
+// `reasoning_content` (400 LITELLM_ERROR "must be passed back to the API").
+// DSH strips the field (its serializer only emits it when reasoning is
+// non-empty) and Claude Code only sets it when thinking blocks exist, so the
+// gateway backfills it: real reasoning from the proxy cache, else empty string.
+
+test('ensureAssistantReasoning injects empty string when no lookup hit', () => {
+  const messages = [
+    { role: 'user', content: 'list files' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'call_abc', type: 'function', function: { name: 'bash', arguments: 'ls' } }] },
+    { role: 'tool', tool_call_id: 'call_abc', content: 'ok' }
+  ]
+  ensureAssistantReasoning(messages, () => null)
+  const assistant = messages[1]
+  assert.equal(assistant.reasoning_content, '')
+  assert.equal(messages[0].reasoning_content, undefined)
+  assert.equal(messages[2].reasoning_content, undefined)
+})
+
+test('ensureAssistantReasoning backfills real reasoning from cache by tool call id', () => {
+  const messages = [
+    { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'bash', arguments: 'a' } }] },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'call_miss', type: 'function', function: { name: 'bash', arguments: 'b' } }] }
+  ]
+  ensureAssistantReasoning(messages, id => (id === 'call_1' ? 'thinking step one' : null))
+  assert.equal(messages[0].reasoning_content, 'thinking step one')
+  assert.equal(messages[1].reasoning_content, '')
+})
+
+test('ensureAssistantReasoning picks the first tool call with a cache hit', () => {
+  const messages = [
+    { role: 'assistant', content: '', tool_calls: [
+      { id: 'call_1', type: 'function', function: { name: 'bash', arguments: 'a' } },
+      { id: 'call_2', type: 'function', function: { name: 'bash', arguments: 'b' } }
+    ] }
+  ]
+  ensureAssistantReasoning(messages, id => (id === 'call_2' ? 'second thought' : null))
+  assert.equal(messages[0].reasoning_content, 'second thought')
+})
+
+test('ensureAssistantReasoning leaves an existing reasoning_content untouched', () => {
+  const messages = [
+    { role: 'assistant', content: '', reasoning_content: 'kept', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'bash', arguments: 'a' } }] }
+  ]
+  ensureAssistantReasoning(messages, () => 'should-not-overwrite')
+  assert.equal(messages[0].reasoning_content, 'kept')
+})
+
+test('ensureAssistantReasoning skips non-assistant, no-tool_calls, and non-array cases', () => {
+  const messages = [
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', content: 'no tools' },
+    { role: 'assistant', content: '', tool_calls: null },
+    { role: 'assistant', content: '', tool_calls: [] }
+  ]
+  const out = ensureAssistantReasoning(messages, () => 'x')
+  assert.equal(out, messages)
+  for (const msg of messages) assert.equal(msg.reasoning_content, undefined)
+})
+
+test('ensureAssistantReasoning still injects the field when tool call ids are missing', () => {
+  // LiteLLM requires the field on every assistant message carrying tool_calls,
+  // so the fallback (empty string) applies even for malformed tool calls whose
+  // id cannot be looked up.
+  const messages = [
+    { role: 'assistant', content: '', tool_calls: [{ id: '', type: 'function', function: { name: 'bash', arguments: 'a' } }] },
+    { role: 'assistant', content: '', tool_calls: [{ type: 'function', function: { name: 'bash', arguments: 'a' } }] }
+  ]
+  ensureAssistantReasoning(messages, () => 'x')
+  assert.equal(messages[0].reasoning_content, '')
+  assert.equal(messages[1].reasoning_content, '')
+})
+
+test('ensureAssistantReasoning returns non-array input unchanged', () => {
+  const notArray = { messages: [] }
+  assert.equal(ensureAssistantReasoning(notArray, () => 'x'), notArray)
+  assert.equal(ensureAssistantReasoning(undefined, () => 'x'), undefined)
+})
+
+test('withReasoningCapture records incremental reasoning per tool call id and resets', () => {
+  const cache = new Map()
+  const convert = withReasoningCapture(line => line, (id, reasoning) => cache.set(id, reasoning))
+  convert('data: {"choices":[{"delta":{"reasoning_content":"let me think"},"finish_reason":null}],"usage":null}')
+  convert('data: {"choices":[{"delta":{"reasoning_content":" harder","content":""},"finish_reason":null}],"usage":null}')
+  convert('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"bash","arguments":"ls"}}],"reasoning_content":"","content":""},"finish_reason":null}],"usage":null}')
+  convert('data: {"choices":[{"delta":{"reasoning_content":"second train of thought"},"finish_reason":null}],"usage":null}')
+  convert('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_def","type":"function","function":{"name":"bash","arguments":"pwd"}}]},"finish_reason":null}],"usage":null}')
+  assert.equal(cache.get('call_abc'), 'let me think harder')
+  // streamReasoning resets after each tool_calls chunk — the second call is
+  // attributed to its own reasoning, not a concatenation of both.
+  assert.equal(cache.get('call_def'), 'second train of thought')
+})
+
+test('withReasoningCapture keeps the latest full text on cumulative reasoning upstreams', () => {
+  const cache = new Map()
+  const convert = withReasoningCapture(line => line, (id, reasoning) => cache.set(id, reasoning))
+  convert('data: {"choices":[{"delta":{"reasoning_content":"hel"},"finish_reason":null}],"usage":null}')
+  convert('data: {"choices":[{"delta":{"reasoning_content":"hello"},"finish_reason":null}],"usage":null}')
+  convert('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"ls"}}]},"finish_reason":null}],"usage":null}')
+  assert.equal(cache.get('call_1'), 'hello')
+})
+
+test('withReasoningCapture passes through [DONE], non-data lines, and converter output', () => {
+  const seen = []
+  const convert = withReasoningCapture(line => { seen.push(line); return `>${line}` }, () => assert.fail('no tool call was sent'))
+  assert.equal(convert('data: [DONE]'), '>data: [DONE]')
+  assert.equal(convert('event: ping'), '>event: ping')
+  assert.equal(convert('data: {"choices":[],"usage":{"total_tokens":3}}'), '>data: {"choices":[],"usage":{"total_tokens":3}}')
+  assert.deepEqual(seen, ['data: [DONE]', 'event: ping', 'data: {"choices":[],"usage":{"total_tokens":3}}'])
+})
+
+test('withReasoningCapture ignores malformed JSON, missing deltas, and non-string reasoning', () => {
+  const cache = new Map()
+  const convert = withReasoningCapture(line => line, (id, reasoning) => cache.set(id, reasoning))
+  convert('data: not-json')
+  convert('data: {"choices":[]}')
+  convert('data: {"choices":[{}]}')
+  convert('data: {"choices":[{"delta":{"reasoning_content":123}}]}')
+  convert('data: {"choices":[{"delta":{"reasoning_content":""}}]}')
+  convert('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"ls"}}]}}]}')
+  assert.equal(cache.get('call_1'), '')
+  assert.equal(cache.size, 1)
+})
+
+test('withReasoningCapture forwards the converter flush hook when present', () => {
+  const converter = line => line
+  const flush = () => 'flushed'
+  converter.flush = flush
+  const wrapped = withReasoningCapture(converter, () => {})
+  assert.equal(typeof wrapped, 'function')
+  assert.equal(wrapped.flush, flush)
+  const plain = withReasoningCapture(line => line, () => {})
+  assert.equal(plain.flush, undefined)
+})
+
+test('integration: Claude Code tool_use without thinking backfills reasoning_content via cache', () => {
+  const body = {
+    model: 'claude-3-5-sonnet',
+    max_tokens: 1024,
+    messages: [
+      { role: 'user', content: 'list files' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Running ls now.' },
+          { type: 'tool_use', id: 'toolu_01', name: 'bash', input: { command: 'ls -la' } }
+        ]
+      },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_01', content: 'total 4' }] }
+    ]
+  }
+  const converted = convertMessagesToChat(body)
+  const assistant = converted.messages.find(m => m.role === 'assistant' && Array.isArray(m.tool_calls))
+  assert.ok(assistant, 'assistant tool_calls message is produced')
+  assert.equal(assistant.tool_calls[0].id, 'toolu_01')
+  assert.equal(assistant.reasoning_content, undefined, 'Claude Code path initially omits the field')
+  // Proxy cache has the reasoning recorded for toolu_01 → backfilled.
+  ensureAssistantReasoning(converted.messages, id => (id === 'toolu_01' ? 'deciding to run ls' : null))
+  assert.equal(assistant.reasoning_content, 'deciding to run ls')
+})
+
+test('integration: DSH chat->chat passthrough without reasoning gets an empty-string backfill', () => {
+  // DSH serializes assistant messages with tool_calls but omits reasoning_content
+  // when its reasoning buffer is empty; chat->chat requests pass through the
+  // gateway unmodified, so ensureAssistantReasoning must add the field itself.
+  const messages = [
+    { role: 'user', content: 'ls' },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'call_dsh', type: 'function', function: { name: 'bash', arguments: 'ls -la' } }] }
+  ]
+  ensureAssistantReasoning(messages, () => null)
+  const assistant = messages[1]
+  assert.equal(assistant.reasoning_content, '')
+  assert.ok('reasoning_content' in assistant, 'field must be present even when empty')
 })

@@ -87,6 +87,76 @@ function extractReasoningText(value) {
   return ''
 }
 
+// --- Thinking-mode request normalization ---
+// Thinking-mode upstreams (e.g. LiteLLM + DeepSeek) reject requests whose
+// assistant tool_calls messages omit `reasoning_content` ("must be passed back
+// to the API"). Clients (DSH, Claude Code, …) routinely strip this non-standard
+// field, so backfill it: prefer the real reasoning recorded for the tool call
+// from the proxy-side reasoning cache, otherwise inject an empty string so the
+// field is present. Mutates the messages array in place and returns it.
+
+function ensureAssistantReasoning(messages, lookupReasoning) {
+  if (!Array.isArray(messages)) return messages
+  for (const msg of messages) {
+    if (!msg || msg.role !== 'assistant') continue
+    const toolCalls = msg.tool_calls
+    if (!Array.isArray(toolCalls) || toolCalls.length === 0) continue
+    if (msg.reasoning_content !== void 0) continue
+    let reasoning = ''
+    if (typeof lookupReasoning === 'function') {
+      for (const call of toolCalls) {
+        if (!call || !call.id) continue
+        const cached = lookupReasoning(call.id)
+        if (cached) {
+          reasoning = cached
+          break
+        }
+      }
+    }
+    msg.reasoning_content = reasoning
+  }
+  return messages
+}
+
+/**
+ * Wrap an SSE converter so the `reasoning_content` deltas streamed before each
+ * tool_call are recorded against the tool call's id in the reasoning cache.
+ * The next request can then backfill `reasoning_content` even when the client
+ * stripped it (thinking-mode upstreams reject the omission).
+ * Handles both incremental (fragment) and cumulative (full-text) reasoning.
+ * @param converter - the SSE line converter: (line) => string.
+ * @param cacheReasoning - (callId, reasoning) => void.
+ * @returns a wrapped converter; any `flush` hook is forwarded.
+ */
+function withReasoningCapture(converter, cacheReasoning) {
+  let streamReasoning = ''
+  const wrapped = (line) => {
+    if (line.startsWith('data: ') && !line.startsWith('data: [DONE]')) {
+      try {
+        const data = JSON.parse(line.slice(6))
+        const delta = data.choices && data.choices[0] && data.choices[0].delta
+        if (delta) {
+          const next = delta.reasoning_content
+          if (typeof next === 'string' && next.length > 0) {
+            // Cumulative upstreams resend the full text every chunk; incremental
+            // upstreams send fragments. Keep the latest full text either way.
+            streamReasoning = streamReasoning && next.startsWith(streamReasoning) ? next : streamReasoning + next
+          }
+          if (Array.isArray(delta.tool_calls)) {
+            for (const call of delta.tool_calls) {
+              if (call && call.id) cacheReasoning(call.id, streamReasoning)
+            }
+            streamReasoning = ''
+          }
+        }
+      } catch {}
+    }
+    return converter(line)
+  }
+  if (converter && typeof converter.flush === 'function') wrapped.flush = converter.flush
+  return wrapped
+}
+
 function convertResponsesToResponses(body) {
   const result = pickFields(body, TARGET_FIELDS.responses)
   if (!Array.isArray(result.input)) return result
@@ -2102,6 +2172,8 @@ export {
   mapFinishReason,
   parseMaybeJson,
   setReasoningCache,
+  ensureAssistantReasoning,
+  withReasoningCapture,
   convertChatToMessages,
   convertMessagesToChat,
   convertChatToResponses,
