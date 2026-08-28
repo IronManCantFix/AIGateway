@@ -9,6 +9,7 @@ const { t } = useI18n()
 const logEnabled = ref(false)
 const logs = ref([])
 const logsLoading = ref(false)
+const logsRefreshing = ref(false)
 const logsLoaded = ref(false)
 const logFileSize = ref(0)
 const logSearch = ref({ provider: '', model: '', statusCode: '', dateFrom: '', dateTo: '' })
@@ -68,7 +69,13 @@ async function loadLogs() {
     logsLoaded.value = true
   } finally {
     logsLoading.value = false
+    logsRefreshing.value = false
   }
+}
+
+async function refreshLogs() {
+  logsRefreshing.value = true
+  await loadLogs()
 }
 
 async function clearLogs() {
@@ -201,6 +208,12 @@ function onPageSizeChange(v) {
   logPageSize.value = Number(v) || 5
   resetLogPage()
 }
+function firstPage() {
+  if (logPage.value > 1) {
+    logPage.value = 1
+    loadLogs().catch(e => console.error('Load logs failed:', e))
+  }
+}
 function prevPage() {
   if (logPage.value > 1) {
     logPage.value -= 1
@@ -280,7 +293,7 @@ onMounted(async () => {
           <div class="log-toolbar-actions">
             <span class="log-size">{{ $t('settings.label.logFileSize', { size: fmtSize(logFileSize) }) }}</span>
             <div class="log-clear-btns">
-              <button class="refresh-btn" @click="loadLogs()" :disabled="logsLoading">{{ logsLoading ? $t('common.loading') : $t('settings.button.refresh') }}</button>
+              <button class="refresh-btn" @click="refreshLogs" :disabled="logsLoading">{{ logsRefreshing ? $t('common.loading') : $t('settings.button.refresh') }}</button>
               <button class="clear-body-btn" @click="clearLogs">{{ $t('settings.button.clearLogs') }}</button>
               <button class="clear-body-btn" @click="clearLogsBodyData">{{ $t('settings.button.clearBodies') }}</button>
             </div>
@@ -333,12 +346,15 @@ onMounted(async () => {
             />
             <span>{{ $t('settings.label.perPageSuffix') }}</span>
           </div>
-          <button :disabled="logPage <= 1 || logsLoading" @click="prevPage">{{ $t('settings.button.prevPage') }}</button>
-          <span class="page-info">{{ $t('settings.label.pageInfo', { page: logPage, total: logTotalPages }) }}</span>
-          <button :disabled="!logHasNextPage || logsLoading" @click="nextPage">{{ $t('settings.button.nextPage') }}</button>
+          <div class="pager-controls">
+            <button :disabled="logPage <= 1 || logsLoading" @click="firstPage">{{ $t('settings.button.firstPage') }}</button>
+            <button :disabled="logPage <= 1 || logsLoading" @click="prevPage">{{ $t('settings.button.prevPage') }}</button>
+            <span class="page-info">{{ $t('settings.label.pageInfo', { page: logPage, total: logTotalPages }) }}</span>
+            <button :disabled="!logHasNextPage || logsLoading" @click="nextPage">{{ $t('settings.button.nextPage') }}</button>
+          </div>
         </div>
 
-        <div class="card-empty" v-if="logsLoading">{{ $t('settings.label.logsLoading') }}</div>
+        <div class="card-empty" v-if="logsLoading && !logs.length">{{ $t('settings.label.logsLoading') }}</div>
         <div class="card-empty" v-else-if="logsLoaded && !logs.length && hasActiveLogFilter">{{ $t('settings.label.noFilteredLogs') }}</div>
         <div class="card-empty" v-else-if="logsLoaded && !logs.length">{{ $t('settings.label.empty') }}</div>
         <div class="card-empty" v-else-if="!logsLoaded">{{ $t('settings.label.logsHint') }}</div>
@@ -375,12 +391,12 @@ onMounted(async () => {
 
 .log-list { overflow: visible; }
 .log-toolbar { padding: 12px 16px 8px; border-bottom: 1px solid var(--border-subtle); }
-.log-search-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.log-filter { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-primary); background: var(--bg-input); outline: none; min-width: 0; flex: 1; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238b95b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; padding-right: 28px; }
+.log-search-row { display: flex; gap: 8px; flex-wrap: nowrap; }
+.log-filter { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-primary); background: var(--bg-input); outline: none; min-width: 0; flex: 1 1 130px; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238b95b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; padding-right: 28px; }
 .log-filter:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .log-filter-menu.select-trigger {
   width: auto;
-  flex: 1 1 150px;
+  flex: 0 1 auto;
   min-width: 0;
   font-size: 12px;
   padding-top: 5px;
@@ -399,12 +415,13 @@ onMounted(async () => {
 .clear-body-btn, .refresh-btn { padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font-size: 12px; color: var(--text-secondary); cursor: pointer; transition: all .15s; }
 .clear-body-btn:hover, .refresh-btn:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--border-hover); }
 
-.log-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--border-subtle); }
+.log-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--border-subtle); }
 .log-pagination button { padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font-size: 12px; color: var(--text-secondary); cursor: pointer; transition: all .15s; }
 .log-pagination button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--border-hover); }
 .log-pagination button:disabled { opacity: .3; cursor: default; }
 .page-info { font-size: 12px; color: var(--text-secondary); font-family: 'SF Mono',monospace; }
-.page-size { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); margin-right: auto; }
+.pager-controls { display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0; }
+.page-size { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
 .page-size select { padding: 2px 22px 2px 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; color: var(--text-primary); background: var(--bg-input); outline: none; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238b95b0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 4px center; }
 
 .log-item { padding: 10px 16px; border-top: 1px solid var(--border-subtle); }
