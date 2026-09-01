@@ -30,6 +30,11 @@ const httpProxyPassword = ref('')
 const httpProxyExcludeProfiles = ref([])
 const showProxyAuth = ref(false)
 
+const retryEnabled = ref(false)
+const retryStatusCodes = ref('400, 500, 503, 504')
+const retryMaxRetries = ref(3)
+const retryDelaySeconds = ref(5)
+
 const profiles = ref([])
 
 let copyTimer = 0
@@ -64,6 +69,15 @@ async function loadSettings() {
     httpProxyPassword.value = s.httpProxy.password || ''
     httpProxyExcludeProfiles.value = s.httpProxy.excludeProfiles || []
   }
+
+  if (s.retry) {
+    retryEnabled.value = !!s.retry.enabled
+    retryStatusCodes.value = Array.isArray(s.retry.statusCodes) && s.retry.statusCodes.length
+      ? s.retry.statusCodes.join(', ')
+      : '400, 500, 503, 504'
+    retryMaxRetries.value = s.retry.maxRetries ?? 3
+    retryDelaySeconds.value = s.retry.retryDelayMs ? Math.round(s.retry.retryDelayMs / 1000) : 5
+  }
 }
 
 async function loadProfiles() {
@@ -73,7 +87,19 @@ async function loadProfiles() {
 async function saveSettings() {
   const n = parseInt(port.value, 10)
   if (isNaN(n) || n < 1 || n > 65535) { port.value = 9999; return }
+
+  // 解析可重试状态码：逗号/空格分隔，过滤非法值
+  const codes = String(retryStatusCodes.value || '')
+    .split(/[,，\s]+/)
+    .map(c => parseInt(c, 10))
+    .filter(c => Number.isInteger(c) && c >= 100 && c <= 599)
+  const maxRetries = Math.max(0, Math.min(20, parseInt(retryMaxRetries.value, 10) || 0))
+  const delaySeconds = Math.max(1, Math.min(300, parseInt(retryDelaySeconds.value, 10) || 5))
+
+  // 合并当前设置，避免覆盖 language/theme/logEnabled 等字段
+  const current = await api.getSettings()
   await api.setSettings({
+    ...current,
     port: n,
     autoStart: autoStart.value,
     trayStatsEnabled: trayStatsEnabled.value,
@@ -83,6 +109,12 @@ async function saveSettings() {
       username: httpProxyUsername.value || null,
       password: httpProxyPassword.value || null,
       excludeProfiles: httpProxyExcludeProfiles.value
+    },
+    retry: {
+      enabled: retryEnabled.value,
+      statusCodes: codes,
+      maxRetries,
+      retryDelayMs: delaySeconds * 1000
     }
   })
   showToast('✓ ' + t('settings.label.saved'))
@@ -437,6 +469,38 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- 接口重试 -->
+        <label class="setting-row toggle-row" @change="saveSettings">
+          <div class="setting-label">
+            {{ $t('settings.section.apiRetry') }}
+            <p class="field-hint">{{ $t('settings.label.retryHint') }}</p>
+          </div>
+          <div class="setting-control">
+            <input type="checkbox" v-model="retryEnabled" />
+          </div>
+        </label>
+
+        <div class="setting-nested" v-if="retryEnabled">
+          <div class="proxy-field">
+            <label>{{ $t('settings.label.retryStatusCodes') }}</label>
+            <input v-model="retryStatusCodes" :placeholder="$t('settings.placeholder.retryStatusCodes')" @change="saveSettings" />
+          </div>
+
+          <div class="retry-fields">
+            <div class="proxy-field">
+              <label>{{ $t('settings.label.retryMaxRetries') }}</label>
+              <input class="retry-num-input" v-model.number="retryMaxRetries" type="number" min="0" max="20" @change="saveSettings" />
+            </div>
+            <div class="proxy-field">
+              <label>{{ $t('settings.label.retryDelay') }}</label>
+              <div class="retry-delay">
+                <input class="retry-num-input" v-model.number="retryDelaySeconds" type="number" min="1" max="300" @change="saveSettings" />
+                <span class="retry-delay-unit">{{ $t('settings.label.retryDelayUnit') }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 自动启动 -->
         <label class="setting-row toggle-row" @change="saveSettings">
           <div class="setting-label">{{ $t('settings.label.autoStart') }}</div>
@@ -570,6 +634,13 @@ label.toggle-row { cursor: pointer; margin: 0; }
 .proxy-field label { display: block; font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
 .proxy-field input { width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; outline: none; transition: all .2s; background: var(--bg-input); color: var(--text-primary); }
 .proxy-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+/* API Retry */
+.retry-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.retry-num-input { width: 100% !important; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 14px; font-weight: 500; font-family: 'SF Mono','Fira Code',monospace; outline: none; transition: all .2s; background: var(--bg-input); color: var(--text-primary); }
+.retry-num-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.retry-delay { display: flex; align-items: center; gap: 8px; }
+.retry-delay-unit { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .proxy-auth-toggle { font-size: 13px; color: var(--accent); cursor: pointer; margin-bottom: 12px; user-select: none; }
 .proxy-auth-toggle:hover { text-decoration: underline; }
 .proxy-exclude { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }

@@ -41,6 +41,7 @@ You have multiple AI tools: Codex CLI, Cursor, CherryStudio, custom scripts... e
 - 🔄 Switch backends freely: enable/disable configs in the GUI, tools are unaware
 - 🔀 Automatic protocol conversion: OpenAI-format tools can call Anthropic and vice versa
 - 🎯 Support multiple providers simultaneously, auto-route by model name — matches providers in config order, stops at first match
+- 🔁 API retry: configurable status codes, retry count and interval — transient upstream failures are retried automatically, while 429 (insufficient balance) is never retried
 
 ## ⚡ Quick Start
 
@@ -256,6 +257,29 @@ The system tray right-click menu allows quick toggling of HTTP proxy without ope
 ### Log Tags
 
 Requests through the proxy show a blue `PROXY` badge in logs, making it easy to identify which requests used the proxy channel.
+
+## 🔁 API Retry
+
+When the upstream API returns a retryable error code (e.g., 500, 503, 504), the gateway automatically waits for a configurable delay and re-sends the same request, improving success rates under transient failures.
+
+### Configuration
+
+1. Open the Settings page, find the "API Retry" configuration card
+2. Enable the retry toggle
+3. Enter the retryable status codes (comma-separated, e.g., `400, 500, 503, 504`)
+4. Set the maximum number of retries (e.g., 3) and the retry interval (e.g., 5 or 10 seconds)
+
+### Rules
+
+- **Only status codes in the configured list are retried**: codes that should not be retried — such as `429` (insufficient balance / rate limited) or `401` (auth failure) — will not trigger retries
+- **Connection-level errors are also retried**: refused connections, timeouts, DNS failures, and other network errors are included in the retry
+- **Retries only happen before headers are sent to the client**: streaming responses are never retried mid-stream, avoiding duplicate data for the client
+- **Works together with failover**: after the retry budget for a provider is exhausted, the gateway switches to the next provider
+- Requests that succeeded after retries show a purple `↻N` badge in logs (N = number of retries)
+
+### Tray Quick Toggle
+
+Click the tray icon to open the panel and quickly toggle API retry without opening the Settings page. Changes take effect immediately, no proxy restart needed.
 
 ## 🏷️ Provider Types
 

@@ -35,6 +35,35 @@ pub struct HttpProxyConfig {
     pub exclude_profiles: Vec<String>,
 }
 
+/// 接口重试机制配置：当上游返回可重试的状态码时，等待 retry_delay_ms 后自动重试。
+/// 429（欠费/限流）等无需重试的状态码不要加入 status_codes。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(rename = "statusCodes", default = "default_retry_status_codes")]
+    pub status_codes: Vec<u16>,
+    #[serde(rename = "maxRetries", default = "default_retry_max_retries")]
+    pub max_retries: u32,
+    #[serde(rename = "retryDelayMs", default = "default_retry_delay_ms")]
+    pub retry_delay_ms: u64,
+}
+
+fn default_retry_status_codes() -> Vec<u16> { vec![400, 500, 503, 504] }
+fn default_retry_max_retries() -> u32 { 3 }
+fn default_retry_delay_ms() -> u64 { 5000 }
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            status_codes: vec![400, 500, 503, 504],
+            max_retries: 3,
+            retry_delay_ms: 5000,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default = "default_port")]
@@ -45,6 +74,8 @@ pub struct Settings {
     pub log_enabled: bool,
     #[serde(rename = "httpProxy", default)]
     pub http_proxy: Option<HttpProxyConfig>,
+    #[serde(rename = "retry", default)]
+    pub retry: Option<RetryConfig>,
     #[serde(default = "default_language")]
     pub language: String,
     #[serde(default = "default_theme")]
@@ -64,6 +95,7 @@ impl Default for Settings {
             auto_start: false,
             log_enabled: false,
             http_proxy: None,
+            retry: None,
             language: "auto".to_string(),
             theme: "auto".to_string(),
             tray_stats_enabled: false,
@@ -136,6 +168,8 @@ pub struct LogEntry {
     pub upstream_url: Option<String>,
     #[serde(default)]
     pub proxy: Option<bool>,
+    #[serde(rename = "retries", default)]
+    pub retries: Option<u32>,
     #[serde(rename = "modelMapping", default)]
     pub model_mapping: Option<String>,
     #[serde(rename = "originalModel", default)]
@@ -995,6 +1029,7 @@ impl ConfigStore {
                 "port": settings.port,
                 "logEnabled": log_enabled,
                 "httpProxy": settings.http_proxy,
+                "retry": settings.retry,
             },
             "models": model_entries,
             "modelStrategies": model_strategies,

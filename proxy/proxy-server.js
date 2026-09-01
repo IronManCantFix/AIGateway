@@ -345,6 +345,23 @@ function injectGeminiThoughtSignatures(messages) {
   }
 }
 
+// --- 重试机制配置 ---
+// 接口重试：上游返回可重试状态码（settings.retry.statusCodes，如 500/503/504）时，
+// 等待 retryDelayMs 后重试同一请求，最多 maxRetries 次。
+// 429（欠费/限流）等状态码不在列表中则不会重试；连接级错误同样纳入重试。
+function getRetrySettings() {
+  const r = currentConfig?.settings?.retry
+  if (!r || !r.enabled) {
+    return { enabled: false, statusCodes: [], maxRetries: 0, retryDelayMs: 0 }
+  }
+  const statusCodes = Array.isArray(r.statusCodes)
+    ? r.statusCodes.map(Number).filter((n) => Number.isInteger(n) && n >= 100 && n <= 599)
+    : []
+  const maxRetries = Math.max(0, Number(r.maxRetries) || 0)
+  const retryDelayMs = Math.max(0, Number(r.retryDelayMs) || 0)
+  return { enabled: true, statusCodes, maxRetries, retryDelayMs }
+}
+
 // --- Forward request to upstream ---
 
 function createProxyAgent(proxyConfig, isHttps, profileId) {
@@ -936,6 +953,53 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
   upstreamReq.end()
 }
 
+// --- 重试包装 ---
+// 在 forwardRequest 外层叠加接口重试：上游返回可重试状态码或连接级错误时，
+// 等待 retryDelayMs 后重新发起同一请求，最多 maxRetries 次。
+// 重试只在响应头尚未发给客户端（headersSent === false）时进行，
+// 避免流式响应中途重试导致客户端收到重复内容。
+// makeAttempt(onUpstreamResponse, onConnectionError) 负责执行一次真实的
+// forwardRequest；onUpstreamResponse / onConnectionError 均为组合钩子，
+// 参数 (payload, inner)：inner 是调用方原本的钩子（如 failover 切换逻辑），
+// 钩子返回 false 表示「不写客户端、交给上层处理」，返回 true 表示正常继续。
+function forwardWithRetry(clientReq, clientRes, makeAttempt) {
+  const retry = getRetrySettings()
+  let retriesLeft = retry.enabled ? retry.maxRetries : 0
+  const delayMs = retry.retryDelayMs
+  // 客户端是否已断开：req 流读完后 destroyed 恒为 true，不能作为判断依据；
+  // 应使用 res.destroyed（响应连接已销毁）或 req.aborted（客户端提前中断）。
+  const clientGone = () => clientReq.aborted || clientRes.destroyed
+
+  const attempt = () => {
+    if (clientRes.headersSent || clientRes.writableEnded || clientGone()) return
+    makeAttempt(
+      // 上游 HTTP 响应钩子：命中可重试状态码时排空响应并延迟重试
+      (upstreamRes, inner) => {
+        const status = upstreamRes.statusCode
+        if (retriesLeft > 0 && retry.statusCodes.includes(status) && !clientRes.headersSent && !clientGone()) {
+          retriesLeft--
+          clientReq._retryCount = (clientReq._retryCount || 0) + 1
+          upstreamRes.resume()
+          setTimeout(attempt, delayMs)
+          return false
+        }
+        return inner ? inner(upstreamRes) : true
+      },
+      // 连接级错误钩子：网络异常（拒绝连接/超时/DNS 等）同样纳入重试
+      (err, inner) => {
+        if (retriesLeft > 0 && !clientRes.headersSent && !clientGone()) {
+          retriesLeft--
+          clientReq._retryCount = (clientReq._retryCount || 0) + 1
+          setTimeout(attempt, delayMs)
+          return true
+        }
+        return inner ? inner(err) : false
+      }
+    )
+  }
+  attempt()
+}
+
 // --- Model strategy helpers ---
 
 function getModelStrategy(requestedModel) {
@@ -1072,7 +1136,7 @@ async function handleFilesRequest(req, res) {
     logged = true
     logRequest(endpoint, '-', res.statusCode, Date.now() - started, null,
       req._loggedRequestBody ?? null, req._filesResponseBody ?? null,
-      req._providerName ?? '-', { method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy })
+      req._providerName ?? '-', { method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, retries: req._retryCount ?? 0 })
   }
   res.on('finish', finalize)
   res.on('close', finalize)
@@ -1165,8 +1229,14 @@ async function handleFilesRequest(req, res) {
 
   req._onResponseBody = (b) => { req._filesResponseBody = b }
 
-  forwardRequest(req, res, upstreamUrl, profile.apiKey, forwardBody, null,
-    req._onResponseBody, null, 'files', profile.id, contentType)
+  forwardWithRetry(req, res, (retryOnUpstream, retryOnConnError) => {
+    forwardRequest(req, res, upstreamUrl, profile.apiKey, forwardBody, null,
+      req._onResponseBody, null, 'files', profile.id, contentType,
+      (upstreamRes) => retryOnUpstream(upstreamRes, null),
+      undefined,
+      (err) => retryOnConnError(err, null)
+    )
+  })
 }
 
 // --- Handle API request ---
@@ -1384,94 +1454,131 @@ async function handleApiRequest(req, res) {
       const agent = createProxyAgent(proxyConfig, true, profile.id)
       const bodyBuf = Buffer.from(JSON.stringify(nanoBody))
 
-      const options = {
-        hostname: parsed.hostname,
-        port: parsed.port || 443,
-        path: parsed.pathname + parsed.search,
-        method: 'POST',
-        agent,
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': bodyBuf.length,
-          'x-goog-api-key': profile.apiKey
-        }
-      }
+      const retry = getRetrySettings()
+      let retriesLeft = retry.enabled ? retry.maxRetries : 0
+      // 客户端是否已断开：req 流读完后 destroyed 恒为 true，不能作为判断依据
+      const clientGone = () => req.aborted || res.destroyed
 
-      const upstreamReq = https.request(options, (upstreamRes) => {
-        const encoding = upstreamRes.headers['content-encoding']
-        const decompressor = encoding === 'gzip' ? zlib.createGunzip()
-          : encoding === 'deflate' ? zlib.createInflate()
-          : encoding === 'br' ? zlib.createBrotliDecompress()
-          : null
-        if (decompressor) {
-          upstreamRes.pipe(decompressor)
-          upstreamRes.on('error', (e) => decompressor.destroy(e))
-          decompressor.headers = upstreamRes.headers
-          decompressor.statusCode = upstreamRes.statusCode
-          upstreamRes = decompressor
+      const attemptNano = () => {
+        if (res.headersSent || res.writableEnded || clientGone()) return
+        const options = {
+          hostname: parsed.hostname,
+          port: parsed.port || 443,
+          path: parsed.pathname + parsed.search,
+          method: 'POST',
+          agent,
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': bodyBuf.length,
+            'x-goog-api-key': profile.apiKey
+          }
         }
 
-        const chunks = []
-        upstreamRes.on('data', c => chunks.push(c))
-        upstreamRes.on('end', () => {
-          const rawBody = Buffer.concat(chunks).toString()
-          if (upstreamRes.statusCode >= 400) {
-            res.writeHead(upstreamRes.statusCode, { 'Content-Type': 'application/json' })
-            res.end(rawBody)
-            if (req._onResponseBody) req._onResponseBody(rawBody)
+        const upstreamReq = https.request(options, (upstreamRes) => {
+          const encoding = upstreamRes.headers['content-encoding']
+          const decompressor = encoding === 'gzip' ? zlib.createGunzip()
+            : encoding === 'deflate' ? zlib.createInflate()
+            : encoding === 'br' ? zlib.createBrotliDecompress()
+            : null
+          if (decompressor) {
+            upstreamRes.pipe(decompressor)
+            upstreamRes.on('error', (e) => decompressor.destroy(e))
+            decompressor.headers = upstreamRes.headers
+            decompressor.statusCode = upstreamRes.statusCode
+            upstreamRes = decompressor
+          }
+
+          // 可重试状态码：排空响应并延迟重试（headers 未发出时才重试）
+          if (retriesLeft > 0 && retry.statusCodes.includes(upstreamRes.statusCode) && !res.headersSent && !clientGone()) {
+            retriesLeft--
+            req._retryCount = (req._retryCount || 0) + 1
+            upstreamRes.resume()
+            upstreamReq.destroy()
+            setTimeout(attemptNano, retry.retryDelayMs)
             return
           }
-          try {
-            const interaction = JSON.parse(rawBody)
-            const openaiResponse = convertNanoBananaResponseToOpenAI(interaction, body.response_format)
-            const responseBody = JSON.stringify(openaiResponse)
-            res.writeHead(upstreamRes.statusCode || 200, { 'Content-Type': 'application/json' })
-            res.end(responseBody)
-            if (req._onResponseBody) req._onResponseBody(responseBody)
-          } catch (e) {
+
+          const chunks = []
+          upstreamRes.on('data', c => chunks.push(c))
+          upstreamRes.on('end', () => {
+            const rawBody = Buffer.concat(chunks).toString()
+            if (upstreamRes.statusCode >= 400) {
+              res.writeHead(upstreamRes.statusCode, { 'Content-Type': 'application/json' })
+              res.end(rawBody)
+              if (req._onResponseBody) req._onResponseBody(rawBody)
+              return
+            }
+            try {
+              const interaction = JSON.parse(rawBody)
+              const openaiResponse = convertNanoBananaResponseToOpenAI(interaction, body.response_format)
+              const responseBody = JSON.stringify(openaiResponse)
+              res.writeHead(upstreamRes.statusCode || 200, { 'Content-Type': 'application/json' })
+              res.end(responseBody)
+              if (req._onResponseBody) req._onResponseBody(responseBody)
+            } catch (e) {
+              res.writeHead(502, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: 'Bad Gateway', message: 'Failed to convert Nano Banana response: ' + e.message }))
+            }
+          })
+        })
+
+        upstreamReq.setTimeout(600000, () => {
+          upstreamReq.destroy(new Error('upstream request timeout'))
+        })
+
+        upstreamReq.on('error', (err) => {
+          if (!res.headersSent) {
+            // 连接级错误：先按重试配置重试
+            if (retriesLeft > 0 && !res.headersSent && !clientGone()) {
+              retriesLeft--
+              req._retryCount = (req._retryCount || 0) + 1
+              setTimeout(attemptNano, retry.retryDelayMs)
+              return
+            }
+            const errorBody = JSON.stringify({ error: 'Bad Gateway', message: err.message })
             res.writeHead(502, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: 'Bad Gateway', message: 'Failed to convert Nano Banana response: ' + e.message }))
+            res.end(errorBody)
+            if (req._onResponseBody) req._onResponseBody(errorBody)
           }
         })
-      })
 
-      upstreamReq.setTimeout(600000, () => {
-        upstreamReq.destroy(new Error('upstream request timeout'))
-      })
+        upstreamReq.write(bodyBuf)
+        upstreamReq.end()
+      }
 
-      upstreamReq.on('error', (err) => {
-        if (!res.headersSent) {
-          const errorBody = JSON.stringify({ error: 'Bad Gateway', message: err.message })
-          res.writeHead(502, { 'Content-Type': 'application/json' })
-          res.end(errorBody)
-          if (req._onResponseBody) req._onResponseBody(errorBody)
-        }
-      })
-
-      upstreamReq.write(bodyBuf)
-      upstreamReq.end()
+      attemptNano()
       return
     }
 
     // No SSE, no body conversion — pass through.
     const rawBuffer = req._rawBuffer  // null for JSON path
-    forwardRequest(req, res, upstreamUrl, profile.apiKey,
-      rawBuffer || body,
-      null,
-      req._onResponseBody || null,
-      null,
-      source,
-      profile.id,
-      rawBuffer ? req._contentType : 'application/json'
-    )
+    forwardWithRetry(req, res, (retryOnUpstream, retryOnConnError) => {
+      forwardRequest(req, res, upstreamUrl, profile.apiKey,
+        rawBuffer || body,
+        null,
+        req._onResponseBody || null,
+        null,
+        source,
+        profile.id,
+        rawBuffer ? req._contentType : 'application/json',
+        (upstreamRes) => retryOnUpstream(upstreamRes, null),
+        undefined,
+        (err) => retryOnConnError(err, null)
+      )
+    })
     return
   }
 
   if (source === 'interactions') {
     // Native pass-through: forward request body as-is to Google Interactions API
-    forwardRequest(req, res, upstreamUrl, profile.apiKey, body,
-      null, req._onResponseBody || null, null, source, profile.id, 'application/json',
-      null, meta.authType)
+    forwardWithRetry(req, res, (retryOnUpstream, retryOnConnError) => {
+      forwardRequest(req, res, upstreamUrl, profile.apiKey, body,
+        null, req._onResponseBody || null, null, source, profile.id, 'application/json',
+        (upstreamRes) => retryOnUpstream(upstreamRes, null),
+        meta.authType,
+        (err) => retryOnConnError(err, null)
+      )
+    })
     return
   }
 
@@ -1564,26 +1671,30 @@ async function handleApiRequest(req, res) {
       }
       const curResponseBodyConverter = getResponseBodyConverter(source, curMeta.target)
 
-      forwardRequest(req, res, curUpstreamUrl, currentProfile.apiKey, curBody,
-        curSseConverter, req._onResponseBody || null, curResponseBodyConverter,
-        source, currentProfile.id, null,
-        (upstreamRes) => {
-          if (upstreamRes.statusCode >= 400 && !res.headersSent && index < candidates.length - 1) {
-            lastError = upstreamRes.statusCode
-            upstreamRes.resume()
+      forwardWithRetry(req, res, (retryOnUpstream, retryOnConnError) => {
+        forwardRequest(req, res, curUpstreamUrl, currentProfile.apiKey, curBody,
+          curSseConverter, req._onResponseBody || null, curResponseBodyConverter,
+          source, currentProfile.id, null,
+          (upstreamRes) => retryOnUpstream(upstreamRes, (upstreamRes2) => {
+            // Failover: 该状态码不可重试或重试次数耗尽，切换下一个提供商
+            if (upstreamRes2.statusCode >= 400 && !res.headersSent && index < candidates.length - 1) {
+              lastError = upstreamRes2.statusCode
+              upstreamRes2.resume()
+              setImmediate(() => attempt(index + 1))
+              return false
+            }
+            return true
+          }),
+          curMeta.authType,
+          // 连接级错误（DNS/拒绝连接/超时等）：先按重试配置重试，
+          // 重试耗尽后 headers 未发出时切下一个提供商
+          (err) => retryOnConnError(err, () => {
+            lastError = 502
             setImmediate(() => attempt(index + 1))
-            return false
-          }
-          return true
-        },
-        curMeta.authType,
-        // 连接级错误（DNS/拒绝连接/超时等）：headers 未发出时同样切下一个提供商
-        () => {
-          lastError = 502
-          setImmediate(() => attempt(index + 1))
-          return true
-        }
-      )
+            return true
+          })
+        )
+      })
     }
 
     attempt(0)
@@ -1591,15 +1702,18 @@ async function handleApiRequest(req, res) {
   }
 
   // Normal forwarding (non-failover)
-  forwardRequest(req, res, upstreamUrl, profile.apiKey, body, sseConverter,
-    req._onResponseBody || null,
-    responseBodyConverter,
-    source,
-    profile.id,
-    null,
-    null,
-    meta.authType
-  )
+  forwardWithRetry(req, res, (retryOnUpstream, retryOnConnError) => {
+    forwardRequest(req, res, upstreamUrl, profile.apiKey, body, sseConverter,
+      req._onResponseBody || null,
+      responseBodyConverter,
+      source,
+      profile.id,
+      null,
+      (upstreamRes) => retryOnUpstream(upstreamRes, null),
+      meta.authType,
+      (err) => retryOnConnError(err, null)
+    )
+  })
 }
 
 // --- HTTP Server ---
@@ -1618,6 +1732,7 @@ function logRequest(endpoint, model, statusCode, duration, error, requestBody, r
     if (extra.method) data.method = extra.method
     if (extra.upstreamUrl) data.upstreamUrl = extra.upstreamUrl
     if (extra.usedProxy) data.proxy = true
+    if (extra.retries != null) data.retries = extra.retries
     if (extra.modelMapping) data.modelMapping = extra.modelMapping
     if (extra.originalModel) data.originalModel = extra.originalModel
     if (extra.bodySizeBefore != null) data.bodySizeBefore = extra.bodySizeBefore
@@ -1767,7 +1882,7 @@ const server = http.createServer(async (req, res) => {
       responseBody = errorBody
     }
     model = model || '-'
-    const errExtra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
+    const errExtra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, retries: req._retryCount ?? 0, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
     logRequest(endpoint, model, res.statusCode || 500, Date.now() - startTime, err.message, rawBody, responseBody, req._providerName, errExtra, req._streamUsage)
     return
   }
@@ -1779,7 +1894,7 @@ const server = http.createServer(async (req, res) => {
   const finalizeLog = () => {
     if (logged) return
     logged = true
-    const extra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
+    const extra = { method: req.method, upstreamUrl: req._upstreamUrl, usedProxy: req._usedProxy, retries: req._retryCount ?? 0, modelMapping: req._modelMapping, originalModel: req._originalModel, bodySizeBefore: req._bodySizeBefore, bodySizeAfter: req._bodySizeAfter }
     logRequest(endpoint, model, res.statusCode, Date.now() - startTime, null, rawBody, responseBody, req._providerName, extra, req._streamUsage)
   }
   // bun 运行时下 res 的 close 事件在客户端提前断开时可能不触发，
