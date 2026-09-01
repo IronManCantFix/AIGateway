@@ -306,6 +306,7 @@ onMounted(async () => {
               <span class="log-badge" :class="statusLabel(l.statusCode)">{{ l.statusCode }}</span>
               <span class="log-badge log-method" v-if="l.method">{{ l.method }}</span>
               <span class="log-badge log-proxy" v-if="l.proxy">PROXY</span>
+              <span class="log-badge log-retry" v-if="l.retries">↻{{ l.retries }}</span>
               <span class="log-ep" :title="l.endpoint">{{ endpointLabel(l.endpoint) }}</span>
               <span class="log-upstream" v-if="l.upstreamUrl" :title="l.upstreamUrl">{{ shortUrl(l.upstreamUrl) }}</span>
               <span class="log-time">{{ fmtTime(l.timestamp) }}</span>
@@ -433,6 +434,7 @@ onMounted(async () => {
 .log-badge.warn { background: var(--warning-soft); color: var(--warning); }
 .log-badge.error { background: var(--danger-soft); color: var(--danger); }
 .log-proxy { background: rgba(59,130,246,.12); color: #60a5fa; font-size: 10px; }
+.log-retry { background: rgba(168,85,247,.14); color: #c084fc; font-size: 10px; }
 .log-method { background: var(--accent-soft); color: var(--text-secondary); font-size: 10px; letter-spacing: .3px; }
 .log-ep { font-size: 13px; color: var(--text-secondary); min-width: 0; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
 .log-upstream { font-size: 11px; color: var(--text-muted); max-width: 320px; min-width: 0; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

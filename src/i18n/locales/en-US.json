@@ -102,6 +102,7 @@
     "section": {
       "proxyPort": "Proxy Port",
       "httpProxy": "HTTP Proxy",
+      "apiRetry": "API Retry",
       "statsOverview": "Request Statistics",
       "general": "General",
       "todayStats": "Today's Stats"
@@ -123,6 +124,11 @@
       "username": "Username",
       "password": "Password",
       "excludeProviders": "Providers that bypass the proxy",
+      "retryHint": "Automatically retries when the upstream returns a retryable status code; do not add codes that should not be retried, such as 429 (insufficient balance / rate limited)",
+      "retryStatusCodes": "Retryable status codes",
+      "retryMaxRetries": "Max retries",
+      "retryDelay": "Retry interval",
+      "retryDelayUnit": "s",
       "autoStart": "Start proxy automatically on launch",
       "logEnabled": "Record request and response bodies",
       "logHint": "Enable only when troubleshooting; the full request and response bodies are logged, which uses more space and noticeably grows the log file. Takes effect immediately.",
@@ -198,7 +204,8 @@
       "allModels": "All models",
       "allStatuses": "All statuses",
       "dateFrom": "From date",
-      "dateTo": "To date"
+      "dateTo": "To date",
+      "retryStatusCodes": "e.g. 400, 500, 503, 504"
     },
     "confirm": {
       "clearLogs": "Clear all request logs? Statistics counters will be preserved.",
@@ -333,6 +340,7 @@
   "panel": {
     "proxy": "Proxy",
     "httpProxy": "HTTP Proxy",
+    "apiRetry": "API Retry",
     "on": "On",
     "off": "Off",
     "todayCalls": "Today Calls",

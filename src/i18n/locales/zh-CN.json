@@ -102,6 +102,7 @@
     "section": {
       "proxyPort": "代理端口",
       "httpProxy": "HTTP 代理",
+      "apiRetry": "接口重试",
       "statsOverview": "请求统计",
       "general": "通用设置",
       "todayStats": "今日统计"
@@ -123,6 +124,11 @@
       "username": "用户名",
       "password": "密码",
       "excludeProviders": "不需要代理的提供商",
+      "retryHint": "上游返回可重试状态码时自动重试；429（欠费/限流）等无需重试的状态码请勿加入",
+      "retryStatusCodes": "可重试的状态码",
+      "retryMaxRetries": "最大重试次数",
+      "retryDelay": "重试间隔",
+      "retryDelayUnit": "秒",
       "autoStart": "启动应用时自动开启代理",
       "logEnabled": "记录请求参数与返回参数",
       "logHint": "仅在排查报错时开启；开启后会完整记录请求体和响应体，占用更多空间，日志文件会明显变大，立即生效",
@@ -198,7 +204,8 @@
       "allModels": "全部模型",
       "allStatuses": "全部状态",
       "dateFrom": "开始日期",
-      "dateTo": "结束日期"
+      "dateTo": "结束日期",
+      "retryStatusCodes": "如：400, 500, 503, 504"
     },
     "confirm": {
       "clearLogs": "确定要清除所有请求日志吗？统计计数将保留。",
@@ -333,6 +340,7 @@
   "panel": {
     "proxy": "代理",
     "httpProxy": "HTTP 代理",
+    "apiRetry": "接口重试",
     "on": "已开启",
     "off": "已关闭",
     "todayCalls": "今日调用",

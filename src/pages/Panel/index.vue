@@ -32,6 +32,7 @@ const addr = computed(() => {
 })
 
 const httpProxyEnabled = computed(() => !!settings.value?.httpProxy?.enabled)
+const apiRetryEnabled = computed(() => !!settings.value?.retry?.enabled)
 
 const todayCount = computed(() => stats.value?.today?.count ?? 0)
 const todayTokens = computed(() => stats.value?.today?.tokens ?? 0)
@@ -163,6 +164,17 @@ async function toggleHttpProxy() {
   }
 }
 
+async function toggleApiRetry() {
+  const next = { ...settings.value }
+  const cur = next.retry || { enabled: false, statusCodes: [400, 500, 503, 504], maxRetries: 3, retryDelayMs: 5000 }
+  next.retry = { ...cur, enabled: !cur.enabled }
+  try {
+    settings.value = await api.setSettings(next)
+  } catch (e) {
+    showToast(typeof e === 'string' ? e : (e?.message || JSON.stringify(e)))
+  }
+}
+
 async function copyModel(model) {
   try {
     await api.copyText(model)
@@ -247,6 +259,19 @@ onBeforeUnmount(() => {
           role="switch"
           :aria-checked="httpProxyEnabled"
           @click="toggleHttpProxy"
+        ><span class="knob"></span></button>
+      </div>
+      <div class="toggle-card">
+        <div class="tc-info">
+          <span class="tc-label">{{ $t('panel.apiRetry') }}</span>
+          <span class="tc-sub">{{ apiRetryEnabled ? $t('panel.on') : $t('panel.off') }}</span>
+        </div>
+        <button
+          class="switch"
+          :class="{ on: apiRetryEnabled }"
+          role="switch"
+          :aria-checked="apiRetryEnabled"
+          @click="toggleApiRetry"
         ><span class="knob"></span></button>
       </div>
     </section>
