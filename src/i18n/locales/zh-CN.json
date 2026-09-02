@@ -340,7 +340,6 @@
   "panel": {
     "proxy": "代理",
     "httpProxy": "HTTP 代理",
-    "apiRetry": "接口重试",
     "on": "已开启",
     "off": "已关闭",
     "todayCalls": "今日调用",

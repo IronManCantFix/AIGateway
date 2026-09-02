@@ -340,7 +340,6 @@
   "panel": {
     "proxy": "Proxy",
     "httpProxy": "HTTP Proxy",
-    "apiRetry": "API Retry",
     "on": "On",
     "off": "Off",
     "todayCalls": "Today Calls",
