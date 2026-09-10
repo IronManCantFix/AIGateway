@@ -1,6 +1,6 @@
 // proxy/proxy-server.js
 // 代理服务器 Sidecar 入口。通过 stdin/stdout JSON Lines IPC 接收配置。
-// 对外暴露 /v1/chat/completions, /v1/responses, /v1/messages, /v1/models
+// 对外暴露 /v1/chat/completions, /v1/responses, /v1/messages, /v1/models, /v1/models/{id}
 
 import http from 'http'
 import https from 'https'
@@ -1104,9 +1104,9 @@ function requestLatestConfig() {
   })
 }
 
-async function handleModels(_, res) {
-  // 配置可能随时变动（增删 profile、启用/停用等），每次请求都向父进程拉取
-  // 最新配置，保证与首页"可用模型"（已启用 profile 的模型并集）一致。
+// 配置可能随时变动（增删 profile、启用/停用等），每次请求都向父进程拉取
+// 最新配置，保证与首页"可用模型"（已启用 profile 的模型并集）一致。
+async function getEnabledModelIds() {
   const freshConfig = await requestLatestConfig()
   if (freshConfig && Array.isArray(freshConfig.profiles)) {
     currentConfig = freshConfig
@@ -1114,10 +1114,29 @@ async function handleModels(_, res) {
   const providerModels = (currentConfig && currentConfig.profiles)
     ? currentConfig.profiles.flatMap(p => (Array.isArray(p.models) ? p.models : []))
     : []
-  const allModels = [...new Set(providerModels)]
+  return [...new Set(providerModels)]
+}
+
+async function handleModels(_, res) {
+  const allModels = await getEnabledModelIds()
   const data = allModels.map(id => ({ id, object: 'model', owned_by: 'aigateway' }))
   res.writeHead(200, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify({ object: 'list', data }))
+}
+
+// GET /v1/models/{id}：OpenAI「retrieve model」端点。
+// VS2026 Copilot 添加自定义 provider 的模型时会调用它校验模型是否存在。
+async function handleModelItem(modelId, res) {
+  let id = modelId
+  try { id = decodeURIComponent(modelId) } catch {}
+  const allModels = await getEnabledModelIds()
+  if (!allModels.includes(id)) {
+    res.writeHead(404, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: `Not Found: model '${id}' is not in any enabled profile` }))
+    return
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify({ id, object: 'model', owned_by: 'aigateway' }))
 }
 
 // --- Route: Files API ---
@@ -1794,6 +1813,13 @@ const server = http.createServer(async (req, res) => {
       await handleModels(req, res)
       res.on('finish', () => {
         logRequest(endpoint, '-', res.statusCode, Date.now() - startTime, null, null, null, '-', { method: req.method })
+      })
+      return
+    } else if (req.method === 'GET' && /^\/v1\/models\/[^/]+$/.test(urlPath)) {
+      const modelId = decodeURIComponent(urlPath.slice('/v1/models/'.length))
+      await handleModelItem(modelId, res)
+      res.on('finish', () => {
+        logRequest(endpoint, modelId, res.statusCode, Date.now() - startTime, null, null, null, '-', { method: req.method })
       })
       return
     } else if (urlPath === '/v1/messages/count_tokens') {
