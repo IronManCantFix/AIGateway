@@ -125,6 +125,47 @@ test('GET /v1/models 只返回已启用 profile 的模型，且配置变动后�
   assert.deepEqual(errors, [], 'sidecar stderr should be empty')
 })
 
+test('GET /v1/models/{id} 返回单个模型对象，未知模型返回 404', async () => {
+  const port = await freePort()
+  const child = spawn(process.execPath, [PROXY_SCRIPT])
+  const lines = makeLineReader(child)
+  const errors = []
+  child.stderr.on('data', (d) => errors.push(d.toString()))
+  const base = `http://127.0.0.1:${port}`
+  const initial = config(port, [profile('a', 'Provider A', ['gpt-5.6-terra', 'a2'])])
+
+  try {
+    child.stdin.write(JSON.stringify({ type: 'init', config: initial }) + '\n')
+    await lines.next((l) => l.includes('"started"'))
+
+    // 已配置模型：返回 200 及单个模型对象（VS2026 Copilot 添加模型时调用）
+    const req1 = fetch(`${base}/v1/models/gpt-5.6-terra`)
+    const line1 = await lines.next((l) => l.includes('"config_request"'))
+    const msg1 = JSON.parse(line1)
+    child.stdin.write(JSON.stringify({ type: 'config_update', id: msg1.id, config: initial }) + '\n')
+    const res1 = await req1
+    const body1 = await res1.json()
+    assert.equal(res1.status, 200)
+    assert.deepEqual(body1, { id: 'gpt-5.6-terra', object: 'model', owned_by: 'aigateway' })
+
+    // URL 编码的模型 id 应被解码
+    const req2 = fetch(`${base}/v1/models/${encodeURIComponent('gpt-5.6-terra')}`)
+    await lines.next((l) => l.includes('"config_request"'))
+    assert.equal((await req2).status, 200)
+
+    // 未在任何已启用 profile 中的模型：返回 404
+    const req3 = fetch(`${base}/v1/models/unknown-model`)
+    await lines.next((l) => l.includes('"config_request"'))
+    const res3 = await req3
+    assert.equal(res3.status, 404)
+  } finally {
+    child.stdin.write(JSON.stringify({ type: 'shutdown' }) + '\n')
+    await new Promise((r) => setTimeout(r, 150))
+    child.kill()
+  }
+  assert.deepEqual(errors, [], 'sidecar stderr should be empty')
+})
+
 test('本地快照无 profile 时 /v1/models 仍拉取最新配置而不是 503', async () => {
   const port = await freePort()
   const child = spawn(process.execPath, [PROXY_SCRIPT])
