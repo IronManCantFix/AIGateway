@@ -66,6 +66,78 @@ function anthropicToolResultContent(output) {
   return stringifyToolOutput(output)
 }
 
+// --- tool_choice 归一化 ---
+// Anthropic Messages 的 tool_choice 是对象（{"type":"auto"} / {"type":"any"} /
+// {"type":"none"} / {"type":"tool","name":"x"}），而 Chat Completions 与 Responses
+// 只认字符串（"auto"/"required"/"none"）或 function 形式。原样透传会被上游判为
+// 非法字段——OpenRouter 风格的中转会把任何非 function 的对象当成 server tool_choice
+// 拒绝（UNSUPPORTED_FIELD: 当前只支持 function tool_choice）。
+// 已经是目标格式的值原样保留，避免影响本就正确的请求。
+function convertAnthropicToolChoice(toolChoice, target) {
+  if (!toolChoice || typeof toolChoice !== 'object') return toolChoice
+  const type = toolChoice.type
+  if (type === 'auto') return 'auto'
+  if (type === 'any') return 'required'
+  if (type === 'none') return 'none'
+  if (type === 'tool' && toolChoice.name) {
+    // Responses 的 function tool_choice 是扁平结构，Chat 的嵌在 function 里
+    return target === 'responses'
+      ? { type: 'function', name: toolChoice.name }
+      : { type: 'function', function: { name: toolChoice.name } }
+  }
+  return toolChoice
+}
+
+// --- 上游错误透传 ---
+// 上游的错误信封没有统一标准：{"error":{"message":...}}、{"message":...}、
+// {"code":...,"message":...}、纯文本都常见。协议转换会把它们当成正常响应处理，
+// 结果是错误信息丢失、客户端收到一个内容为空的“成功”响应。
+// 这里统一抽出可读文本，再翻译成客户端协议的错误结构。
+function extractUpstreamErrorMessage(rawBody) {
+  const text = typeof rawBody === 'string' ? rawBody : ''
+  let parsed = null
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    parsed = null
+  }
+  if (parsed && typeof parsed === 'object') {
+    const err = parsed.error
+    if (typeof err === 'string' && err) return err
+    if (err && typeof err === 'object') {
+      for (const key of ['message', 'msg', 'detail', 'error_description', 'code']) {
+        if (typeof err[key] === 'string' && err[key]) return err[key]
+      }
+    }
+    for (const key of ['message', 'msg', 'detail', 'error_description']) {
+      if (typeof parsed[key] === 'string' && parsed[key]) return parsed[key]
+    }
+    const dumped = JSON.stringify(parsed)
+    return dumped.length > 500 ? dumped.slice(0, 500) : dumped
+  }
+  return text ? text.slice(0, 500) : 'upstream error'
+}
+
+function anthropicErrorType(status) {
+  if (status === 400) return 'invalid_request_error'
+  if (status === 401) return 'authentication_error'
+  if (status === 403) return 'permission_error'
+  if (status === 404) return 'not_found_error'
+  if (status === 413) return 'request_too_large'
+  if (status === 429) return 'rate_limit_error'
+  if (status === 529) return 'overloaded_error'
+  return status >= 500 ? 'api_error' : 'invalid_request_error'
+}
+
+// 把上游错误体翻译成客户端协议的错误结构（状态码由调用方保留）
+function buildClientErrorBody(sourceFormat, status, rawBody) {
+  const message = extractUpstreamErrorMessage(rawBody)
+  if (sourceFormat === 'messages') {
+    return { type: 'error', error: { type: anthropicErrorType(status), message } }
+  }
+  return { error: { message, type: 'upstream_error', code: status } }
+}
+
 function extractReasoningText(value) {
   if (!value) return ''
   if (typeof value === 'string') return value
@@ -335,6 +407,10 @@ function convertMessagesToChat(body) {
       }
       return t
     })
+  }
+  // Anthropic 的 tool_choice 对象必须归一化，不能原样透传给 OpenAI 格式上游
+  if (result.tool_choice != null) {
+    result.tool_choice = convertAnthropicToolChoice(result.tool_choice, 'chat_completions')
   }
   return result
 }
@@ -609,6 +685,10 @@ function convertMessagesToResponses(body) {
       }
       return t
     })
+  }
+  // 同上：Anthropic 的 tool_choice 对象不能透传给 Responses 上游
+  if (result.tool_choice != null) {
+    result.tool_choice = convertAnthropicToolChoice(result.tool_choice, 'responses')
   }
   return result
 }
@@ -2185,5 +2265,8 @@ export {
   convertResponsesResponseToMessages,
   convertMessagesResponseToResponses,
   convertChatResponseToResponses,
-  convertResponsesResponseToChat
+  convertResponsesResponseToChat,
+  convertAnthropicToolChoice,
+  extractUpstreamErrorMessage,
+  buildClientErrorBody
 }

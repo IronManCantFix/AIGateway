@@ -22,7 +22,9 @@ import {
   parseMaybeJson,
   setReasoningCache,
   ensureAssistantReasoning,
-  withReasoningCapture
+  withReasoningCapture,
+  extractUpstreamErrorMessage,
+  buildClientErrorBody
 } from './protocol-converters.js'
 import { parseMultipartFields } from './multipart-scanner.js'
 import { normalizeUsage, parseUsageFromResponse, estimateRequestTokens, createIncrementalUsageParser } from './token-usage.js'
@@ -678,14 +680,13 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
           'Connection': 'keep-alive'
         })
         try {
-          const data = JSON.parse(rawBody)
-
           // If upstream returned an error (4xx/5xx), forward it to the client
           // instead of trying to convert the error body into a valid response.
-          if (data.error && upstreamRes.statusCode >= 400) {
-            const errMsg = typeof data.error === 'object'
-              ? (data.error.message || data.error.msg || JSON.stringify(data.error))
-              : String(data.error)
+          // 判定只依据状态码：错误信封样式五花八门（无 error 字段、顶层 message、
+          // 纯文本…），按 data.error 判定会把错误体当成正常响应转换，
+          // 客户端最终只收到一个内容为空的“成功”响应。
+          if (upstreamRes.statusCode >= 400) {
+            const errMsg = extractUpstreamErrorMessage(rawBody)
             if (sourceFormat === 'responses') {
               const respId = 'resp_' + Date.now()
               clientRes.write(
@@ -696,12 +697,15 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
               clientRes.write(fmtOpenAISSE({ id: 'error', object: 'chat.completion', created: Math.floor(Date.now()), model: '', choices: [{ index: 0, message: { role: 'assistant', content: 'Upstream error ' + upstreamRes.statusCode + ': ' + errMsg }, finish_reason: 'stop' }], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }))
               clientRes.write('data: [DONE]\n\n')
             } else {
-              // Anthropic Messages or unknown — just return JSON error
+              // Anthropic Messages：按 Messages 的错误事件格式回写
+              clientRes.write(fmtAnthropicSSE('error', buildClientErrorBody('messages', upstreamRes.statusCode, rawBody)))
             }
             clientRes.end()
             if (onResponseBody) onResponseBody(rawBody)
             return
           }
+
+          const data = JSON.parse(rawBody)
 
           if (sourceFormat === 'responses') {
             // Upstream returned non-streaming Chat/Messages JSON, client expects Responses SSE
@@ -905,7 +909,12 @@ function forwardRequest(clientReq, clientRes, upstreamUrl, apiKey, body, sseConv
       boundedCollect(upstreamRes, upstreamReq, (buf) => {
         let responseBody = buf.toString()
 
-        if (responseBodyConverter) {
+        if (responseBodyConverter && upstreamRes.statusCode >= 400) {
+          // 上游报错时不能走协议转换：错误体不是响应结构，转换只会得到
+          // 一个内容为空的“成功”响应，把真正的原因丢掉。统一翻译成
+          // 客户端协议的错误结构，状态码保持上游原值。
+          responseBody = JSON.stringify(buildClientErrorBody(sourceFormat, upstreamRes.statusCode, responseBody))
+        } else if (responseBodyConverter) {
           try {
             const parsed = JSON.parse(responseBody)
             const converted = responseBodyConverter(parsed)

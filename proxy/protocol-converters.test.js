@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   convertChatToMessages,
   convertMessagesToChat,
+  convertMessagesToResponses,
   convertChatToResponses,
   convertResponsesToChat,
   getBodyConverter,
@@ -60,6 +61,39 @@ test('converts Chat Completions tool calls into Anthropic Messages blocks', () =
     tool_use_id: 'call_1',
     content: '{"temp":22}'
   })
+})
+
+test('converts Anthropic tool_choice objects into Chat Completions tool_choice', () => {
+  const base = { model: 'm', messages: [{ role: 'user', content: 'hi' }] }
+  // Anthropic 用对象形式，OpenAI/OpenRouter 只认字符串或 function 对象；
+  // 原样透传会被上游判为不合法的 tool_choice（如 tokenrhythm 的 UNSUPPORTED_FIELD）。
+  assert.equal(convertMessagesToChat({ ...base, tool_choice: { type: 'auto' } }).tool_choice, 'auto')
+  assert.equal(convertMessagesToChat({ ...base, tool_choice: { type: 'any' } }).tool_choice, 'required')
+  assert.equal(convertMessagesToChat({ ...base, tool_choice: { type: 'none' } }).tool_choice, 'none')
+  assert.deepEqual(
+    convertMessagesToChat({ ...base, tool_choice: { type: 'tool', name: 'search' } }).tool_choice,
+    { type: 'function', function: { name: 'search' } }
+  )
+})
+
+test('leaves already-Chat-Completions tool_choice untouched', () => {
+  const base = { model: 'm', messages: [{ role: 'user', content: 'hi' }] }
+  assert.equal(convertMessagesToChat({ ...base, tool_choice: 'auto' }).tool_choice, 'auto')
+  assert.equal(convertMessagesToChat({ ...base, tool_choice: 'required' }).tool_choice, 'required')
+  const openaiForm = { type: 'function', function: { name: 'search' } }
+  assert.deepEqual(convertMessagesToChat({ ...base, tool_choice: openaiForm }).tool_choice, openaiForm)
+})
+
+test('converts Anthropic tool_choice objects into Responses tool_choice', () => {
+  const base = { model: 'm', messages: [{ role: 'user', content: 'hi' }] }
+  assert.equal(convertMessagesToResponses({ ...base, tool_choice: { type: 'auto' } }).tool_choice, 'auto')
+  assert.equal(convertMessagesToResponses({ ...base, tool_choice: { type: 'any' } }).tool_choice, 'required')
+  assert.equal(convertMessagesToResponses({ ...base, tool_choice: { type: 'none' } }).tool_choice, 'none')
+  // Responses API 的 function tool_choice 是扁平结构，不嵌在 function 里
+  assert.deepEqual(
+    convertMessagesToResponses({ ...base, tool_choice: { type: 'tool', name: 'search' } }).tool_choice,
+    { type: 'function', name: 'search' }
+  )
 })
 
 test('converts Anthropic Messages tool blocks back into Chat Completions messages', () => {
