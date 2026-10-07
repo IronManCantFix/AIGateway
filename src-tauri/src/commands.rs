@@ -670,10 +670,14 @@ pub fn restart_app(app_handle: tauri::AppHandle, state: State<'_, AppState>) {
 
 #[tauri::command]
 pub fn toggle_devtools(app_handle: tauri::AppHandle) -> bool {
+    // open_devtools 仅在 tauri/devtools feature 下存在；release 构建不含 devtools
+    #[cfg(feature = "devtools")]
     if let Some(window) = app_handle.get_webview_window("main") {
         window.open_devtools();
         return true;
     }
+    #[cfg(not(feature = "devtools"))]
+    let _ = app_handle;
     false
 }
 
