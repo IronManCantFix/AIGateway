@@ -52,24 +52,31 @@ esac
 echo "Installing proxy dependencies..."
 cd "$PROXY_DIR" && bun install
 
+# --smol：降低 Bun 运行时的内存占用（GC 更激进）。
+# 代理是低频转发场景，吞吐损失可忽略；如需压测性能可用 PROXY_SMOL=0 临时关闭。
+BUN_SMOL_FLAGS=()
+if [ "${PROXY_SMOL:-1}" = "1" ]; then
+  BUN_SMOL_FLAGS=(--smol)
+fi
+
 build_one() {
   local target="$1"
   case "$target" in
     mac-arm)
       echo "  → bun-darwin-arm64"
-      bun build --compile --target=bun-darwin-arm64 proxy-server.js --outfile "$OUT_DIR/proxy-server-aarch64-apple-darwin"
+      bun build --compile "${BUN_SMOL_FLAGS[@]}" --target=bun-darwin-arm64 proxy-server.js --outfile "$OUT_DIR/proxy-server-aarch64-apple-darwin"
       ;;
     mac-intel)
       echo "  → bun-darwin-x64"
-      bun build --compile --target=bun-darwin-x64 proxy-server.js --outfile "$OUT_DIR/proxy-server-x86_64-apple-darwin"
+      bun build --compile "${BUN_SMOL_FLAGS[@]}" --target=bun-darwin-x64 proxy-server.js --outfile "$OUT_DIR/proxy-server-x86_64-apple-darwin"
       ;;
     windows)
       echo "  → bun-windows-x64"
-      bun build --compile --target=bun-windows-x64 proxy-server.js --outfile "$OUT_DIR/proxy-server-x86_64-pc-windows-msvc.exe"
+      bun build --compile "${BUN_SMOL_FLAGS[@]}" --target=bun-windows-x64 proxy-server.js --outfile "$OUT_DIR/proxy-server-x86_64-pc-windows-msvc.exe"
       ;;
     linux)
       echo "  → bun-linux-x64"
-      bun build --compile --target=bun-linux-x64 proxy-server.js --outfile "$OUT_DIR/proxy-server-x86_64-unknown-linux-gnu"
+      bun build --compile "${BUN_SMOL_FLAGS[@]}" --target=bun-linux-x64 proxy-server.js --outfile "$OUT_DIR/proxy-server-x86_64-unknown-linux-gnu"
       ;;
   esac
 }

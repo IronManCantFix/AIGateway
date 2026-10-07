@@ -16,6 +16,19 @@ pub struct AppState {
     pub proxy: ProxyManager,
 }
 
+/// 进程内共享的 HTTP 客户端：复用连接池与 TLS 会话缓存，
+/// 避免每次命令新建 Client（每个 Client 各持有一份连接池内存）。
+/// 各请求通过 request builder 的 `.timeout()` 自行设置超时。
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("AIGateway")
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
 #[derive(serde::Serialize)]
 pub struct UpdateInfo {
     pub current_version: String,
@@ -314,7 +327,7 @@ pub async fn fetch_provider_models(profile: serde_json::Value) -> Result<Vec<Str
         join_api_path(base_url, "/v1/models")
     };
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let req_builder = client
         .get(&url)
         .header("Accept", "application/json")
@@ -407,15 +420,12 @@ fn compare_versions(current: &str, latest: &str) -> bool {
 pub async fn check_for_updates(app_handle: tauri::AppHandle) -> Result<UpdateInfo, crate::error::AppError> {
     let current_version = app_handle.package_info().version.to_string();
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| crate::error::AppError::new("http.clientFailed").with_detail(e.to_string()))?;
+    let client = http_client();
 
     let resp = client
         .get("https://api.github.com/repos/IronManCantFix/AIGateway/releases/latest")
-        .header("User-Agent", "AIGateway")
         .header("Accept", "application/vnd.github.v3+json")
+        .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
         .map_err(|e| crate::error::AppError::new("update.requestFailed").with_detail(e.to_string()))?;
@@ -517,14 +527,12 @@ pub async fn download_and_install_update(
     let temp_dir = std::env::temp_dir();
     let file_path = temp_dir.join(&file_name);
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(600))
-        .build()
-        .map_err(|e| crate::error::AppError::new("http.clientFailed").with_detail(e.to_string()))?;
+    // 下载用共享客户端；超时设在请求级别（整体下载时长，含大文件流式传输）
+    let client = http_client();
 
     let resp = client
         .get(&url)
-        .header("User-Agent", "AIGateway")
+        .timeout(std::time::Duration::from_secs(600))
         .send()
         .await
         .map_err(|e| crate::error::AppError::new("update.downloadFailed").with_detail(e.to_string()))?;
@@ -662,10 +670,14 @@ pub fn restart_app(app_handle: tauri::AppHandle, state: State<'_, AppState>) {
 
 #[tauri::command]
 pub fn toggle_devtools(app_handle: tauri::AppHandle) -> bool {
+    // open_devtools 仅在 tauri/devtools feature 下存在；release 构建不含 devtools
+    #[cfg(feature = "devtools")]
     if let Some(window) = app_handle.get_webview_window("main") {
         window.open_devtools();
         return true;
     }
+    #[cfg(not(feature = "devtools"))]
+    let _ = app_handle;
     false
 }
 

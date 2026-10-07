@@ -3,11 +3,18 @@ name = "aigateway"
 version = "1.0.0"
 edition = "2021"
 
+# 开发时手动启用 WebView devtools：cargo build --features devtools
+[features]
+default = []
+devtools = ["tauri/devtools"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png", "devtools"] }
+# devtools 不默认启用：release 包不携带 WebView 调试器。
+# 开发调试时用 `cargo build --features devtools`（tauri CLI dev 构建默认已带 devtools）。
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
