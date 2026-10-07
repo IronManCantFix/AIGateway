@@ -588,20 +588,51 @@ impl ConfigStore {
     fn read_logs_jsonl_filtered(&self, filter: &LogFilter, limit: Option<usize>, offset: Option<usize>) -> Result<LogsPage, String> {
         let path = self.logs_jsonl_path();
         let file = fs::File::open(&path).map_err(|e| e.to_string())?;
-        // 一次读完，按时间倒序（最新在前），再筛选，再分页
-        let mut entries: Vec<LogEntry> = BufReader::new(file)
-            .lines()
-            .map_while(Result::ok)
-            .filter(|line| !line.trim().is_empty())
-            .filter_map(|line| serde_json::from_str::<LogEntry>(&line).ok())
-            .collect();
-        entries.reverse();
-        entries.retain(|e| filter.matches(e));
-        let total = entries.len();
-        let offset = offset.unwrap_or(0).min(total);
-        let limit = limit.unwrap_or(total.saturating_sub(offset));
-        let end = (offset + limit).min(total);
-        Ok(LogsPage { logs: entries[offset..end].to_vec(), total })
+        // 流式逐行处理，避免把整个日志文件（上限 50MB）一次性解析进内存。
+        // 文件按 append 顺序（最旧在前）存储；页面需要按时间倒序（最新在前）分页，
+        // 因此仅保留"最后 offset+limit 条匹配项"的滑动缓冲，最终反转取窗口。
+        // total 仍需全量扫描统计，但内存峰值从 O(文件) 降到 O(offset+limit)。
+        let offset = offset.unwrap_or(0);
+        let limit = limit.unwrap_or(usize::MAX);
+        if limit == 0 {
+            // 只需要 total：不缓存任何条目
+            let mut total = 0usize;
+            for line in BufReader::new(file).lines().map_while(Result::ok) {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if let Ok(e) = serde_json::from_str::<LogEntry>(&line) {
+                    if filter.matches(&e) {
+                        total += 1;
+                    }
+                }
+            }
+            return Ok(LogsPage { logs: vec![], total });
+        }
+        let keep = offset.saturating_add(limit);
+        let mut buffer: Vec<LogEntry> = Vec::new();
+        let mut total = 0usize;
+        for line in BufReader::new(file).lines().map_while(Result::ok) {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(e) = serde_json::from_str::<LogEntry>(&line) else {
+                continue;
+            };
+            if !filter.matches(&e) {
+                continue;
+            }
+            total += 1;
+            if buffer.len() == keep {
+                buffer.remove(0);
+            }
+            if buffer.len() < keep {
+                buffer.push(e);
+            }
+        }
+        buffer.reverse();
+        let end = limit.min(buffer.len());
+        Ok(LogsPage { logs: buffer[..end].to_vec(), total })
     }
 
     fn append_log_jsonl(&self, entry: &LogEntry) -> Result<(), String> {
@@ -622,21 +653,33 @@ impl ConfigStore {
         if meta.len() <= max_bytes {
             return Ok(());
         }
+        // 第一遍只数有效行数（不把内容载入内存）
         let file = fs::File::open(&path).map_err(|e| e.to_string())?;
-        let mut lines: Vec<String> = BufReader::new(file)
+        let total_lines = BufReader::new(&file)
             .lines()
             .map_while(Result::ok)
             .filter(|line| !line.trim().is_empty())
-            .collect();
-        if lines.len() > keep_lines {
-            let drain_count = lines.len() - keep_lines;
-            lines.drain(0..drain_count);
+            .count();
+        drop(file);
+        if total_lines <= keep_lines {
+            return Ok(());
         }
+        // 第二遍流式跳过最旧的 skip 条有效行，边读边写临时文件（内存 O(1)）
+        let skip = total_lines - keep_lines;
+        let file = fs::File::open(&path).map_err(|e| e.to_string())?;
         let tmp = path.with_extension("jsonl.tmp");
         {
-            let mut file = fs::File::create(&tmp).map_err(|e| e.to_string())?;
-            for line in lines {
-                writeln!(file, "{}", line).map_err(|e| e.to_string())?;
+            let mut out = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+            let mut seen = 0usize;
+            for line in BufReader::new(file).lines().map_while(Result::ok) {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                seen += 1;
+                if seen <= skip {
+                    continue;
+                }
+                writeln!(out, "{}", line).map_err(|e| e.to_string())?;
             }
         }
         fs::rename(&tmp, &path).map_err(|e| e.to_string())
@@ -734,6 +777,7 @@ impl ConfigStore {
     pub fn clear_logs_bodies(&self) -> Result<(), String> {
         let path = self.logs_jsonl_path();
         if path.exists() {
+            // 流式处理：逐行解析、去掉 body 后立即写出，不缓存全部行
             let file = fs::File::open(&path).map_err(|e| e.to_string())?;
             let tmp = path.with_extension("jsonl.tmp");
             {
