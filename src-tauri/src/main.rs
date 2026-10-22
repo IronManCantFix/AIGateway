@@ -174,12 +174,21 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // 兜底：无论以何种方式退出（重启、退出、系统关闭），
-            // 都同步清理 sidecar 子进程，防止残留占用代理端口
-            if let tauri::RunEvent::Exit = event {
-                if let Some(state) = app_handle.try_state::<AppState>() {
-                    state.proxy.stop_sync();
+            match event {
+                // 事件循环就绪后才允许写托盘图标（Linux 上过早写入会导致图标丢失）
+                tauri::RunEvent::Ready => {
+                    tray::mark_event_loop_ready();
+                    #[cfg(target_os = "linux")]
+                    tray::refresh_after_event_loop_ready(app_handle);
                 }
+                // 兜底：无论以何种方式退出（重启、退出、系统关闭），
+                // 都同步清理 sidecar 子进程，防止残留占用代理端口
+                tauri::RunEvent::Exit => {
+                    if let Some(state) = app_handle.try_state::<AppState>() {
+                        state.proxy.stop_sync();
+                    }
+                }
+                _ => {}
             }
         });
 }

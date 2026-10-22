@@ -55,6 +55,46 @@ pub fn fmt_tokens(n: u64) -> String {
 /// 包含 running 状态：代理启停时即使数字没变也要重渲染（更新 logo 颜色）。
 static LAST_TRAY_STATS: Mutex<Option<(u64, u64, bool)>> = Mutex::new(None);
 
+/// 主事件循环是否已启动。Linux（libayatana-appindicator）在托盘宿主就绪前
+/// 收到图标替换/注册请求会静默丢弃，且不会重试，表现为托盘里始终没有图标；
+/// 因此主循环就绪前一律不动托盘图标。Windows 的 Shell_NotifyIcon 会自动重试，
+/// 不受影响，但统一延后也没有副作用。
+static EVENT_LOOP_READY: AtomicBool = AtomicBool::new(false);
+
+pub fn mark_event_loop_ready() {
+    EVENT_LOOP_READY.store(true, Ordering::SeqCst);
+}
+
+pub fn is_event_loop_ready() -> bool {
+    EVENT_LOOP_READY.load(Ordering::SeqCst)
+}
+
+/// 主循环就绪后补写一次图标：即使首次注册被桌面丢弃，也能重新挂上托盘项。
+/// 仅 Linux 调用（其他平台在 setup 阶段注册即可正常工作）。
+#[cfg(target_os = "linux")]
+pub fn refresh_after_event_loop_ready(app: &tauri::AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        // 给桌面环境一点时间把 StatusNotifierWatcher 注册完
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        let (running, config_store) = match app.try_state::<crate::commands::AppState>() {
+            Some(state) => (
+                state.proxy.get_status().status == "running",
+                std::sync::Arc::clone(&state.config),
+            ),
+            None => return,
+        };
+        if let Some(tray) = app.tray_by_id("main") {
+            set_status_icon(&tray, running);
+            tray.set_tooltip(Some("AIGateway")).ok();
+        }
+        // 清掉去重状态，让统计图标能重新绘制
+        LAST_TRAY_STATS.lock().unwrap().take();
+        update_tray_stats(&app, &config_store, running);
+    });
+}
+
+
 fn set_status_icon(tray: &TrayIcon, running: bool) {
     // 与统计图标使用同一套 2x 放大 logo，保证两种状态图标大小一致
     let img = logo_icon_2x(running);
@@ -198,6 +238,10 @@ fn render_stats_icon_bitmap(count: &str, tokens: &str, running: bool) -> tauri::
 /// running/stopped logo when the stats icon is not in use.
 pub fn update_tray_stats(app: &tauri::AppHandle, config_store: &ConfigStore, running: bool) {
     let Some(tray) = app.tray_by_id("main") else { return };
+    // 事件循环启动前不动图标：Linux 会丢弃注册，导致托盘图标永久消失。
+    // （自动启动代理时 sidecar 在 setup 阶段就回报 started，会触发这里）
+    if !is_event_loop_ready() { return; }
+
     let settings = config_store.get_settings();
     if !settings.tray_stats_enabled {
         // Only touch the icon when we were showing the stats icon before
