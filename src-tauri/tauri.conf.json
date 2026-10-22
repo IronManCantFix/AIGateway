@@ -35,6 +35,11 @@
     ],
     "externalBin": [
       "binaries/proxy-server"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/installer.nsh"
+      }
+    }
   }
 }

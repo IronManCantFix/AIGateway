@@ -507,6 +507,7 @@ fn find_platform_asset(assets: &[serde_json::Value]) -> (String, String) {
 #[tauri::command]
 pub async fn download_and_install_update(
     app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
     url: String,
     file_name: String,
 ) -> Result<UpdateResult, crate::error::AppError> {
@@ -636,10 +637,24 @@ pub async fn download_and_install_update(
 
     #[cfg(target_os = "windows")]
     {
+        // 安装包会覆盖安装目录下的 proxy-server.exe。NSIS 安装器在安装阶段
+        // 用 RestartManager 强制关闭主程序，这会跳过 RunEvent::Exit 里的
+        // stop_sync；而 sidecar 在 stdin 关闭后仍会继续运行，成为孤儿进程并
+        // 锁住自己的 exe，导致安装器写入失败（更新装不上）且旧代理残留占端口。
+        // 因此拉起安装器前先同步停掉 sidecar。
+        state.proxy.stop_sync();
+        // stop_sync 不推送状态事件，这里补发一次，避免界面仍显示"运行中"
+        app_handle.emit("proxy-status-changed", serde_json::json!({ "status": "stopped" })).ok();
+
         std::process::Command::new("cmd")
             .args(["/C", "start", "", &file_path.to_string_lossy()])
             .spawn()
             .map_err(|e| crate::error::AppError::new("update.openFailed").with_detail(e.to_string()))?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = &state;
     }
 
     #[cfg(target_os = "linux")]
